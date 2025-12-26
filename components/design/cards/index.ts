@@ -1,0 +1,92 @@
+/**
+ * カードコンポーネントのエクスポート
+ * 新しいカードを追加する場合は、ここにエクスポートを追加してください
+ */
+
+import React from 'react';
+
+// カードコンポーネントをインポート
+// import { ExampleCard } from './ExampleCard';
+import { AppArchitectureCard } from './AppArchitectureCard';
+import { DatabaseOverviewCard } from './DatabaseOverviewCard';
+import { SQLiteSchemaCard } from './SQLiteSchemaCard';
+import { ChromaDBSchemaCard } from './ChromaDBSchemaCard';
+import { DataFlowCard } from './DataFlowCard';
+import { RAGSearchMechanismCard } from './RAGSearchMechanismCard';
+import { OrchestrationMCPLLMCard } from './OrchestrationMCPLLMCard';
+import { AgentSystemCard } from './AgentSystemCard';
+import { FileUploadCard } from './FileUploadCard';
+import { AIAssistantCard } from './AIAssistantCard';
+
+// カードコンポーネントの型定義
+export interface CardComponent {
+  id: string;
+  title: string;
+  description?: string;
+  component: React.ComponentType<any>;
+}
+
+// カードコンポーネントのリスト
+// 新しいカードを追加する場合は、この配列に追加してください
+export const cardComponents: CardComponent[] = [
+  { 
+    id: 'app-architecture', 
+    title: 'アプリ全体構成', 
+    description: '使用ライブラリとアーキテクチャ', 
+    component: AppArchitectureCard 
+  },
+  { 
+    id: 'database-overview', 
+    title: 'データベース構成', 
+    description: 'SQLiteとChromaDBの全体構成', 
+    component: DatabaseOverviewCard 
+  },
+  { 
+    id: 'sqlite-schema', 
+    title: 'SQLiteスキーマ', 
+    description: 'SQLiteに保存されるデータ構造とテーブル関係', 
+    component: SQLiteSchemaCard 
+  },
+  { 
+    id: 'chromadb-schema', 
+    title: 'ChromaDBスキーマ', 
+    description: 'ChromaDBに保存されるベクトルデータ', 
+    component: ChromaDBSchemaCard 
+  },
+  { 
+    id: 'data-flow', 
+    title: 'データフロー', 
+    description: 'データの保存・取得の流れ', 
+    component: DataFlowCard 
+  },
+  { 
+    id: 'rag-search-mechanism', 
+    title: 'RAG検索の仕組み', 
+    description: 'RAG検索のアルゴリズムとデータフロー', 
+    component: RAGSearchMechanismCard 
+  },
+  { 
+    id: 'orchestration-mcp-llm', 
+    title: 'オーケストレーション・MCP・LLM連携', 
+    description: 'オーケストレーションレイヤー、MCPサーバー、LLMの連携方法', 
+    component: OrchestrationMCPLLMCard 
+  },
+  { 
+    id: 'agent-system', 
+    title: 'Agentシステム', 
+    description: 'マルチエージェントシステムのアーキテクチャと動作', 
+    component: AgentSystemCard 
+  },
+  { 
+    id: 'file-upload', 
+    title: 'ファイルアップロード', 
+    description: 'ファイルアップロード機能の仕組みと実装', 
+    component: FileUploadCard 
+  },
+  { 
+    id: 'ai-assistant', 
+    title: 'AIアシスタント', 
+    description: 'AIアシスタントの機能とアーキテクチャ', 
+    component: AIAssistantCard 
+  },
+];

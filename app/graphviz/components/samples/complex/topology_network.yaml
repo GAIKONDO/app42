@@ -1,0 +1,44 @@
+# topology/network.yaml
+# ケーブリングガイド全体図のトポロジ定義
+id: network_topology
+label: ケーブリングガイド 全体図
+description: ServiceNWとHW管理NWを含むネットワークトポロジ
+type: topology
+networks:
+  - id: service_nw
+    label: ServiceNW
+    description: サービスネットワーク
+    layers:
+      - id: super_spine
+        label: ServiceNW Super Spine
+        level: 0
+      - id: spine
+        label: ServiceNW Spine
+        level: 1
+      - id: leaf
+        label: ServiceNW Leaf
+        level: 2
+        variants:
+          - id: leaf_gtr
+            label: ServiceNW Leaf (GTR接続)
+          - id: leaf_storage
+            label: ServiceNW Storage Leaf
+  - id: hw_mgmt_nw
+    label: HW管理NW
+    description: ハードウェア管理ネットワーク（OOB）
+    layers:
+      - id: oob_spine
+        label: HW管理NW OOB Spine
+        level: 0
+      - id: oob_leaf
+        label: HW管理NW OOB Leaf
+        level: 1
+        variants:
+          - id: oob_leaf_mgmt
+            label: HW管理NW OOB Leaf (MGMT)
+          - id: oob_leaf_service
+            label: HW管理NW OOB Leaf (ServiceNW接続)
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

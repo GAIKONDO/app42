@@ -1,0 +1,380 @@
+# devices/switches/service_nw_super_spine_01.yaml
+id: svc_super_spine_01
+type: device
+label: ServiceNW Super Spine #01
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U1
+ports:
+  - id: port_1
+    label: Port 1
+    speed: 400G
+    role: spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: port_2
+    label: Port 2
+    speed: 400G
+    role: spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: port_3
+    label: Port 3
+    speed: 400G
+    role: external_connection
+    cable_type: QDD-400G-LR4
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/service_nw_super_spine_02.yaml
+id: svc_super_spine_02
+type: device
+label: ServiceNW Super Spine #02
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U2
+ports:
+  - id: port_1
+    label: Port 1
+    speed: 400G
+    role: spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/service_nw_spine.yaml
+id: svc_spine
+type: device
+label: ServiceNW Spine
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U3
+ports:
+  - id: port_1
+    label: Port 1
+    speed: 400G
+    role: super_spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: port_2
+    label: Port 2
+    speed: 400G
+    role: super_spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: port_3
+    label: Port 3
+    speed: 400G
+    role: leaf_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: port_4
+    label: Port 4
+    speed: 400G
+    role: leaf_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: port_5
+    label: Port 5
+    speed: 400G
+    role: storage_leaf_connection
+    cable_type: QDD-4X100G-FR-S
+    cable_spec: 4x QSFP-100G-DR-S, SMF MPO12 (TypeB, APC) - LC Breakout
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/service_nw_leaf_gtr.yaml
+id: svc_leaf_gtr
+type: device
+label: ServiceNW Leaf (GTR接続)
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U4
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: apic_connection
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth2
+    label: eth2
+    speed: 10G
+    role: nd_connection
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth49
+    label: eth49
+    speed: 100G
+    role: server_connection
+    cable_type: Breakout DAC QSFP-DD
+    cable_spec: 4x QSFP56-100G
+  - id: eth50
+    label: eth50
+    speed: 400G
+    role: spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: eth51
+    label: eth51
+    speed: 100G
+    role: gtr_connection
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/service_nw_leaf.yaml
+id: svc_leaf
+type: device
+label: ServiceNW Leaf
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U5
+ports:
+  - id: eth49
+    label: eth49
+    speed: 1G
+    role: server_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth50
+    label: eth50
+    speed: 1G
+    role: storage_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth51
+    label: eth51
+    speed: 400G
+    role: spine_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/service_nw_storage_leaf.yaml
+id: svc_storage_leaf
+type: device
+label: ServiceNW Storage Leaf
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U6
+ports:
+  - id: eth1
+    label: eth1
+    speed: 25G
+    role: vsanrn_connection
+    cable_type: SFP28-25G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth2
+    label: eth2
+    speed: 10G
+    role: storage_connection
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth3
+    label: eth3
+    speed: 10G
+    role: storage_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  - id: eth49
+    label: eth49
+    speed: 10G
+    role: oob_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  - id: eth50
+    label: eth50
+    speed: 400G
+    role: spine_connection
+    cable_type: QDD-4X100G-FR-S
+    cable_spec: 4x QSFP-100G-DR-S, SMF MPO12 (TypeB, APC) - LC Breakout
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/hw_mgmt_oob_spine_01.yaml
+id: hw_oob_spine_01
+type: device
+label: HW管理NW OOB Spine #01
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U7
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: oob_leaf_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth2
+    label: eth2
+    speed: 10G
+    role: oob_leaf_service_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  - id: eth3
+    label: eth3
+    speed: 10G
+    role: vsanrn_connection
+    cable_type: ET7302-SR
+    cable_spec: MMF LC Duplex
+  - id: eth4
+    label: eth4
+    speed: 10G
+    role: external_connection
+    cable_type: ET5402-LR
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/hw_mgmt_oob_spine_02.yaml
+id: hw_oob_spine_02
+type: device
+label: HW管理NW OOB Spine #02
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U8
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: oob_leaf_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth2
+    label: eth2
+    speed: 10G
+    role: oob_leaf_service_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/hw_mgmt_oob_leaf.yaml
+id: hw_oob_leaf
+type: device
+label: HW管理NW OOB Leaf
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U9
+ports:
+  - id: eth1
+    label: eth1
+    speed: 1G
+    role: server_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth2
+    label: eth2
+    speed: 1G
+    role: storage_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth49
+    label: eth49
+    speed: 1G
+    role: oob_spine_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth50
+    label: eth50
+    speed: 1G
+    role: oob_leaf_mgmt_connection
+    cable_type: STP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/hw_mgmt_oob_leaf_mgmt.yaml
+id: hw_oob_leaf_mgmt
+type: device
+label: HW管理NW OOB Leaf (MGMT)
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U10
+ports:
+  - id: eth1
+    label: eth1
+    speed: 1G
+    role: wvs_connection
+    cable_type: STP Cable
+    cable_spec: Cat5e
+  - id: eth49
+    label: eth49
+    speed: 1G
+    role: oob_leaf_connection
+    cable_type: STP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/switches/hw_mgmt_oob_leaf_service.yaml
+id: hw_oob_leaf_service
+type: device
+label: HW管理NW OOB Leaf (ServiceNW接続)
+model: Network Switch
+category: switch
+location:
+  rack: main_rack
+  unit: U11
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: storage_leaf_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  - id: eth49
+    label: eth49
+    speed: 10G
+    role: oob_spine_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

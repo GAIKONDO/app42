@@ -1,0 +1,67 @@
+# intents/cabling_rules.yaml
+id: cabling_rules
+label: ケーブリングルール
+type: intent
+rules:
+  - name: server_dual_homing
+    description: Serverは必ず別Leafに接続する（冗長化）
+    applies_to: server
+    validation:
+      type: connection_count
+      min: 2
+      max: 2
+      target_devices: leaf
+      networks:
+        - service_nw
+  
+  - name: storage_redundancy
+    description: Storageは複数の接続経路を持つ
+    applies_to: storage
+    validation:
+      type: connection_count
+      min: 2
+      max: null
+      target_devices: leaf
+  
+  - name: external_connection_cable_type
+    description: 別フロアへの接続は光ファイバー（SMF）を使用
+    applies_to: external_connection
+    validation:
+      type: cable_type_check
+      allowed_types:
+        - QSFP-100G-LR4
+        - QDD-400G-LR4
+        - ET5402-LR
+      required_spec: SMF
+  
+  - name: internal_connection_cable_type
+    description: 架内接続はUTP/STPケーブル、架外接続はSTPケーブル
+    applies_to: internal_connection
+    validation:
+      type: cable_type_check
+      location_rules:
+        - location: same_rack
+          allowed_types:
+            - UTP Cable
+            - STP Cable
+        - location: different_rack
+          allowed_types:
+            - STP Cable
+  
+  - name: spine_redundancy
+    description: Spineは必ずペアで配置する
+    applies_to: spine
+    validation:
+      type: device_pair
+      network: service_nw
+  
+  - name: oob_spine_redundancy
+    description: OOB Spineは必ずペアで配置する
+    applies_to: oob_spine
+    validation:
+      type: device_pair
+      network: hw_mgmt_nw
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

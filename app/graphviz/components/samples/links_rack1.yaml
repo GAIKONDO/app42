@@ -1,0 +1,28 @@
+# links/rack1.yaml
+id: rack1_links
+label: Rack 1 Connections
+type: links
+network: service
+connections:
+  - id: conn_001
+    from:
+      device: dell_r7625_01
+      port: eth1
+    to:
+      device: svc_leaf_rack1_n0
+      port: eth49
+    network: service
+    status: active
+  - id: conn_002
+    from:
+      device: dell_r7625_01
+      port: eth2
+    to:
+      device: svc_leaf_rack1_n1
+      port: eth49
+    network: service
+    status: active
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

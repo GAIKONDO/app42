@@ -1,0 +1,22 @@
+# intents/redundancy.yaml
+id: redundancy
+label: Redundancy Rules
+type: intent
+rules:
+  - name: server_dual_homing
+    description: Serverは必ず別Leafに接続する
+    applies_to: server
+    validation:
+      type: connection_count
+      min: 2
+      max: 2
+      target_devices: leaf
+  - name: leaf_pair_redundancy
+    description: Leafは必ずペアで配置する
+    applies_to: leaf
+    validation:
+      type: device_pair
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

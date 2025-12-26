@@ -1,0 +1,119 @@
+# devices/external/wvs_pe.yaml
+id: wvs_pe
+type: device
+label: WVS-PE
+model: External Device
+category: external
+location:
+  floor: other_floor
+ports:
+  - id: eth1
+    label: eth1
+    speed: 100G
+    role: service_nw_connection
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/external/cpa_gwrt.yaml
+id: cpa_gwrt
+type: device
+label: CPA-GwRT
+model: External Device
+category: external
+location:
+  floor: other_floor
+ports:
+  - id: eth1
+    label: eth1
+    speed: 100G
+    role: service_nw_connection
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/external/gtr.yaml
+id: gtr
+type: device
+label: GTR
+model: External Device
+category: external
+location:
+  floor: other_floor
+ports:
+  - id: eth1
+    label: eth1
+    speed: 100G
+    role: service_nw_connection
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/external/service_nw_super_spine_external.yaml
+id: svc_super_spine_external
+type: device
+label: ServiceNW Super Spine (別フロア)
+model: Network Switch
+category: switch
+location:
+  floor: other_floor
+ports:
+  - id: port_1
+    label: Port 1
+    speed: 400G
+    role: external_connection
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/external/hw_mgmt_oob_spine_external.yaml
+id: hw_oob_spine_external
+type: device
+label: HW管理NW OOB Spine (別フロア)
+model: Network Switch
+category: switch
+location:
+  floor: other_floor
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: external_connection
+    cable_type: ET5402-LR
+    cable_spec: SMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/external/wvs.yaml
+id: wvs
+type: device
+label: WVS
+model: External Device
+category: external
+location:
+  rack: other_rack
+ports:
+  - id: eth1
+    label: eth1
+    speed: 1G
+    role: hw_mgmt_connection
+    cable_type: STP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

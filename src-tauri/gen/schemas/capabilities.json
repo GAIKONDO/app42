@@ -1,0 +1,1 @@
+{"main-capability":{"identifier":"main-capability","description":"Main window capability with shell open permission","local":true,"windows":["*"],"permissions":["core:default","shell:allow-open"]}}

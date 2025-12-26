@@ -1,0 +1,136 @@
+# タブ4: サーバー詳細・シーケンス サンプル
+# 個別サーバーの詳細設定、アプリケーション構成、シーケンス図
+# serverId: タブ3のサーバーIDを参照
+
+id: server_details_001
+type: server-details
+label: Webサーバー1 詳細設定
+description: Webサーバー1のOS、ミドルウェア、アプリケーション構成
+serverId: server_001  # タブ3のサーバーIDを参照
+
+os:
+  type: Linux
+  distribution: Ubuntu 22.04 LTS
+  kernel: 5.15.0
+  description: "Ubuntu 22.04 LTS Server"
+
+middleware:
+  - name: nginx
+    version: 1.22.0
+    config: /etc/nginx/nginx.conf
+    description: "Webサーバー"
+
+  - name: Node.js
+    version: 18.17.0
+    config: /etc/nodejs/app.json
+    description: "アプリケーションランタイム"
+
+  - name: PM2
+    version: 5.3.0
+    config: /etc/pm2/ecosystem.config.js
+    description: "プロセスマネージャー"
+
+applications:
+  - name: web-app
+    port: 8080
+    environment: production
+    env_vars:
+      DB_HOST: db.example.com
+      DB_PORT: 5432
+      DB_NAME: myapp
+      REDIS_HOST: redis.example.com
+      REDIS_PORT: 6379
+    description: "メインWebアプリケーション"
+
+  - name: api-service
+    port: 8081
+    environment: production
+    env_vars:
+      DB_HOST: db.example.com
+      DB_PORT: 5432
+    description: "APIサービス"
+
+sequences:
+  - id: seq_user_auth
+    label: ユーザー認証フロー
+    description: "ユーザーログイン時の認証シーケンス"
+    participants:
+      - user
+      - web-server
+      - auth-server
+      - database
+    steps:
+      - from: user
+        to: web-server
+        message: "POST /login {username, password}"
+        description: "ユーザーがログイン情報を送信"
+
+      - from: web-server
+        to: auth-server
+        message: "validate credentials"
+        description: "認証サーバーに認証情報を送信"
+
+      - from: auth-server
+        to: database
+        message: "SELECT * FROM users WHERE username = ?"
+        description: "データベースからユーザー情報を取得"
+
+      - from: database
+        to: auth-server
+        message: "user data"
+        description: "ユーザー情報を返却"
+
+      - from: auth-server
+        to: web-server
+        message: "JWT token"
+        description: "認証成功、JWTトークンを発行"
+
+      - from: web-server
+        to: user
+        message: "200 OK {token}"
+        description: "ログイン成功、トークンを返却"
+
+  - id: seq_data_processing
+    label: データ処理フロー
+    description: "データ取得から処理までのシーケンス"
+    participants:
+      - web-server
+      - api-service
+      - database
+      - redis
+    steps:
+      - from: web-server
+        to: api-service
+        message: "GET /api/data"
+        description: "データ取得リクエスト"
+
+      - from: api-service
+        to: redis
+        message: "GET cache_key"
+        description: "キャッシュからデータを取得試行"
+
+      - from: redis
+        to: api-service
+        message: "null"
+        description: "キャッシュにデータなし"
+
+      - from: api-service
+        to: database
+        message: "SELECT * FROM data_table"
+        description: "データベースからデータを取得"
+
+      - from: database
+        to: api-service
+        message: "data result"
+        description: "データを返却"
+
+      - from: api-service
+        to: redis
+        message: "SET cache_key data"
+        description: "取得したデータをキャッシュに保存"
+
+      - from: api-service
+        to: web-server
+        message: "200 OK {data}"
+        description: "データを返却"
+

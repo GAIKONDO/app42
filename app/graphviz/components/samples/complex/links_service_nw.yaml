@@ -1,0 +1,242 @@
+# links/service_nw.yaml
+id: service_nw_links
+label: ServiceNW Connections
+type: links
+network: service_nw
+connections:
+  # Super Spine → Spine
+  - id: conn_super_spine_01_to_spine
+    from:
+      device: svc_super_spine_01
+      port: port_1
+    to:
+      device: svc_spine
+      port: port_1
+    network: service_nw
+    status: active
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: conn_super_spine_01_to_spine_2
+    from:
+      device: svc_super_spine_01
+      port: port_2
+    to:
+      device: svc_spine
+      port: port_2
+    network: service_nw
+    status: active
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  - id: conn_super_spine_02_to_spine
+    from:
+      device: svc_super_spine_02
+      port: port_1
+    to:
+      device: svc_spine
+      port: port_2
+    network: service_nw
+    status: active
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  
+  # Super Spine → External
+  - id: conn_super_spine_01_to_external
+    from:
+      device: svc_super_spine_01
+      port: port_3
+    to:
+      device: svc_super_spine_external
+      port: port_1
+    network: service_nw
+    status: active
+    cable_type: QDD-400G-LR4
+    cable_spec: SMF LC Duplex
+    location: other_floor
+  
+  # Spine → Leaf (GTR接続)
+  - id: conn_spine_to_leaf_gtr
+    from:
+      device: svc_spine
+      port: port_3
+    to:
+      device: svc_leaf_gtr
+      port: eth50
+    network: service_nw
+    status: active
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  
+  # Spine → Leaf
+  - id: conn_spine_to_leaf
+    from:
+      device: svc_spine
+      port: port_4
+    to:
+      device: svc_leaf
+      port: eth51
+    network: service_nw
+    status: active
+    cable_type: QDD-400G-DR4
+    cable_spec: SMF MPO-12 (TypeB, APC)
+  
+  # Spine → Storage Leaf
+  - id: conn_spine_to_storage_leaf
+    from:
+      device: svc_spine
+      port: port_5
+    to:
+      device: svc_storage_leaf
+      port: eth50
+    network: service_nw
+    status: active
+    cable_type: QDD-4X100G-FR-S
+    cable_spec: 4x QSFP-100G-DR-S, SMF MPO12 (TypeB, APC) - LC Breakout
+  
+  # Leaf (GTR接続) → Devices
+  - id: conn_leaf_gtr_to_apic
+    from:
+      device: svc_leaf_gtr
+      port: eth1
+    to:
+      device: apic_01
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: conn_leaf_gtr_to_nd
+    from:
+      device: svc_leaf_gtr
+      port: eth2
+    to:
+      device: nd_01
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: conn_leaf_gtr_to_server
+    from:
+      device: svc_leaf_gtr
+      port: eth49
+    to:
+      device: server_01
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: Breakout DAC QSFP-DD
+    cable_spec: 4x QSFP56-100G
+  
+  # Leaf (GTR接続) → External
+  - id: conn_leaf_gtr_to_wvs_pe
+    from:
+      device: svc_leaf_gtr
+      port: eth51
+    to:
+      device: wvs_pe
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+    location: other_floor
+  - id: conn_leaf_gtr_to_cpa_gwrt
+    from:
+      device: svc_leaf_gtr
+      port: eth51
+    to:
+      device: cpa_gwrt
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+    location: other_floor
+  - id: conn_leaf_gtr_to_gtr
+    from:
+      device: svc_leaf_gtr
+      port: eth51
+    to:
+      device: gtr
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: QSFP-100G-LR4
+    cable_spec: SMF LC Duplex
+    location: other_floor
+  
+  # Leaf → Devices
+  - id: conn_leaf_to_server
+    from:
+      device: svc_leaf
+      port: eth49
+    to:
+      device: server_01
+      port: eth2
+    network: service_nw
+    status: active
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: conn_leaf_to_storage
+    from:
+      device: svc_leaf
+      port: eth50
+    to:
+      device: storage_01
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  
+  # Storage Leaf → Devices
+  - id: conn_storage_leaf_to_vsanrn
+    from:
+      device: svc_storage_leaf
+      port: eth1
+    to:
+      device: vsanrn_01
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: SFP28-25G-SR
+    cable_spec: MMF LC Duplex
+  - id: conn_storage_leaf_to_storage_1
+    from:
+      device: svc_storage_leaf
+      port: eth2
+    to:
+      device: storage_01
+      port: eth2
+    network: service_nw
+    status: active
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: conn_storage_leaf_to_storage_2
+    from:
+      device: svc_storage_leaf
+      port: eth3
+    to:
+      device: storage_01
+      port: eth3
+    network: service_nw
+    status: active
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  
+  # Storage Leaf → OOB Leaf (ServiceNW接続)
+  - id: conn_storage_leaf_to_oob_leaf_service
+    from:
+      device: svc_storage_leaf
+      port: eth49
+    to:
+      device: hw_oob_leaf_service
+      port: eth1
+    network: service_nw
+    status: active
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

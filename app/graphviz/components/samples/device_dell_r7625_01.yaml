@@ -1,0 +1,23 @@
+# devices/servers/dell_r7625_01.yaml
+id: dell_r7625_01
+type: device
+label: Dell R7625 #01
+model: Dell R7625
+location:
+  rack: rack1
+  unit: U10
+ports:
+  - id: eth1
+    label: eth1
+    speed: 100G
+    role: service
+    mac: "00:11:22:33:44:55"
+  - id: eth2
+    label: eth2
+    speed: 100G
+    role: service
+    mac: "00:11:22:33:44:56"
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

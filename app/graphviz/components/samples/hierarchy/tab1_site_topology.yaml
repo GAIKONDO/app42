@@ -1,0 +1,67 @@
+# タブ1: 棟間ネットワーク サンプル
+# 複数の棟（データセンター、拠点）間のネットワーク接続関係
+
+id: site_network_001
+type: site-topology
+label: 本社-支社間ネットワーク
+description: 本社データセンターと各支社間のネットワーク構成
+
+sites:
+  - id: site_tokyo
+    label: 東京本社DC
+    location:
+      lat: 35.6812
+      lon: 139.7671
+      address: "東京都千代田区丸の内1-1-1"
+    capacity:
+      racks: 100
+      power: 5000  # kW
+
+  - id: site_osaka
+    label: 大阪支社DC
+    location:
+      lat: 34.6937
+      lon: 135.5023
+      address: "大阪府大阪市北区梅田1-1-1"
+    capacity:
+      racks: 50
+      power: 2500  # kW
+
+  - id: site_fukuoka
+    label: 福岡支社DC
+    location:
+      lat: 33.5904
+      lon: 130.4017
+      address: "福岡県福岡市博多区博多駅前1-1-1"
+    capacity:
+      racks: 30
+      power: 1500  # kW
+
+connections:
+  - id: conn_tokyo_osaka
+    from: site_tokyo
+    to: site_osaka
+    type: dedicated-line
+    bandwidth: 10Gbps
+    latency: 5ms
+    provider: NTT
+    description: "東京-大阪間専用線"
+
+  - id: conn_tokyo_fukuoka
+    from: site_tokyo
+    to: site_fukuoka
+    type: vpn
+    bandwidth: 1Gbps
+    latency: 15ms
+    provider: KDDI
+    description: "東京-福岡間VPN"
+
+  - id: conn_osaka_fukuoka
+    from: site_osaka
+    to: site_fukuoka
+    type: internet
+    bandwidth: 500Mbps
+    latency: 20ms
+    provider: SoftBank
+    description: "大阪-福岡間インターネット接続"
+

@@ -1,0 +1,126 @@
+# 接続（Connections）の例
+# このファイルは参考用です。実際のsite-equipment YAMLファイルに追加してください。
+
+connections:
+  # ============================================
+  # ラック1内の接続（サーバー → ToRスイッチ）
+  # ============================================
+  - id: conn_rack1_srv1_tor
+    from: rack_1766706843939_server_1
+    to: rack_1766706843939_tor_1
+    type: ethernet
+    bandwidth: 25Gbps
+    description: "サーバー1 → ToR1"
+
+  - id: conn_rack1_srv2_tor
+    from: rack_1766706843939_server_2
+    to: rack_1766706843939_tor_1
+    type: ethernet
+    bandwidth: 25Gbps
+    description: "サーバー2 → ToR1"
+
+  # ============================================
+  # ラック2内の接続（サーバー → ToRスイッチ）
+  # ============================================
+  - id: conn_rack2_srv1_tor
+    from: rack_1766707579078_server_1
+    to: rack_1766707579078_tor_1
+    type: ethernet
+    bandwidth: 25Gbps
+    description: "サーバー1 → ToR2"
+
+  - id: conn_rack2_srv2_tor
+    from: rack_1766707579078_server_2
+    to: rack_1766707579078_tor_1
+    type: ethernet
+    bandwidth: 25Gbps
+    description: "サーバー2 → ToR2"
+
+  # ============================================
+  # ラック間の接続（ToR → Spineスイッチ）
+  # ============================================
+  - id: conn_tor1_spine
+    from: rack_1766706843939_tor_1
+    to: spine_switch_1
+    type: fiber
+    bandwidth: 100Gbps
+    description: "ToR1 → Spine"
+
+  - id: conn_tor2_spine
+    from: rack_1766707579078_tor_1
+    to: spine_switch_1
+    type: fiber
+    bandwidth: 100Gbps
+    description: "ToR2 → Spine"
+
+  - id: conn_tor3_spine
+    from: rack_1766712845159_tor_1
+    to: spine_switch_1
+    type: fiber
+    bandwidth: 100Gbps
+    description: "ToR3 → Spine"
+
+  - id: conn_tor4_spine
+    from: rack_1766712849361_tor_1
+    to: spine_switch_1
+    type: fiber
+    bandwidth: 100Gbps
+    description: "ToR4 → Spine"
+
+  # ============================================
+  # ラック間の接続（ToR間の接続例）
+  # ============================================
+  - id: conn_tor1_tor2
+    from: rack_1766706843939_tor_1
+    to: rack_1766707579078_tor_1
+    type: fiber
+    bandwidth: 100Gbps
+    description: "ToR1 ↔ ToR2"
+
+  # ============================================
+  # サーバー間の接続（同一ラック内）
+  # ============================================
+  - id: conn_rack1_srv1_srv2
+    from: rack_1766706843939_server_1
+    to: rack_1766706843939_server_2
+    type: ethernet
+    bandwidth: 10Gbps
+    description: "サーバー1 ↔ サーバー2"
+
+  # ============================================
+  # ラック間のサーバー接続（異なるラック間）
+  # ============================================
+  - id: conn_rack1_srv1_rack2_srv1
+    from: rack_1766706843939_server_1
+    to: rack_1766707579078_server_1
+    type: ethernet
+    bandwidth: 10Gbps
+    description: "ラック1サーバー1 ↔ ラック2サーバー1"
+
+# ============================================
+# 注意事項
+# ============================================
+# 1. 接続先の機器（ToR、Spineなど）は、equipmentリストに定義されている必要があります
+# 2. 例：
+#    equipment:
+#      - id: rack_1766706843939_tor_1
+#        type: switch
+#        label: ToR1
+#        position:
+#          unit: "41-42"
+#      - id: spine_switch_1
+#        type: switch
+#        label: Spine Switch
+#        position:
+#          unit: "1-2"
+# 3. 接続の形式は2つあります：
+#    - 新形式: from/toが直接文字列（上記の例）
+#    - 旧形式: from/toがオブジェクト（device, port）
+#      例:
+#        from:
+#          device: rack_1766706843939_server_1
+#          port: eth0
+#        to:
+#          device: rack_1766706843939_tor_1
+#          port: port1
+

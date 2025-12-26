@@ -1,0 +1,135 @@
+# links/hw_mgmt_nw.yaml
+id: hw_mgmt_nw_links
+label: HW管理NW Connections
+type: links
+network: hw_mgmt_nw
+connections:
+  # OOB Spine → External
+  - id: conn_oob_spine_01_to_external
+    from:
+      device: hw_oob_spine_01
+      port: eth4
+    to:
+      device: hw_oob_spine_external
+      port: eth1
+    network: hw_mgmt_nw
+    status: active
+    cable_type: ET5402-LR
+    cable_spec: SMF LC Duplex
+    location: other_floor
+  
+  # OOB Spine → OOB Leaf
+  - id: conn_oob_spine_01_to_oob_leaf
+    from:
+      device: hw_oob_spine_01
+      port: eth1
+    to:
+      device: hw_oob_leaf
+      port: eth49
+    network: hw_mgmt_nw
+    status: active
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: conn_oob_spine_02_to_oob_leaf
+    from:
+      device: hw_oob_spine_02
+      port: eth1
+    to:
+      device: hw_oob_leaf
+      port: eth49
+    network: hw_mgmt_nw
+    status: active
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  
+  # OOB Spine → OOB Leaf (ServiceNW接続)
+  - id: conn_oob_spine_01_to_oob_leaf_service
+    from:
+      device: hw_oob_spine_01
+      port: eth2
+    to:
+      device: hw_oob_leaf_service
+      port: eth49
+    network: hw_mgmt_nw
+    status: active
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  - id: conn_oob_spine_02_to_oob_leaf_service
+    from:
+      device: hw_oob_spine_02
+      port: eth2
+    to:
+      device: hw_oob_leaf_service
+      port: eth49
+    network: hw_mgmt_nw
+    status: active
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  
+  # OOB Spine → vSANRN
+  - id: conn_oob_spine_01_to_vsanrn
+    from:
+      device: hw_oob_spine_01
+      port: eth3
+    to:
+      device: vsanrn_01
+      port: eth2
+    network: hw_mgmt_nw
+    status: active
+    cable_type: ET7302-SR
+    cable_spec: MMF LC Duplex
+  
+  # OOB Leaf → Devices
+  - id: conn_oob_leaf_to_server
+    from:
+      device: hw_oob_leaf
+      port: eth1
+    to:
+      device: server_01
+      port: eth3
+    network: hw_mgmt_nw
+    status: active
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: conn_oob_leaf_to_storage
+    from:
+      device: hw_oob_leaf
+      port: eth2
+    to:
+      device: storage_01
+      port: eth4
+    network: hw_mgmt_nw
+    status: active
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  
+  # OOB Leaf → OOB Leaf (MGMT)
+  - id: conn_oob_leaf_to_oob_leaf_mgmt
+    from:
+      device: hw_oob_leaf
+      port: eth50
+    to:
+      device: hw_oob_leaf_mgmt
+      port: eth49
+    network: hw_mgmt_nw
+    status: active
+    cable_type: STP Cable
+    cable_spec: Cat5e
+  
+  # OOB Leaf (MGMT) → External
+  - id: conn_oob_leaf_mgmt_to_wvs
+    from:
+      device: hw_oob_leaf_mgmt
+      port: eth1
+    to:
+      device: wvs
+      port: eth1
+    network: hw_mgmt_nw
+    status: active
+    cable_type: STP Cable
+    cable_spec: Cat5e
+    location: other_rack
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

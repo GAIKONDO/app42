@@ -1,0 +1,19 @@
+# topology/service.yaml
+id: service
+label: Service Network
+description: サービスネットワークのトポロジ定義
+type: topology
+layers:
+  - id: super_spine
+    label: Super Spine
+    level: 0
+  - id: spine
+    label: Spine
+    level: 1
+  - id: leaf
+    label: Leaf
+    level: 2
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

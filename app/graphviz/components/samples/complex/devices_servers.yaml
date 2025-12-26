@@ -1,0 +1,164 @@
+# devices/servers/server_01.yaml
+id: server_01
+type: device
+label: Server
+model: Server
+category: server
+location:
+  rack: main_rack
+  unit: U20
+ports:
+  - id: eth1
+    label: eth1
+    speed: 100G
+    role: service_nw_connection
+    cable_type: Breakout DAC QSFP-DD
+    cable_spec: 4x QSFP56-100G
+  - id: eth2
+    label: eth2
+    speed: 1G
+    role: service_nw_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth3
+    label: eth3
+    speed: 1G
+    role: hw_mgmt_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/servers/storage_01.yaml
+id: storage_01
+type: device
+label: Storage
+model: Storage System
+category: storage
+location:
+  rack: main_rack
+  unit: U21
+ports:
+  - id: eth1
+    label: eth1
+    speed: 1G
+    role: service_nw_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth2
+    label: eth2
+    speed: 10G
+    role: storage_leaf_connection
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth3
+    label: eth3
+    speed: 10G
+    role: storage_leaf_connection
+    cable_type: ET5402-SR
+    cable_spec: MMF LC Duplex
+  - id: eth4
+    label: eth4
+    speed: 1G
+    role: hw_mgmt_connection
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/servers/vsanrn_01.yaml
+id: vsanrn_01
+type: device
+label: vSANRN
+model: vSAN Node
+category: server
+location:
+  rack: main_rack
+  unit: U22
+ports:
+  - id: eth1
+    label: eth1
+    speed: 25G
+    role: storage_leaf_connection
+    cable_type: SFP28-25G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth2
+    label: eth2
+    speed: 10G
+    role: oob_spine_connection
+    cable_type: ET7302-SR
+    cable_spec: MMF LC Duplex
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/servers/apic_01.yaml
+id: apic_01
+type: device
+label: APIC
+model: APIC Controller
+category: controller
+location:
+  rack: main_rack
+  unit: U23
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: service_nw_connection
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth2
+    label: eth2
+    speed: 1G
+    role: internal
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth3
+    label: eth3
+    speed: 1G
+    role: external
+    cable_type: STP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+
+---
+# devices/servers/nd_01.yaml
+id: nd_01
+type: device
+label: ND
+model: Network Device
+category: network_device
+location:
+  rack: main_rack
+  unit: U24
+ports:
+  - id: eth1
+    label: eth1
+    speed: 10G
+    role: service_nw_connection
+    cable_type: SFP-10G-SR
+    cable_spec: MMF LC Duplex
+  - id: eth2
+    label: eth2
+    speed: 1G
+    role: internal
+    cable_type: UTP Cable
+    cable_spec: Cat5e
+  - id: eth3
+    label: eth3
+    speed: 1G
+    role: external
+    cable_type: STP Cable
+    cable_spec: Cat5e
+metadata:
+  createdAt: "2025-01-01T00:00:00Z"
+  updatedAt: "2025-01-01T00:00:00Z"
+

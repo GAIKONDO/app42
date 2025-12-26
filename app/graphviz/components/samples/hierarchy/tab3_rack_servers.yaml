@@ -1,0 +1,103 @@
+# タブ3: ラック内サーバー・ポート サンプル
+# 1つのラック内のサーバーや機器の詳細、ポート構成、接続詳細
+# rackId: タブ2のラックIDを参照
+
+id: rack_servers_001
+type: rack-servers
+label: ラック1 サーバー詳細
+description: ラック1内のサーバーとポートの詳細情報
+rackId: rack_001  # タブ2のラックIDを参照
+
+servers:
+  - id: server_001
+    label: Webサーバー1
+    model: Dell R7625
+    specs:
+      cpu:
+        model: "AMD EPYC 7763"
+        cores: 64
+      memory:
+        total: 512GB
+        slots: 16
+      storage:
+        type: NVMe
+        capacity: 3.84TB
+    ports:
+      - id: eth0
+        label: 管理ポート
+        speed: 1Gbps
+        mac: "00:1B:44:11:3A:B7"
+        ip: "192.168.1.10/24"
+        vlan: 100
+        description: "管理ネットワーク用"
+
+      - id: eth1
+        label: サービスポート
+        speed: 10Gbps
+        mac: "00:1B:44:11:3A:B8"
+        ip: "10.0.1.10/24"
+        vlan: 200
+        description: "サービスネットワーク用"
+
+    connections:
+      - from:
+          port: eth0
+        to:
+          device: switch_001
+          port: port1
+        type: management
+        description: "管理ネットワーク接続"
+
+      - from:
+          port: eth1
+        to:
+          device: switch_001
+          port: port2
+        type: service
+        description: "サービスネットワーク接続"
+
+  - id: server_002
+    label: DBサーバー1
+    model: Dell R7625
+    specs:
+      cpu:
+        model: "AMD EPYC 7763"
+        cores: 64
+      memory:
+        total: 1TB
+        slots: 16
+      storage:
+        type: NVMe
+        capacity: 7.68TB
+    ports:
+      - id: eth0
+        label: 管理ポート
+        speed: 1Gbps
+        mac: "00:1B:44:11:3A:C7"
+        ip: "192.168.1.20/24"
+        vlan: 100
+
+      - id: eth1
+        label: データベースポート
+        speed: 10Gbps
+        mac: "00:1B:44:11:3A:C8"
+        ip: "10.0.2.10/24"
+        vlan: 300
+        description: "データベース専用ネットワーク"
+
+    connections:
+      - from:
+          port: eth0
+        to:
+          device: switch_001
+          port: port3
+        type: management
+
+      - from:
+          port: eth1
+        to:
+          device: switch_001
+          port: port4
+        type: database
+        description: "データベースネットワーク接続"
+

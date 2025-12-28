@@ -6,31 +6,57 @@ import type { KnowledgeGraphSearchResult, SearchFilters, TopicSummary } from './
 import { findSimilarTopicsChroma } from '../topicEmbeddingsChroma';
 import { getTopicsByIds, getTopicFilesByTopicIds } from '../topicApi';
 import { normalizeSimilarity, calculateTopicScore, adjustWeightsForQuery, DEFAULT_WEIGHTS, type ScoringWeights } from '../ragSearchScoring';
+import { searchTopicsBM25 } from './bm25Search';
+import { combineSearchResults, type HybridSearchConfig, DEFAULT_HYBRID_CONFIG } from './hybridSearch';
 
 /**
- * トピックを検索
+ * トピックを検索（ハイブリッド検索対応）
  */
 export async function searchTopics(
   queryText: string,
   limit: number,
   filters?: SearchFilters,
-  weights: ScoringWeights = DEFAULT_WEIGHTS
+  weights: ScoringWeights = DEFAULT_WEIGHTS,
+  hybridConfig?: HybridSearchConfig
 ): Promise<KnowledgeGraphSearchResult[]> {
+  const config = hybridConfig || DEFAULT_HYBRID_CONFIG;
+  
   // organizationIdが未指定の場合、Rust側で全組織横断検索が実行される
   try {
-    console.log('[searchTopics] 検索開始:', { queryText, limit, filters, weights });
+    console.log('[searchTopics] 検索開始:', { queryText, limit, filters, weights, hybridConfig: config });
     
-    // ChromaDBで類似トピックを検索
-    const chromaResults = await findSimilarTopicsChroma(
-      queryText,
-      limit * 2, // フィルタリングで減る可能性があるため多めに取得
-      filters?.organizationId,
-      filters?.topicSemanticCategory
-    );
+    // 並列でベクトル検索とBM25検索を実行
+    const [vectorResults, bm25Results] = await Promise.all([
+      config.useVector
+        ? findSimilarTopicsChroma(
+            queryText,
+            limit * 2,
+            filters?.organizationId,
+            filters?.topicSemanticCategory
+          ).catch(error => {
+            console.warn('[searchTopics] ベクトル検索エラー:', error);
+            return [];
+          })
+        : Promise.resolve([]),
+      config.useBM25
+        ? searchTopicsBM25(
+            queryText,
+            limit * 2,
+            filters
+          ).catch(error => {
+            console.warn('[searchTopics] BM25検索エラー:', error);
+            return [];
+          })
+        : Promise.resolve([]),
+    ]);
 
-    console.log('[searchTopics] ChromaDB検索結果:', chromaResults.length, '件');
-    if (chromaResults.length > 0) {
-      console.log('[searchTopics] ChromaDB検索結果のサンプル:', chromaResults.slice(0, 2).map(r => ({
+    console.log('[searchTopics] 検索結果:', {
+      vectorCount: vectorResults.length,
+      bm25Count: bm25Results.length,
+    });
+
+    if (vectorResults.length > 0) {
+      console.log('[searchTopics] ベクトル検索結果のサンプル:', vectorResults.slice(0, 2).map(r => ({
         topicId: r.topicId,
         meetingNoteId: r.meetingNoteId,
         regulationId: r.regulationId,
@@ -39,14 +65,130 @@ export async function searchTopics(
       })));
     }
 
-    if (chromaResults.length === 0) {
-      console.log('[searchTopics] ChromaDB検索結果が空のため、空の配列を返します');
+    if (bm25Results.length > 0) {
+      console.log('[searchTopics] BM25検索結果のサンプル:', bm25Results.slice(0, 2).map(r => ({
+        topicId: r.topicId,
+        bm25Score: r.bm25Score,
+        matchedTerms: r.matchedTerms,
+      })));
+    }
+
+    // BM25検索結果が少ない場合の警告
+    if (config.useBM25 && bm25Results.length === 0 && vectorResults.length > 0) {
+      console.warn('[searchTopics] BM25検索結果が0件です。ベクトル検索結果のみを使用します。');
+    }
+
+    // 検索結果を統合
+    let combinedResults: Array<{ 
+      id: string; 
+      score: number; 
+      similarity: number; 
+      bm25Score: number;
+      meetingNoteId?: string;
+      regulationId?: string;
+      title?: string;
+      contentSummary?: string;
+      organizationId?: string;
+    }> = [];
+    
+    if (config.useVector && config.useBM25) {
+      // ハイブリッド検索: ベクトル検索とBM25検索を統合
+      const vectorResultsForHybrid = vectorResults.map(r => ({
+        id: r.topicId,
+        similarity: r.similarity,
+      }));
+      const bm25ResultsForHybrid = bm25Results.map(r => ({
+        id: r.topicId,
+        bm25Score: r.bm25Score,
+      }));
+      
+      // BM25検索結果が少ない場合は、ベクトル検索の重みを上げる
+      const adjustedWeights = bm25Results.length < vectorResults.length / 2
+        ? { bm25: config.weights.bm25 * 0.5, vector: config.weights.vector + config.weights.bm25 * 0.5 }
+        : config.weights;
+      
+      console.log('[searchTopics] ハイブリッド検索の重み調整:', {
+        original: config.weights,
+        adjusted: adjustedWeights,
+        bm25Count: bm25Results.length,
+        vectorCount: vectorResults.length,
+      });
+      
+      const combined = combineSearchResults(
+        vectorResultsForHybrid,
+        bm25ResultsForHybrid,
+        adjustedWeights
+      );
+
+      // ベクトル検索結果から追加情報を取得
+      const vectorMap = new Map(vectorResults.map(r => [r.topicId, r]));
+      combinedResults = combined.map(r => {
+        const vectorInfo = vectorMap.get(r.id);
+        return {
+          ...r,
+          meetingNoteId: vectorInfo?.meetingNoteId,
+          regulationId: vectorInfo?.regulationId,
+          title: vectorInfo?.title,
+          contentSummary: vectorInfo?.contentSummary,
+          organizationId: vectorInfo?.organizationId,
+        };
+      });
+    } else if (config.useVector) {
+      // ベクトル検索のみ
+      combinedResults = vectorResults.map(r => ({
+        id: r.topicId,
+        score: r.similarity,
+        similarity: r.similarity,
+        bm25Score: 0,
+        meetingNoteId: r.meetingNoteId,
+        regulationId: r.regulationId,
+        title: r.title,
+        contentSummary: r.contentSummary,
+        organizationId: r.organizationId,
+      }));
+    } else if (config.useBM25) {
+      // BM25検索のみ（ベクトル検索結果から情報を取得）
+      // BM25検索結果が0件の場合は、ベクトル検索結果をフォールバックとして使用
+      if (bm25Results.length === 0 && vectorResults.length > 0) {
+        console.log('[searchTopics] BM25検索結果が0件のため、ベクトル検索結果をフォールバックとして使用');
+        combinedResults = vectorResults.map(r => ({
+          id: r.topicId,
+          score: r.similarity,
+          similarity: r.similarity,
+          bm25Score: 0,
+          meetingNoteId: r.meetingNoteId,
+          regulationId: r.regulationId,
+          title: r.title,
+          contentSummary: r.contentSummary,
+          organizationId: r.organizationId,
+        }));
+      } else {
+        const vectorMap = new Map(vectorResults.map(r => [r.topicId, r]));
+        combinedResults = bm25Results.map(r => {
+          const vectorInfo = vectorMap.get(r.topicId);
+          return {
+            id: r.topicId,
+            score: r.bm25Score,
+            similarity: 0,
+            bm25Score: r.bm25Score,
+            meetingNoteId: vectorInfo?.meetingNoteId,
+            regulationId: vectorInfo?.regulationId,
+            title: vectorInfo?.title,
+            contentSummary: vectorInfo?.contentSummary,
+            organizationId: vectorInfo?.organizationId,
+          };
+        });
+      }
+    }
+
+    if (combinedResults.length === 0) {
+      console.log('[searchTopics] 検索結果が空のため、空の配列を返します');
       return [];
     }
 
     // トピックIDとmeetingNoteId/regulationIdのペアを抽出
-    const topicIdsWithParentIds = chromaResults.map(r => ({
-      topicId: r.topicId,
+    const topicIdsWithParentIds = combinedResults.map(r => ({
+      topicId: r.id,
       meetingNoteId: r.meetingNoteId,
       regulationId: r.regulationId,
     }));
@@ -107,7 +249,7 @@ export async function searchTopics(
     // 結果を構築
     const results: KnowledgeGraphSearchResult[] = [];
 
-    for (const { topicId, meetingNoteId, regulationId, similarity, title, contentSummary, organizationId: chromaOrgId } of chromaResults) {
+    for (const { id: topicId, similarity, bm25Score, meetingNoteId, regulationId, title, contentSummary, organizationId: chromaOrgId } of combinedResults) {
       const parentId = meetingNoteId || regulationId || '';
       let topic = topicMap.get(`${topicId}-${parentId}`);
       
@@ -169,14 +311,15 @@ export async function searchTopics(
         continue;
       }
 
-      // 類似度を正規化
-      const normalizedSimilarity = normalizeSimilarity(similarity);
+      // 類似度を正規化（ベクトル検索の結果がある場合）
+      const normalizedSimilarity = similarity > 0 ? normalizeSimilarity(similarity) : 0;
       
       console.log('[searchTopics] 類似度処理:', {
         topicId,
         meetingNoteId,
         rawSimilarity: similarity,
         normalizedSimilarity,
+        bm25Score,
         similarityType: typeof similarity,
       });
 
@@ -189,7 +332,7 @@ export async function searchTopics(
         updatedAtForScore = new Date(milliseconds).toISOString();
       }
       
-      const score = calculateTopicScore(
+      let baseScore = calculateTopicScore(
         normalizedSimilarity,
         {
           importance: topic.importance,
@@ -203,6 +346,20 @@ export async function searchTopics(
         topic.searchCount || 0,
         queryText
       );
+
+      // BM25スコアがある場合は、ハイブリッドスコアを計算
+      if (bm25Score > 0 && config.useBM25 && config.useVector) {
+        // BM25スコアを0-1の範囲に正規化（簡易版）
+        const normalizedBM25 = Math.min(1, bm25Score / 10);
+        // ハイブリッドスコア: ベクトルスコアとBM25スコアの重み付き平均
+        baseScore = baseScore * config.weights.vector + normalizedBM25 * config.weights.bm25;
+      } else if (bm25Score > 0 && config.useBM25 && !config.useVector) {
+        // BM25のみの場合
+        const normalizedBM25 = Math.min(1, bm25Score / 10);
+        baseScore = normalizedBM25;
+      }
+
+      const score = baseScore;
 
       console.log('[searchTopics] スコア計算結果:', {
         topicId,

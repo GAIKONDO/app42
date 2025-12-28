@@ -8,6 +8,7 @@ import type { Relation } from '@/types/relation';
 import type { KnowledgeGraphSearchResult, KnowledgeGraphContextResult, SearchFilters } from './types';
 import { searchKnowledgeGraph } from './searchKnowledgeGraph';
 import { getEntitiesByIds } from '../entityApi';
+import { getSearchConfig } from './searchConfig';
 
 /**
  * RAG用のコンテキストを取得
@@ -62,7 +63,16 @@ export async function getKnowledgeGraphContextWithResults(
   try {
     console.log('[getKnowledgeGraphContextWithResults] 検索開始:', { queryText, limit, filters });
     
-    // 検索を実行
+    // 検索設定を取得（AIアシスタントでも設定を反映）
+    const searchConfig = typeof window !== 'undefined' ? getSearchConfig() : {
+      enableBM25: false,
+      enableRouter: false,
+      useHybridSearchByDefault: false,
+    };
+    
+    console.log('[getKnowledgeGraphContextWithResults] 検索設定:', searchConfig);
+    
+    // 検索を実行（設定に基づいてBM25とクエリルーターが自動的に使用される）
     const results = await searchKnowledgeGraph(queryText, limit, filters);
 
     console.log('[getKnowledgeGraphContextWithResults] 検索結果:', {

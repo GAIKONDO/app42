@@ -97,6 +97,7 @@ class KnowledgeGraphProvider implements InformationSourceProvider {
   ): Promise<InformationItem[]> {
     try {
       const { getKnowledgeGraphContextWithResults } = await import('../knowledgeGraphRAG');
+      // AIアシスタントでもBM25とクエリルーターの設定が反映される
       const { context, results } = await getKnowledgeGraphContextWithResults(query, limit, filters, 2000);
       
       if (!context || context.trim() === '') {

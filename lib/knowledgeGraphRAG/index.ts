@@ -34,3 +34,54 @@ export {
 // ユーティリティ関数をエクスポート
 export { formatSources } from './utils';
 
+// ハイブリッド検索設定をエクスポート
+export {
+  DEFAULT_HYBRID_CONFIG,
+  DEFAULT_HYBRID_WEIGHTS,
+  type HybridWeights,
+  type HybridSearchConfig,
+} from './hybridSearch';
+
+// クエリルーターをエクスポート
+export {
+  analyzeQuery,
+  getSearchStrategy,
+  logQueryAnalysis,
+  type QueryType,
+  type QueryAnalysis,
+  type SearchStrategy,
+} from './queryRouter';
+
+// クエリルーターを使用した検索関数をエクスポート
+export { searchKnowledgeGraphWithRouter } from './searchKnowledgeGraphWithRouter';
+
+// BM25キャッシュ管理をエクスポート
+export {
+  bm25IndexCache,
+} from './bm25IndexCache';
+
+export {
+  invalidateEntityCache,
+  invalidateRelationCache,
+  invalidateTopicCache,
+  invalidateAllCache,
+} from './bm25CacheInvalidation';
+
+// BM25パラメータ調整をエクスポート
+export {
+  tuneBM25Parameters,
+  RECOMMENDED_BM25_CONFIG,
+  SHORT_DOCUMENT_CONFIG,
+  LONG_DOCUMENT_CONFIG,
+  type ParameterTuningResult,
+} from './bm25ParameterTuning';
+
+// 検索設定をエクスポート
+export {
+  getSearchConfig,
+  setSearchConfig,
+  resetSearchConfig,
+  DEFAULT_SEARCH_CONFIG,
+  type SearchConfig,
+} from './searchConfig';
+

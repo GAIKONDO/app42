@@ -66,44 +66,6 @@ export default function StartupPageHeader({
         <h2 style={{ margin: 0 }}>{startup?.title}</h2>
       </div>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        {activeTab === 'details' && (
-          <>
-            {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#F3F4F6',
-                  color: '#374151',
-                  border: '1px solid #D1D5DB',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                }}
-              >
-                詳細を編集
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  setIsEditing(false);
-                  setEditingContent(startup?.content || '');
-                }}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#F3F4F6',
-                  color: '#374151',
-                  border: '1px solid #D1D5DB',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                }}
-              >
-                編集を終了
-              </button>
-            )}
-          </>
-        )}
         {savingStatus !== 'idle' && (
           <div style={{
             padding: '8px 12px',

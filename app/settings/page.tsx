@@ -10,6 +10,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import EmbeddingSettings from './components/EmbeddingSettings';
 import SqliteSettings from './components/SqliteSettings';
 import VectorDatabaseSettings from './components/VectorDatabaseSettings';
+import SearchSettings from './components/SearchSettings';
 import EnvironmentVariablesInfo from './components/EnvironmentVariablesInfo';
 import CsvImportSection from './components/CsvImportSection';
 import CsvImportPreviewModal from './components/CsvImportPreviewModal';
@@ -298,6 +299,10 @@ export default function SettingsPage() {
 
         {activeTab === 'vector-db' && (
           <VectorDatabaseSettings />
+        )}
+
+        {activeTab === 'search' && (
+          <SearchSettings />
         )}
 
         {activeTab === 'import' && (

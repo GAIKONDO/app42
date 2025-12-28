@@ -1,6 +1,6 @@
 'use client';
 
-export type SettingsTab = 'architecture' | 'api-keys' | 'embeddings' | 'sqlite' | 'vector-db' | 'import' | 'env';
+export type SettingsTab = 'architecture' | 'api-keys' | 'embeddings' | 'sqlite' | 'vector-db' | 'import' | 'env' | 'search';
 
 interface SettingsTabBarProps {
   activeTab: SettingsTab;
@@ -14,6 +14,7 @@ export function SettingsTabBar({ activeTab, onTabChange }: SettingsTabBarProps) 
     { id: 'embeddings' as const, label: '埋め込み生成' },
     { id: 'sqlite' as const, label: 'SQLite' },
     { id: 'vector-db' as const, label: 'ベクトルDB' },
+    { id: 'search' as const, label: '検索設定' },
     { id: 'import' as const, label: 'データインポート' },
     { id: 'env' as const, label: '環境変数' },
   ];

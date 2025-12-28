@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { searchKnowledgeGraph } from '@/lib/knowledgeGraphRAG';
+import { searchKnowledgeGraph, searchKnowledgeGraphWithRouter } from '@/lib/knowledgeGraphRAG';
 import type { KnowledgeGraphSearchResult } from '@/lib/knowledgeGraphRAG';
+import { getSearchConfig } from '@/lib/knowledgeGraphRAG/searchConfig';
 
 interface SearchFilters {
   organizationId?: string;
@@ -93,21 +94,46 @@ export function useRAGSearch(options: UseRAGSearchOptions = {}) {
         console.warn('[useRAGSearch] organizationIdが指定されていません。検索結果が空になる可能性があります。');
       }
       
-      const results = await searchKnowledgeGraph(
-        query,
-        maxResults,
-        {
-          organizationId: filters.organizationId,
-          entityType: filters.entityType,
-          relationType: filters.relationType,
-          createdAfter: filters.createdAfter,
-          createdBefore: filters.createdBefore,
-          updatedAfter: filters.updatedAfter,
-          updatedBefore: filters.updatedBefore,
-          filterLogic: filters.filterLogic,
-        },
-        useCache
-      );
+      // 検索設定を取得
+      const searchConfig = getSearchConfig();
+      
+      // クエリルーターが有効な場合は、ルーターを使用した検索を実行
+      let results: KnowledgeGraphSearchResult[];
+      if (searchConfig.enableRouter) {
+        console.log('[useRAGSearch] クエリルーターを使用した検索を実行');
+        results = await searchKnowledgeGraphWithRouter(
+          query,
+          maxResults,
+          {
+            organizationId: filters.organizationId,
+            entityType: filters.entityType,
+            relationType: filters.relationType,
+            createdAfter: filters.createdAfter,
+            createdBefore: filters.createdBefore,
+            updatedAfter: filters.updatedAfter,
+            updatedBefore: filters.updatedBefore,
+            filterLogic: filters.filterLogic,
+          },
+          useCache
+        );
+      } else {
+        // 従来の検索（ベクトル検索のみ、またはハイブリッド検索）
+        results = await searchKnowledgeGraph(
+          query,
+          maxResults,
+          {
+            organizationId: filters.organizationId,
+            entityType: filters.entityType,
+            relationType: filters.relationType,
+            createdAfter: filters.createdAfter,
+            createdBefore: filters.createdBefore,
+            updatedAfter: filters.updatedAfter,
+            updatedBefore: filters.updatedBefore,
+            filterLogic: filters.filterLogic,
+          },
+          useCache
+        );
+      }
       
       console.log('[useRAGSearch] 検索結果取得:', results.length, '件', results);
       

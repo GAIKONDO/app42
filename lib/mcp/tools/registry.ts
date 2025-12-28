@@ -148,7 +148,8 @@ class SearchKnowledgeGraphTool implements MCPToolImplementation {
       console.log('[SearchKnowledgeGraphTool] 検索開始:', { query, limit, organizationId });
       
       // まず、searchKnowledgeGraphを直接呼び出して検索結果を取得（RAG検索ページと同じ方法）
-      const { searchKnowledgeGraph } = await import('@/lib/knowledgeGraphRAG');
+      const { searchKnowledgeGraphWithRouter, searchKnowledgeGraph } = await import('@/lib/knowledgeGraphRAG');
+      const { getSearchConfig } = await import('@/lib/knowledgeGraphRAG/searchConfig');
       
       console.log('[SearchKnowledgeGraphTool] searchKnowledgeGraph呼び出し前:', {
         query,
@@ -158,11 +159,19 @@ class SearchKnowledgeGraphTool implements MCPToolImplementation {
         queryLength: query?.length,
       });
       
-      const searchResults = await searchKnowledgeGraph(
-        query,
-        limit,
-        organizationId ? { organizationId } : undefined
-      );
+      // 検索設定を取得して、ルーターが有効な場合は使用
+      const searchConfig = getSearchConfig();
+      const searchResults = searchConfig.enableRouter
+        ? await searchKnowledgeGraphWithRouter(
+            query,
+            limit,
+            organizationId ? { organizationId } : undefined
+          )
+        : await searchKnowledgeGraph(
+            query,
+            limit,
+            organizationId ? { organizationId } : undefined
+          );
       
       console.log('[SearchKnowledgeGraphTool] searchKnowledgeGraph結果:', {
         resultsCount: searchResults.length,

@@ -213,3 +213,19 @@ export function generateUniqueBizDevPhaseId(): string {
   return `bizdev_${timestamp}_${randomPart}`;
 }
 
+/**
+ * 注力施策をJSONファイルから読み込む（現在は未実装）
+ */
+export async function loadInitiativeFromJson(initiativeId: string): Promise<any | null> {
+  // 現在は未実装のため、nullを返す
+  return null;
+}
+
+/**
+ * 注力施策をJSONファイルに保存する（現在は未実装）
+ */
+export async function saveInitiativeToJson(initiative: any): Promise<void> {
+  // 現在は未実装のため、何もしない
+  return;
+}
+

@@ -24,10 +24,13 @@ export interface UseOrganizationDataReturn {
   initiativesByOrg: Map<string, { orgName: string; initiatives: FocusInitiative[] }>;
   meetingNotes: MeetingNote[];
   setMeetingNotes: React.Dispatch<React.SetStateAction<MeetingNote[]>>;
+  meetingNotesByOrg: Map<string, { orgName: string; meetingNotes: MeetingNote[] }>;
   regulations: Regulation[];
   setRegulations: React.Dispatch<React.SetStateAction<Regulation[]>>;
+  regulationsByOrg: Map<string, { orgName: string; regulations: Regulation[] }>;
   startups: Startup[];
   setStartups: React.Dispatch<React.SetStateAction<Startup[]>>;
+  startupsByOrg: Map<string, { orgName: string; startups: Startup[] }>;
   loading: boolean;
   error: string | null;
   reloadInitiatives: (orgId: string, orgTree: OrgNodeData | null) => Promise<void>;
@@ -39,8 +42,11 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
   const [focusInitiatives, setFocusInitiatives] = useState<FocusInitiative[]>([]);
   const [initiativesByOrg, setInitiativesByOrg] = useState<Map<string, { orgName: string; initiatives: FocusInitiative[] }>>(new Map());
   const [meetingNotes, setMeetingNotes] = useState<MeetingNote[]>([]);
+  const [meetingNotesByOrg, setMeetingNotesByOrg] = useState<Map<string, { orgName: string; meetingNotes: MeetingNote[] }>>(new Map());
   const [regulations, setRegulations] = useState<Regulation[]>([]);
+  const [regulationsByOrg, setRegulationsByOrg] = useState<Map<string, { orgName: string; regulations: Regulation[] }>>(new Map());
   const [startups, setStartups] = useState<Startup[]>([]);
+  const [startupsByOrg, setStartupsByOrg] = useState<Map<string, { orgName: string; startups: Startup[] }>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -424,23 +430,287 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
             }
             
             try {
-              const notes = await getMeetingNotes(validOrganizationId);
-              setMeetingNotes(notes);
+              const currentNotes = await getMeetingNotes(validOrganizationId);
+              
+              // 子組織のIDを収集（注力施策と同じロジック）
+              const childOrgIdsForNotes: string[] = [];
+              const collectChildOrgIdsForNotes = (org: OrgNodeData) => {
+                if (org.children) {
+                  for (const child of org.children) {
+                    if (child.id) {
+                      childOrgIdsForNotes.push(child.id);
+                    }
+                    collectChildOrgIdsForNotes(child); // 再帰的に子組織を収集
+                  }
+                }
+              };
+              
+              if (updatedOrg) {
+                collectChildOrgIdsForNotes(updatedOrg);
+              }
+              
+              // 子組織の議事録を取得
+              const childNotes: MeetingNote[] = [];
+              for (const childOrgId of childOrgIdsForNotes) {
+                try {
+                  const childNotesData = await getMeetingNotes(childOrgId);
+                  childNotes.push(...childNotesData);
+                } catch (error) {
+                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の議事録取得に失敗:`, error);
+                }
+              }
+              
+              // すべての議事録を設定
+              const allNotes = [...currentNotes, ...childNotes];
+              setMeetingNotes(allNotes);
+              
+              // 組織ごとにグループ化
+              const meetingNotesByOrgMap = new Map<string, { orgName: string; meetingNotes: MeetingNote[] }>();
+              
+              // 現在の組織の議事録
+              if (currentNotes.length > 0) {
+                const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
+                  if (org.id === orgId) return org.name || org.title || orgId;
+                  if (org.children) {
+                    for (const child of org.children) {
+                      const found = findOrgName(child, orgId);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                };
+                
+                const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
+                meetingNotesByOrgMap.set(validOrganizationId, {
+                  orgName: orgName || validOrganizationId,
+                  meetingNotes: currentNotes,
+                });
+              }
+              
+              // 子組織の議事録
+              for (const childOrgId of childOrgIdsForNotes) {
+                const childNotesForOrg = childNotes.filter(n => n.organizationId === childOrgId);
+                if (childNotesForOrg.length > 0) {
+                  const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
+                    if (org.id === orgId) return org.name || org.title || orgId;
+                    if (org.children) {
+                      for (const child of org.children) {
+                        const found = findOrgName(child, orgId);
+                        if (found) return found;
+                      }
+                    }
+                    return null;
+                  };
+                  
+                  const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
+                  meetingNotesByOrgMap.set(childOrgId, {
+                    orgName: orgName || childOrgId,
+                    meetingNotes: childNotesForOrg,
+                  });
+                }
+              }
+              
+              setMeetingNotesByOrg(meetingNotesByOrgMap);
+              
+              devLog('📋 [loadOrganizationData] 組織ごとの議事録:', {
+                currentOrg: validOrganizationId,
+                currentCount: currentNotes.length,
+                childOrgsCount: childOrgIdsForNotes.length,
+                childCount: childNotes.length,
+                totalCount: allNotes.length,
+                byOrgCount: meetingNotesByOrgMap.size,
+              });
             } catch (noteError: any) {
               devWarn('議事録の取得に失敗しました:', noteError);
             }
             
             try {
-              const regulationsData = await getRegulations(validOrganizationId);
-              setRegulations(regulationsData);
+              const currentRegulations = await getRegulations(validOrganizationId);
+              
+              // 子組織のIDを収集（注力施策と同じロジック）
+              const childOrgIdsForRegulations: string[] = [];
+              const collectChildOrgIdsForRegulations = (org: OrgNodeData) => {
+                if (org.children) {
+                  for (const child of org.children) {
+                    if (child.id) {
+                      childOrgIdsForRegulations.push(child.id);
+                    }
+                    collectChildOrgIdsForRegulations(child); // 再帰的に子組織を収集
+                  }
+                }
+              };
+              
+              if (updatedOrg) {
+                collectChildOrgIdsForRegulations(updatedOrg);
+              }
+              
+              // 子組織の制度を取得
+              const childRegulations: Regulation[] = [];
+              for (const childOrgId of childOrgIdsForRegulations) {
+                try {
+                  const childRegulationsData = await getRegulations(childOrgId);
+                  childRegulations.push(...childRegulationsData);
+                } catch (error) {
+                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の制度取得に失敗:`, error);
+                }
+              }
+              
+              // すべての制度を設定
+              const allRegulations = [...currentRegulations, ...childRegulations];
+              setRegulations(allRegulations);
+              
+              // 組織ごとにグループ化
+              const regulationsByOrgMap = new Map<string, { orgName: string; regulations: Regulation[] }>();
+              
+              // 現在の組織の制度
+              if (currentRegulations.length > 0) {
+                const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
+                  if (org.id === orgId) return org.name || org.title || orgId;
+                  if (org.children) {
+                    for (const child of org.children) {
+                      const found = findOrgName(child, orgId);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                };
+                
+                const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
+                regulationsByOrgMap.set(validOrganizationId, {
+                  orgName: orgName || validOrganizationId,
+                  regulations: currentRegulations,
+                });
+              }
+              
+              // 子組織の制度
+              for (const childOrgId of childOrgIdsForRegulations) {
+                const childRegulationsForOrg = childRegulations.filter(r => r.organizationId === childOrgId);
+                if (childRegulationsForOrg.length > 0) {
+                  const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
+                    if (org.id === orgId) return org.name || org.title || orgId;
+                    if (org.children) {
+                      for (const child of org.children) {
+                        const found = findOrgName(child, orgId);
+                        if (found) return found;
+                      }
+                    }
+                    return null;
+                  };
+                  
+                  const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
+                  regulationsByOrgMap.set(childOrgId, {
+                    orgName: orgName || childOrgId,
+                    regulations: childRegulationsForOrg,
+                  });
+                }
+              }
+              
+              setRegulationsByOrg(regulationsByOrgMap);
+              
+              devLog('📋 [loadOrganizationData] 組織ごとの制度:', {
+                currentOrg: validOrganizationId,
+                currentCount: currentRegulations.length,
+                childOrgsCount: childOrgIdsForRegulations.length,
+                childCount: childRegulations.length,
+                totalCount: allRegulations.length,
+                byOrgCount: regulationsByOrgMap.size,
+              });
             } catch (regulationError: any) {
               devWarn('制度の取得に失敗しました:', regulationError);
             }
             
             // スタートアップを取得
             try {
-              const startupsData = await getStartups(validOrganizationId);
-              setStartups(startupsData);
+              const currentStartups = await getStartups(validOrganizationId);
+              
+              // 子組織のIDを収集（注力施策と同じロジック）
+              const childOrgIdsForStartups: string[] = [];
+              const collectChildOrgIdsForStartups = (org: OrgNodeData) => {
+                if (org.children) {
+                  for (const child of org.children) {
+                    if (child.id) {
+                      childOrgIdsForStartups.push(child.id);
+                    }
+                    collectChildOrgIdsForStartups(child); // 再帰的に子組織を収集
+                  }
+                }
+              };
+              
+              if (updatedOrg) {
+                collectChildOrgIdsForStartups(updatedOrg);
+              }
+              
+              // 子組織のスタートアップを取得
+              const childStartups: Startup[] = [];
+              for (const childOrgId of childOrgIdsForStartups) {
+                try {
+                  const childStartupsData = await getStartups(childOrgId);
+                  childStartups.push(...childStartupsData);
+                } catch (error) {
+                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} のスタートアップ取得に失敗:`, error);
+                }
+              }
+              
+              // すべてのスタートアップを設定
+              const allStartups = [...currentStartups, ...childStartups];
+              setStartups(allStartups);
+              
+              // 組織ごとにグループ化
+              const startupsByOrgMap = new Map<string, { orgName: string; startups: Startup[] }>();
+              
+              // 現在の組織のスタートアップ
+              if (currentStartups.length > 0) {
+                const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
+                  if (org.id === orgId) return org.name || org.title || orgId;
+                  if (org.children) {
+                    for (const child of org.children) {
+                      const found = findOrgName(child, orgId);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                };
+                
+                const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
+                startupsByOrgMap.set(validOrganizationId, {
+                  orgName: orgName || validOrganizationId,
+                  startups: currentStartups,
+                });
+              }
+              
+              // 子組織のスタートアップ
+              for (const childOrgId of childOrgIdsForStartups) {
+                const childStartupsForOrg = childStartups.filter(s => s.organizationId === childOrgId);
+                if (childStartupsForOrg.length > 0) {
+                  const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
+                    if (org.id === orgId) return org.name || org.title || orgId;
+                    if (org.children) {
+                      for (const child of org.children) {
+                        const found = findOrgName(child, orgId);
+                        if (found) return found;
+                      }
+                    }
+                    return null;
+                  };
+                  
+                  const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
+                  startupsByOrgMap.set(childOrgId, {
+                    orgName: orgName || childOrgId,
+                    startups: childStartupsForOrg,
+                  });
+                }
+              }
+              
+              setStartupsByOrg(startupsByOrgMap);
+              
+              devLog('📋 [loadOrganizationData] 組織ごとのスタートアップ:', {
+                currentOrg: validOrganizationId,
+                currentCount: currentStartups.length,
+                childOrgsCount: childOrgIdsForStartups.length,
+                childCount: childStartups.length,
+                totalCount: allStartups.length,
+                byOrgCount: startupsByOrgMap.size,
+              });
             } catch (startupError: any) {
               devWarn('スタートアップの取得に失敗しました:', startupError);
             }
@@ -520,11 +790,14 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
     initiativesByOrg,
     meetingNotes,
     setMeetingNotes,
+    meetingNotesByOrg,
     regulations,
     regulations,
     setRegulations,
+    regulationsByOrg,
     startups,
     setStartups,
+    startupsByOrg,
     loading,
     error,
     reloadInitiatives,

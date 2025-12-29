@@ -23,6 +23,8 @@ interface KnowledgeGraphFiltersProps {
   setSelectedOrganizationIds: (ids: Set<string>) => void;
   selectedMemberIds: Set<string>;
   setSelectedMemberIds: (ids: Set<string>) => void;
+  dateFilterType: 'none' | 'created' | 'updated' | 'registered';
+  setDateFilterType: (type: 'none' | 'created' | 'updated' | 'registered') => void;
   dateRangeStart: string;
   setDateRangeStart: (date: string) => void;
   dateRangeEnd: string;
@@ -45,6 +47,8 @@ export default function KnowledgeGraphFilters({
   setSelectedOrganizationIds,
   selectedMemberIds,
   setSelectedMemberIds,
+  dateFilterType,
+  setDateFilterType,
   dateRangeStart,
   setDateRangeStart,
   dateRangeEnd,
@@ -61,13 +65,13 @@ export default function KnowledgeGraphFilters({
 }: KnowledgeGraphFiltersProps) {
   const hasActiveFilters = selectedOrganizationIds.size > 0 || 
     selectedMemberIds.size > 0 || 
-    dateRangeStart || 
-    dateRangeEnd || 
+    (dateFilterType !== 'none' && (dateRangeStart || dateRangeEnd)) || 
     selectedImportance.size > 0;
 
   const handleResetFilters = () => {
     setSelectedOrganizationIds(new Set());
     setSelectedMemberIds(new Set());
+    setDateFilterType('none');
     setDateRangeStart('');
     setDateRangeEnd('');
     setSelectedImportance(new Set());
@@ -261,10 +265,9 @@ export default function KnowledgeGraphFilters({
           <label style={{ fontSize: '14px', color: '#6B7280', whiteSpace: 'nowrap' }}>
             期間:
           </label>
-          <input
-            type="date"
-            value={dateRangeStart}
-            onChange={(e) => setDateRangeStart(e.target.value)}
+          <select
+            value={dateFilterType}
+            onChange={(e) => setDateFilterType(e.target.value as 'none' | 'created' | 'updated' | 'registered')}
             style={{
               padding: '6px 12px',
               border: '1px solid #D1D5DB',
@@ -273,23 +276,45 @@ export default function KnowledgeGraphFilters({
               backgroundColor: '#FFFFFF',
               color: '#1F2937',
             }}
-            placeholder="開始日"
-          />
-          <span style={{ fontSize: '14px', color: '#6B7280' }}>〜</span>
-          <input
-            type="date"
-            value={dateRangeEnd}
-            onChange={(e) => setDateRangeEnd(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              border: '1px solid #D1D5DB',
-              borderRadius: '6px',
-              fontSize: '14px',
-              backgroundColor: '#FFFFFF',
-              color: '#1F2937',
-            }}
-            placeholder="終了日"
-          />
+          >
+            <option value="none">なし</option>
+            <option value="created">作成日</option>
+            <option value="updated">更新日</option>
+            <option value="registered">登録日（トピック日付）</option>
+          </select>
+          {dateFilterType !== 'none' && (
+            <>
+              <input
+                type="date"
+                value={dateRangeStart}
+                onChange={(e) => setDateRangeStart(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  border: '1px solid #D1D5DB',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  backgroundColor: '#FFFFFF',
+                  color: '#1F2937',
+                }}
+                placeholder="開始日"
+              />
+              <span style={{ fontSize: '14px', color: '#6B7280' }}>〜</span>
+              <input
+                type="date"
+                value={dateRangeEnd}
+                onChange={(e) => setDateRangeEnd(e.target.value)}
+                style={{
+                  padding: '6px 12px',
+                  border: '1px solid #D1D5DB',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  backgroundColor: '#FFFFFF',
+                  color: '#1F2937',
+                }}
+                placeholder="終了日"
+              />
+            </>
+          )}
         </div>
         
         {/* 重要度フィルター */}

@@ -7,6 +7,9 @@ import type { MeetingNote } from '@/lib/orgApi';
 interface MeetingNotesTabProps {
   organizationId: string;
   meetingNotes: MeetingNote[];
+  meetingNotesByOrg: Map<string, { orgName: string; meetingNotes: MeetingNote[] }>;
+  expandedOrgIds: Set<string>;
+  setExpandedOrgIds: (ids: Set<string>) => void;
   editingMeetingNoteId: string | null;
   editingMeetingNoteTitle: string;
   setEditingMeetingNoteTitle: (title: string) => void;
@@ -23,6 +26,9 @@ interface MeetingNotesTabProps {
 export default function MeetingNotesTab({
   organizationId,
   meetingNotes,
+  meetingNotesByOrg,
+  expandedOrgIds,
+  setExpandedOrgIds,
   editingMeetingNoteId,
   editingMeetingNoteTitle,
   setEditingMeetingNoteTitle,
@@ -81,55 +87,182 @@ export default function MeetingNotesTab({
           </svg>
         </button>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-          議事録 ({meetingNotes.length}件)
-        </h3>
-        <button
-          onClick={onOpenAddModal}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#10B981',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#059669';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = '#10B981';
-          }}
-        >
-          + 追加
-        </button>
-      </div>
-      {meetingNotes.length === 0 ? (
-        <p style={{ color: 'var(--color-text-light)', padding: '20px', textAlign: 'center' }}>
-          議事録が登録されていません
-        </p>
-      ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: '16px',
-          }}
-        >
-          {meetingNotes.map((note) => (
-            <div
-              key={note.id}
-              onClick={() => {
-                if (editingMeetingNoteId !== note.id && organizationId && note.id) {
-                  router.push(`/organization/detail/meeting?meetingId=${note.id}&id=${organizationId}`);
-                }
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+            議事録 ({meetingNotes.length}件)
+          </h3>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {meetingNotesByOrg.size > 1 && (
+              <button
+                onClick={() => {
+                  const childOrgIds = Array.from(meetingNotesByOrg.keys()).filter(id => id !== organizationId);
+                  const allExpanded = childOrgIds.length > 0 && childOrgIds.every(id => expandedOrgIds.has(id));
+                  
+                  if (allExpanded) {
+                    setExpandedOrgIds(new Set());
+                  } else {
+                    setExpandedOrgIds(new Set(childOrgIds));
+                  }
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6B7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#4B5563';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#6B7280';
+                }}
+              >
+                {(() => {
+                  const childOrgIds = Array.from(meetingNotesByOrg.keys()).filter(id => id !== organizationId);
+                  const allExpanded = childOrgIds.length > 0 && childOrgIds.every(id => expandedOrgIds.has(id));
+                  return allExpanded ? (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="18 15 12 9 6 15" />
+                      </svg>
+                      すべて閉じる
+                    </>
+                  ) : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                      すべて開く
+                    </>
+                  );
+                })()}
+              </button>
+            )}
+            <button
+              onClick={onOpenAddModal}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#10B981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
               }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#059669';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#10B981';
+              }}
+            >
+              + 追加
+            </button>
+          </div>
+        </div>
+        {meetingNotes.length === 0 ? (
+          <p style={{ color: 'var(--color-text-light)', padding: '20px', textAlign: 'center' }}>
+            議事録が登録されていません
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {Array.from(meetingNotesByOrg.entries()).map(([orgId, orgData]) => {
+              const isCurrentOrg = orgId === organizationId;
+              const isExpanded = isCurrentOrg || expandedOrgIds.has(orgId);
+              
+              return (
+                <div key={orgId} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ 
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '8px',
+                    paddingBottom: '8px',
+                    borderBottom: '1px solid #E5E7EB',
+                  }}>
+                    <h4 style={{ 
+                      fontSize: '14px', 
+                      fontWeight: 600, 
+                      color: '#6B7280',
+                      margin: 0,
+                    }}>
+                      {orgData.orgName} ({orgData.meetingNotes.length}件)
+                    </h4>
+                    {!isCurrentOrg && (
+                      <button
+                        onClick={() => {
+                          const newExpanded = new Set(expandedOrgIds);
+                          if (isExpanded) {
+                            newExpanded.delete(orgId);
+                          } else {
+                            newExpanded.add(orgId);
+                          }
+                          setExpandedOrgIds(newExpanded);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '24px',
+                          height: '24px',
+                          padding: 0,
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#6B7280',
+                          transition: 'transform 0.2s ease',
+                          transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = '#374151';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = '#6B7280';
+                        }}
+                      >
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {isExpanded && (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                        gap: '16px',
+                      }}
+                    >
+                      {orgData.meetingNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          onClick={() => {
+                            if (editingMeetingNoteId !== note.id && note.organizationId && note.id) {
+                              router.push(`/organization/detail/meeting?meetingId=${note.id}&id=${note.organizationId}`);
+                            }
+                          }}
               style={{
                 padding: '16px',
                 backgroundColor: '#ffffff',
@@ -221,8 +354,8 @@ export default function MeetingNotesTab({
                     <h4 
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (organizationId && note.id) {
-                          router.push(`/organization/detail/meeting?meetingId=${note.id}&id=${organizationId}`);
+                        if (note.organizationId && note.id) {
+                          router.push(`/organization/detail/meeting?meetingId=${note.id}&id=${note.organizationId}`);
                         }
                       }}
                       style={{ 
@@ -333,9 +466,15 @@ export default function MeetingNotesTab({
                 </>
               )}
             </div>
-          ))}
-        </div>
-      )}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

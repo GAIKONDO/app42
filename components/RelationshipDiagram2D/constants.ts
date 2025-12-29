@@ -25,6 +25,18 @@ export const DESIGN = {
       text: '#FFFFFF',
       hover: '#FBBF24',
     },
+    category: {
+      fill: '#8B5CF6',
+      stroke: '#7C3AED',
+      text: '#FFFFFF',
+      hover: '#A78BFA',
+    },
+    startup: {
+      fill: '#EC4899',
+      stroke: '#DB2777',
+      text: '#FFFFFF',
+      hover: '#F472B6',
+    },
     connection: {
       main: '#666666',      // より濃いグレー（#C4C4C4 → #666666）
       branch: '#888888',    // より濃いグレー（#E0E0E0 → #888888）
@@ -51,6 +63,14 @@ export const DESIGN = {
       fontSize: '12px',
       fontWeight: '500',
     },
+    category: {
+      fontSize: '14px',
+      fontWeight: '600',
+    },
+    startup: {
+      fontSize: '14px',
+      fontWeight: '500',
+    },
   },
   spacing: {
     nodePadding: {
@@ -58,12 +78,16 @@ export const DESIGN = {
       organization: { x: 16, y: 8 },
       initiative: { x: 16, y: 8 },
       topic: { x: 12, y: 6 },
+      category: { x: 16, y: 8 },
+      startup: { x: 16, y: 8 },
     },
     radius: {
       theme: 6,
       organization: 6,
       initiative: 6,
       topic: 4,
+      category: 6,
+      startup: 6,
     },
   },
   stroke: {

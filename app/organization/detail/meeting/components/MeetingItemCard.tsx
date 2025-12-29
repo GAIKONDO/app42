@@ -690,6 +690,11 @@ export default function MeetingItemCard({
                     
                     // Topicsテーブルに各トピックを保存
                     for (const topic of newTopics) {
+                      // topicDateを取得（mentionedDateまたはitem.dateから）
+                      const topicDate = (topic as any).mentionedDate !== undefined 
+                        ? (topic as any).mentionedDate 
+                        : (item?.date || undefined);
+                      
                       saveTopicEmbeddingAsync(
                         topic.id,
                         meetingId,
@@ -701,7 +706,9 @@ export default function MeetingItemCard({
                           semanticCategory: topic.semanticCategory,
                           importance: topic.importance,
                           summary: topic.summary,
-                        }
+                        },
+                        undefined, // regulationId
+                        topicDate
                       ).catch((error: any) => {
                         console.warn(`トピック ${topic.id} のTopicsテーブルへの保存に失敗しました:`, error);
                       });
@@ -915,6 +922,11 @@ export default function MeetingItemCard({
 
                           // Topicsテーブルに保存
                           try {
+                            // topicDateを取得（mentionedDateまたはitem.dateから）
+                            const topicDate = (topic as any).mentionedDate !== undefined 
+                              ? (topic as any).mentionedDate 
+                              : (item?.date || undefined);
+                            
                             await saveTopicEmbeddingAsync(
                               topic.id,
                               meetingId,
@@ -926,7 +938,9 @@ export default function MeetingItemCard({
                                 semanticCategory: metadata.semanticCategory,
                                 importance: metadata.importance,
                                 summary: metadata.summary,
-                              }
+                              },
+                              undefined, // regulationId
+                              topicDate
                             );
                             console.log(`✅ [MeetingItemCard] Topicsテーブルへの保存成功: ${topic.id}`);
                           } catch (saveError: any) {

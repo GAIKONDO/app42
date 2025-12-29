@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
 import type { Startup } from '@/lib/orgApi';
+import { saveStartup } from '@/lib/orgApi';
 import MermaidLoader from '@/components/MermaidLoader';
 import { generateUniqueId } from '@/lib/orgApi';
 import { StartupTabBar } from './components/StartupTabBar';
@@ -27,6 +28,7 @@ function StartupDetailPageContent() {
   const startupId = searchParams?.get('startupId') as string;
   
   // データ取得カスタムフック
+  const router = useRouter();
   const {
     startup,
     orgData,
@@ -268,6 +270,25 @@ function StartupDetailPageContent() {
   const [aiGeneratedTarget, setAiGeneratedTarget] = useState<'description' | 'objective' | 'evaluation' | null>(null);
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   
+  // 組織変更ハンドラー
+  const handleOrganizationChange = async (newOrganizationId: string) => {
+    if (!startup || !startupId) {
+      throw new Error('スタートアップデータが読み込まれていません');
+    }
+
+    // スタートアップのorganizationIdを更新
+    const updatedStartup = {
+      ...startup,
+      organizationId: newOrganizationId,
+    };
+
+    // データベースに保存
+    await saveStartup(updatedStartup);
+
+    // 新しい組織のページに遷移
+    router.push(`/organization/startup?organizationId=${newOrganizationId}&startupId=${startupId}`);
+  };
+
   // 保存とダウンロードのカスタムフック
   const { handleManualSave, handleDownloadJson } = useStartupSave({
     startup,
@@ -383,9 +404,11 @@ function StartupDetailPageContent() {
           orgData={orgData}
           startup={startup}
           organizationId={organizationId}
+          allOrganizations={allOrganizations}
           savingStatus={savingStatus}
           onSave={handleManualSave}
           onDownloadJson={handleDownloadJson}
+          onOrganizationChange={handleOrganizationChange}
           activeTab={activeTab}
           isEditing={isEditing}
           setIsEditing={setIsEditing}

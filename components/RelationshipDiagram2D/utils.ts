@@ -5,7 +5,7 @@ export function wrapText(
   text: string,
   maxWidth: number,
   fontSize: number,
-  nodeType?: 'theme' | 'organization' | 'initiative' | 'topic' | 'company'
+  nodeType?: 'theme' | 'organization' | 'initiative' | 'topic' | 'company' | 'category' | 'startup'
 ): string[] {
   // ノードタイプごとの最大文字数設定
   const maxCharsByType: Record<string, number> = {
@@ -107,7 +107,9 @@ export function getNodeRadius(node: RelationshipNode): number {
   if (node.data?.isParent) return Math.max(node.label.length * 5, 100); // 親：100px
   if (node.type === 'theme') return Math.max(node.label.length * 3.5, 60); // 大：60px（75px→60px）
   if (node.type === 'organization') return Math.max(node.label.length * 3, 45); // 中：45px
+  if (node.type === 'category') return Math.max(node.label.length * 3, 45); // カテゴリー：45px
   if (node.type === 'initiative') return 28; // 注力施策は固定サイズ：28px
+  if (node.type === 'startup') return 28; // スタートアップは固定サイズ：28px
   if (node.type === 'topic') return 20; // 個別トピックは固定サイズ：20px
   return 40;
 }
@@ -118,7 +120,9 @@ export function getCollisionRadius(node: RelationshipNode): number {
   if (node.data?.isParent) return 105; // 親：105px
   if (node.type === 'theme') return 65; // 大：65px（80px→65px）
   if (node.type === 'organization') return 50; // 中：50px
+  if (node.type === 'category') return 50; // カテゴリー：50px
   if (node.type === 'initiative') return 30; // 小：30px
+  if (node.type === 'startup') return 30; // スタートアップ：30px
   if (node.type === 'topic') return 24; // 最小：24px
   return 40;
 }

@@ -5,14 +5,13 @@ import Layout from '@/components/Layout';
 import { useAnalyticsData } from './hooks/useAnalyticsData';
 import { AnalyticsTabBar } from './components/TabBar';
 import { RelationshipDiagramTab } from './components/RelationshipDiagramTab';
-import { A2C100Tab } from './components/A2C100Tab';
 import { PlaceholderTab } from './components/PlaceholderTab';
 import { CategoryManagementTab } from './components/CategoryManagementTab';
 
-type AnalyticsTab = 'relationship-diagram' | 'a2c100' | 'category-management' | 'tab4';
+type AnalyticsTab = 'relationship-diagram' | 'category-management' | 'tab4';
 
 export default function AnalyticsPage() {
-  const [activeTab, setActiveTab] = useState<AnalyticsTab>('relationship-diagram');
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>('category-management');
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'diagram' | 'bubble'>('diagram');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'organization' | 'company' | 'person'>('all');
@@ -113,10 +112,6 @@ export default function AnalyticsPage() {
             onViewModeChange={setViewMode}
             onTypeFilterChange={setSelectedTypeFilter}
           />
-        )}
-
-        {activeTab === 'a2c100' && (
-          <A2C100Tab />
         )}
 
         {activeTab === 'category-management' && (

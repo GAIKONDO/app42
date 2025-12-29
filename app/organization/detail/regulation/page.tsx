@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Layout from '@/components/Layout';
-import { getRegulationById, saveRegulation, getOrgTreeFromDb, generateUniqueId } from '@/lib/orgApi';
+import { getRegulationById, saveRegulation, getOrgTreeFromDb, generateUniqueId, getTopicsByRegulation } from '@/lib/orgApi';
 // import { saveCompanyRegulation } from '@/lib/companiesApi';
 import type { Regulation, OrgNodeData } from '@/lib/orgApi';
 // import type { CompanyRegulation } from '@/lib/companiesApi';
@@ -68,6 +68,7 @@ function RegulationDetailPageContent() {
   const {
     regulation,
     orgData,
+    allOrganizations,
     loading,
     error,
     monthContents,
@@ -89,6 +90,63 @@ function RegulationDetailPageContent() {
     onSetActiveSection: setActiveSection,
     tabOrder,
   });
+
+  // 組織変更ハンドラー
+  const handleOrganizationChange = async (newOrganizationId: string) => {
+    if (!regulation || !regulationId) {
+      console.error('❌ [ページ] 制度データがありません');
+      return;
+    }
+
+    try {
+      console.log('🔄 [ページ] 組織変更を開始:', {
+        regulationId,
+        currentOrganizationId: organizationId,
+        newOrganizationId,
+      });
+
+      // 1. 制度のorganizationIdを更新
+      await saveRegulation({
+        ...regulation,
+        organizationId: newOrganizationId,
+      });
+
+      console.log('✅ [ページ] 制度の組織変更が完了しました');
+
+      // 2. 関連するすべてのトピックのorganizationIdを更新
+      const topics = await getTopicsByRegulation(regulationId);
+      console.log(`📖 [ページ] 関連トピック数: ${topics.length}件`);
+
+      if (topics.length > 0) {
+        // TauriコマンドでSQLiteを直接更新
+        for (const topic of topics) {
+          try {
+            await callTauriCommand('sql_exec', {
+              sql: `UPDATE topics 
+                    SET organizationId = ?1, 
+                        chromaSynced = 0,
+                        updatedAt = datetime('now')
+                    WHERE id = ?2`,
+              params: [newOrganizationId, topic.id],
+            });
+            console.log(`✅ [ページ] トピック ${topic.id} の組織変更が完了しました`);
+          } catch (topicError: any) {
+            console.error(`❌ [ページ] トピック ${topic.id} の更新エラー:`, topicError);
+            // エラーが発生しても続行
+          }
+        }
+        console.log(`✅ [ページ] 全トピックの組織変更が完了しました（${topics.length}件）`);
+      }
+
+      console.log('✅ [ページ] 組織変更が完了しました。ページを遷移します。');
+
+      // 新しい組織の制度ページに遷移
+      router.push(`/organization/detail/regulation?organizationId=${newOrganizationId}&regulationId=${regulationId}`);
+    } catch (error: any) {
+      console.error('❌ [ページ] 組織変更エラー:', error);
+      throw error;
+    }
+  };
   
   // タブ名編集モード
   const [editingTabLabel, setEditingTabLabel] = useState<TabType | null>(null);
@@ -780,6 +838,7 @@ function RegulationDetailPageContent() {
           downloadingHtml={downloadingHtml}
           hasUnsavedChanges={hasUnsavedChanges}
           organizationId={organizationId}
+          allOrganizations={allOrganizations}
           onSave={async () => {
             // tabOrderも含めて保存
             if (regulation) {
@@ -814,6 +873,7 @@ function RegulationDetailPageContent() {
           }}
           onDownloadJson={handleDownloadJson}
           onDownloadHtml={handleDownloadHtmlFromHook}
+          onOrganizationChange={handleOrganizationChange}
         />
 
         {/* タブナビゲーション */}
@@ -1293,6 +1353,11 @@ function RegulationDetailPageContent() {
             
             // トピック埋め込みを保存（非同期）
             if (regulation && organizationId) {
+              // topicDateを取得（mentionedDateまたはitem.dateから）
+              const topicDate = (topic as any).mentionedDate !== undefined 
+                ? (topic as any).mentionedDate 
+                : (item?.date || undefined);
+              
               saveTopicEmbeddingAsync(
                 topicId,
                 undefined, // meetingNoteId
@@ -1305,7 +1370,8 @@ function RegulationDetailPageContent() {
                   importance: topic.importance,
                   summary: topic.summary,
                 },
-                regulationId // regulationId
+                regulationId, // regulationId
+                topicDate
               ).catch((error: any) => {
                 devWarn('⚠️ トピック埋め込みの保存に失敗しました（続行します）:', error);
               });

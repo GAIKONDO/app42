@@ -27,7 +27,8 @@ export async function saveTopicEmbedding(
   title: string,
   content: string,
   metadata?: Partial<Pick<TopicMetadata, 'keywords' | 'semanticCategory' | 'tags' | 'summary' | 'importance'>>,
-  regulationId?: string
+  regulationId?: string,
+  topicDate?: string | null
 ): Promise<void> {
   if (typeof window === 'undefined') {
     throw new Error('トピック埋め込みの保存はクライアント側でのみ実行可能です');
@@ -112,6 +113,11 @@ export async function saveTopicEmbedding(
     }
     if (regulationId) {
       topicData.regulationId = regulationId;
+    }
+    
+    // topicDate（登録日）を設定
+    if (topicDate) {
+      topicData.topicDate = topicDate;
     }
 
     // メタデータフィールドを追加
@@ -253,7 +259,8 @@ export async function saveTopicEmbeddingAsync(
   title: string,
   content: string,
   metadata?: Partial<Pick<TopicMetadata, 'keywords' | 'semanticCategory' | 'tags' | 'summary' | 'importance'>>,
-  regulationId?: string
+  regulationId?: string,
+  topicDate?: string | null
 ): Promise<void> {
   if (typeof window === 'undefined') {
     return;
@@ -267,8 +274,9 @@ export async function saveTopicEmbeddingAsync(
       organizationId,
       hasMetadata: !!metadata,
       metadataKeys: metadata ? Object.keys(metadata) : [],
+      topicDate,
     });
-    await saveTopicEmbedding(topicId, meetingNoteId, organizationId, title, content, metadata, regulationId);
+    await saveTopicEmbedding(topicId, meetingNoteId, organizationId, title, content, metadata, regulationId, topicDate);
     console.log('✅ [saveTopicEmbeddingAsync] 成功:', topicId);
   } catch (error: any) {
     console.error(`❌ [saveTopicEmbeddingAsync] トピック ${topicId} の埋め込み生成エラー:`, {

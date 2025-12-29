@@ -50,47 +50,95 @@ export async function getTopicById(
 ): Promise<TopicSearchInfo | null> {
   try {
     const parentId = meetingNoteId || regulationId;
+    
+    // まず、topicsテーブルから直接取得を試みる（優先）
+    // idが {meetingNoteId}-topic-{topicId} 形式の場合
+    if (parentId) {
+      const { callTauriCommand } = await import('./localFirebase');
+      const embeddingId = `${parentId}-topic-${topicId}`;
+      
+      try {
+        // topicsテーブルから直接取得を試みる
+        const topicResults = await callTauriCommand('query_get', {
+          collectionName: 'topics',
+          conditions: { id: embeddingId },
+        }) as Array<{ id: string; data: any }>;
+        
+        if (topicResults && topicResults.length > 0) {
+          const topicData = topicResults[0].data || topicResults[0];
+          console.log(`[getTopicById] topicsテーブルから直接取得成功: topicId=${topicId}, id=${embeddingId}`);
+          
+          return {
+            topicId: topicData.topicId || topicId,
+            meetingNoteId: topicData.meetingNoteId || meetingNoteId,
+            regulationId: topicData.regulationId || regulationId,
+            title: topicData.title || '',
+            content: topicData.content || '',
+            summary: topicData.description || topicData.contentSummary || topicData.summary,
+            semanticCategory: topicData.semanticCategory,
+            importance: topicData.importance,
+            organizationId: topicData.organizationId || '',
+            keywords: topicData.keywords ? (Array.isArray(topicData.keywords) ? topicData.keywords : (typeof topicData.keywords === 'string' ? JSON.parse(topicData.keywords) : [])) : [],
+            createdAt: topicData.createdAt,
+            updatedAt: topicData.updatedAt,
+            searchCount: topicData.searchCount || 0,
+          };
+        } else {
+          console.log(`[getTopicById] topicsテーブルにデータが見つかりませんでした（id検索）: id=${embeddingId}。フォールバック処理に進みます。`);
+        }
+      } catch (error) {
+        console.warn(`[getTopicById] topicsテーブルからの取得エラー（続行）:`, error);
+      }
+      
+      // topicIdとmeetingNoteId/regulationIdで検索も試みる
+      try {
+        const conditions: any = { topicId };
+        if (meetingNoteId) {
+          conditions.meetingNoteId = meetingNoteId;
+        } else if (regulationId) {
+          // regulationIdの場合は、meetingNoteIdがregulationIdとして保存されている可能性がある
+          conditions.meetingNoteId = regulationId;
+        }
+        
+        const topicResults = await callTauriCommand('query_get', {
+          collectionName: 'topics',
+          conditions,
+        }) as Array<{ id: string; data: any }>;
+        
+        if (topicResults && topicResults.length > 0) {
+          const topicData = topicResults[0].data || topicResults[0];
+          console.log(`[getTopicById] topicsテーブルから取得成功（topicId検索）: topicId=${topicId}`);
+          
+          return {
+            topicId: topicData.topicId || topicId,
+            meetingNoteId: topicData.meetingNoteId || meetingNoteId,
+            regulationId: topicData.regulationId || regulationId,
+            title: topicData.title || '',
+            content: topicData.content || '',
+            summary: topicData.description || topicData.contentSummary || topicData.summary,
+            semanticCategory: topicData.semanticCategory,
+            importance: topicData.importance,
+            organizationId: topicData.organizationId || '',
+            keywords: topicData.keywords ? (Array.isArray(topicData.keywords) ? topicData.keywords : (typeof topicData.keywords === 'string' ? JSON.parse(topicData.keywords) : [])) : [],
+            createdAt: topicData.createdAt,
+            updatedAt: topicData.updatedAt,
+            searchCount: topicData.searchCount || 0,
+          };
+        } else {
+          console.log(`[getTopicById] topicsテーブルにデータが見つかりませんでした（topicId検索）: topicId=${topicId}。フォールバック処理に進みます。`);
+        }
+      } catch (error) {
+        console.warn(`[getTopicById] topicsテーブルからの取得エラー（topicId検索、続行）:`, error);
+      }
+    }
+    
+    // topicsテーブルにない場合、議事録または制度のJSONからパースして取得（フォールバック）
     if (!parentId) {
       console.warn(`[getTopicById] meetingNoteIdまたはregulationIdが必要です: topicId=${topicId}`);
       return null;
     }
     
-    // Graphvizのトピックの場合は、topicsテーブルから直接取得
-    if (meetingNoteId && meetingNoteId.startsWith('graphviz_')) {
-      console.log(`[getTopicById] Graphvizトピックのため、topicsテーブルから直接取得: topicId=${topicId}, meetingNoteId=${meetingNoteId}`);
-      const { callTauriCommand } = await import('./localFirebase');
-      const embeddingId = `${meetingNoteId}-topic-${topicId}`;
-      
-      try {
-        const topicDoc = await callTauriCommand('doc_get', {
-          collectionName: 'topics',
-          docId: embeddingId,
-        }) as any;
-        
-        if (topicDoc?.exists && topicDoc?.data) {
-          const topicData = topicDoc.data;
-          return {
-            topicId: topicData.topicId || topicId,
-            meetingNoteId: topicData.meetingNoteId || meetingNoteId,
-            regulationId: topicData.regulationId,
-            title: topicData.title || '',
-            content: topicData.content || '',
-            summary: topicData.description || topicData.contentSummary,
-            semanticCategory: topicData.semanticCategory,
-            importance: topicData.importance,
-            organizationId: topicData.organizationId || '',
-            keywords: topicData.keywords ? (Array.isArray(topicData.keywords) ? topicData.keywords : JSON.parse(topicData.keywords)) : [],
-            createdAt: topicData.createdAt,
-            updatedAt: topicData.updatedAt,
-            searchCount: topicData.searchCount || 0,
-          };
-        }
-      } catch (error) {
-        console.warn(`[getTopicById] Graphvizトピックの取得エラー:`, error);
-      }
-      
-      return null;
-    }
+    console.log(`[getTopicById] フォールバック処理: 議事録/制度のJSONからパースして取得します。topicId=${topicId}, meetingNoteId=${meetingNoteId}, regulationId=${regulationId}`);
     
     // 議事録または制度からトピック情報を取得
     if (meetingNoteId) {

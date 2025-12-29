@@ -165,6 +165,7 @@ export function CategoryManagementTab({
         <VcSection
           vcs={vcs}
           setVcs={setVcs}
+          startups={startups}
           vcManagement={vcManagement}
         />
       )}
@@ -173,6 +174,7 @@ export function CategoryManagementTab({
         <DepartmentSection
           departments={departments}
           setDepartments={setDepartments}
+          startups={startups}
           departmentManagement={departmentManagement}
         />
       )}
@@ -181,6 +183,7 @@ export function CategoryManagementTab({
         <StatusSection
           statuses={statuses}
           setStatuses={setStatuses}
+          startups={startups}
           statusManagement={statusManagement}
         />
       )}
@@ -189,6 +192,7 @@ export function CategoryManagementTab({
         <EngagementLevelSection
           engagementLevels={engagementLevels}
           setEngagementLevels={setEngagementLevels}
+          startups={startups}
           engagementLevelManagement={engagementLevelManagement}
         />
       )}
@@ -197,6 +201,7 @@ export function CategoryManagementTab({
         <BizDevPhaseSection
           bizDevPhases={bizDevPhases}
           setBizDevPhases={setBizDevPhases}
+          startups={startups}
           bizDevPhaseManagement={bizDevPhaseManagement}
         />
       )}

@@ -1609,6 +1609,35 @@ pub async fn save_topic_embedding(
     embedding_metadata.insert("topicId".to_string(), Value::String(topic_id.clone()));
     embedding_metadata.insert("organizationId".to_string(), Value::String(organization_id.clone()));
     
+    // タイトルが空でないことを確認
+    let title_value = embedding_metadata.get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if title_value.is_empty() {
+        eprintln!("[save_topic_embedding] ⚠️ 警告: タイトルが空です。topicId={}, organizationId={}", topic_id, organization_id);
+        // contentSummaryからタイトルを推測
+        if let Some(content_summary) = embedding_metadata.get("contentSummary")
+            .and_then(|v| v.as_str()) {
+            if !content_summary.is_empty() {
+                let fallback_title = if content_summary.len() > 50 {
+                    format!("{}...", &content_summary[..50])
+                } else {
+                    content_summary.to_string()
+                };
+                embedding_metadata.insert("title".to_string(), Value::String(fallback_title.clone()));
+                eprintln!("[save_topic_embedding] contentSummaryからタイトルを生成: {}", fallback_title);
+            } else {
+                let fallback_title = format!("トピック {}", topic_id);
+                embedding_metadata.insert("title".to_string(), Value::String(fallback_title.clone()));
+                eprintln!("[save_topic_embedding] topicIdをタイトルとして使用: {}", fallback_title);
+            }
+        } else {
+            let fallback_title = format!("トピック {}", topic_id);
+            embedding_metadata.insert("title".to_string(), Value::String(fallback_title.clone()));
+            eprintln!("[save_topic_embedding] topicIdをタイトルとして使用: {}", fallback_title);
+        }
+    }
+    
     // meetingNoteIdまたはregulationIdを設定
     if let Some(meeting_note_id) = meeting_note_id {
         embedding_metadata.insert("meetingNoteId".to_string(), Value::String(meeting_note_id));

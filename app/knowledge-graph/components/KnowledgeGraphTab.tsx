@@ -71,6 +71,7 @@ export function KnowledgeGraphTab() {
   // フィルター状態
   const [selectedOrganizationIds, setSelectedOrganizationIds] = useState<Set<string>>(new Set());
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set());
+  const [dateFilterType, setDateFilterType] = useState<'none' | 'created' | 'updated' | 'registered'>('none');
   const [dateRangeStart, setDateRangeStart] = useState<string>('');
   const [dateRangeEnd, setDateRangeEnd] = useState<string>('');
   const [selectedImportance, setSelectedImportance] = useState<Set<'high' | 'medium' | 'low'>>(new Set());
@@ -172,6 +173,7 @@ export function KnowledgeGraphTab() {
     topicSearchQuery,
     selectedOrganizationIds,
     selectedMemberIds,
+    dateFilterType,
     dateRangeStart,
     dateRangeEnd,
     selectedImportance,
@@ -211,6 +213,8 @@ export function KnowledgeGraphTab() {
           setSelectedOrganizationIds={setSelectedOrganizationIds}
           selectedMemberIds={selectedMemberIds}
           setSelectedMemberIds={setSelectedMemberIds}
+          dateFilterType={dateFilterType}
+          setDateFilterType={setDateFilterType}
           dateRangeStart={dateRangeStart}
           setDateRangeStart={setDateRangeStart}
           dateRangeEnd={dateRangeEnd}

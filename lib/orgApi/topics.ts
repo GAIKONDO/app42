@@ -378,6 +378,9 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
     
     const allTopics: TopicInfo[] = [];
     
+    // topicsテーブルから取得したトピックのマップを作成（createdAt/updatedAt/topicDate補完用）
+    const topicsFromDbMap = new Map<string, { createdAt?: string; updatedAt?: string; topicDate?: string }>();
+    
     try {
       const allTopicsResult = await callTauriCommand('query_get', {
         collectionName: 'topics',
@@ -385,6 +388,21 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
       });
       
       const allTopicsFromDb = (allTopicsResult || []) as Array<{ id: string; data: any }>;
+      
+      // すべてのトピックをマップに登録（createdAt/updatedAt/topicDate補完用）
+      for (const item of allTopicsFromDb) {
+        const topicData = item.data;
+        const topicId = topicData.topicId;
+        const meetingNoteId = topicData.meetingNoteId;
+        if (topicId && meetingNoteId) {
+          const key = `${meetingNoteId}-topic-${topicId}`;
+          topicsFromDbMap.set(key, {
+            createdAt: topicData.createdAt,
+            updatedAt: topicData.updatedAt,
+            topicDate: topicData.topicDate,
+          });
+        }
+      }
       
       const graphvizTopics = allTopicsFromDb.filter(item => {
         const meetingNoteId = item.data?.meetingNoteId || '';
@@ -421,8 +439,10 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
           itemId: '',
           organizationId: topicData.organizationId || '',
           companyId: topicData.companyId || undefined,
-          topicDate: undefined,
+          topicDate: topicData.topicDate || undefined,
           isAllPeriods: true,
+          createdAt: topicData.createdAt,
+          updatedAt: topicData.updatedAt,
           semanticCategory: topicData.semanticCategory as TopicInfo['semanticCategory'],
           importance: topicData.importance as TopicInfo['importance'],
           keywords,
@@ -484,6 +504,13 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
               
               const isAllPeriods = topic.isAllPeriods === true;
               
+              // topicsテーブルからcreatedAt/updatedAt/topicDateを補完
+              const topicKey = `${note.id}-topic-${topic.id}`;
+              const dbTopicInfo = topicsFromDbMap.get(topicKey);
+              
+              // topicDateはtopicsテーブルから取得したものを優先、なければ議事録から取得したものを使用
+              const finalTopicDate = dbTopicInfo?.topicDate || topicDate;
+              
               allTopics.push({
                 id: topic.id,
                 title: topic.title,
@@ -493,8 +520,10 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
                 itemId: item.id,
                 organizationId: note.organizationId,
                 companyId: (note as any).companyId || undefined,
-                topicDate: topicDate,
+                topicDate: finalTopicDate,
                 isAllPeriods: isAllPeriods,
+                createdAt: dbTopicInfo?.createdAt,
+                updatedAt: dbTopicInfo?.updatedAt,
                 semanticCategory: topic.semanticCategory as TopicInfo['semanticCategory'],
                 importance: topic.importance as TopicInfo['importance'],
                 keywords,
@@ -562,6 +591,13 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
               
               const isAllPeriods = topic.isAllPeriods === true;
               
+              // topicsテーブルからcreatedAt/updatedAt/topicDateを補完
+              const topicKey = `${regulation.id}-topic-${topic.id}`;
+              const dbTopicInfo = topicsFromDbMap.get(topicKey);
+              
+              // topicDateはtopicsテーブルから取得したものを優先、なければ制度から取得したものを使用
+              const finalTopicDate = dbTopicInfo?.topicDate || topicDate;
+              
               allTopics.push({
                 id: topic.id,
                 title: topic.title,
@@ -570,8 +606,10 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
                 meetingNoteTitle: regulation.title,
                 itemId: item.id,
                 organizationId: regulation.organizationId,
-                topicDate: topicDate,
+                topicDate: finalTopicDate,
                 isAllPeriods: isAllPeriods,
+                createdAt: dbTopicInfo?.createdAt,
+                updatedAt: dbTopicInfo?.updatedAt,
                 semanticCategory: topic.semanticCategory as TopicInfo['semanticCategory'],
                 importance: topic.importance as TopicInfo['importance'],
                 keywords,

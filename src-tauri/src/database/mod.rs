@@ -1440,6 +1440,7 @@ impl Database {
                 lastChromaSyncAttempt TEXT,
                 lastSearchDate TEXT,
                 searchCount INTEGER DEFAULT 0,
+                topicDate TEXT,
                 createdAt TEXT NOT NULL,
                 updatedAt TEXT NOT NULL,
                 FOREIGN KEY (meetingNoteId) REFERENCES meetingNotes(id),
@@ -1507,6 +1508,7 @@ impl Database {
                             chromaSynced INTEGER DEFAULT 0,
                             chromaSyncError TEXT,
                             lastChromaSyncAttempt TEXT,
+                            topicDate TEXT,
                             createdAt TEXT NOT NULL,
                             updatedAt TEXT NOT NULL,
                             FOREIGN KEY (meetingNoteId) REFERENCES meetingNotes(id),
@@ -1558,6 +1560,16 @@ impl Database {
                     init_log!("✅ imagePathsカラムを追加しました");
                 } else {
                     init_log!("ℹ️  topicsテーブルのimagePathsカラムは既に存在します");
+                }
+                
+                // topicDateカラムの追加（非破壊的マイグレーション）
+                let topic_date_exists = columns.contains(&"topicDate".to_string());
+                if !topic_date_exists {
+                    init_log!("📝 topicsテーブルにtopicDateカラムを追加します");
+                    conn.execute("ALTER TABLE topics ADD COLUMN topicDate TEXT", [])?;
+                    init_log!("✅ topicDateカラムを追加しました");
+                } else {
+                    init_log!("ℹ️  topicsテーブルのtopicDateカラムは既に存在します");
                 }
             }
             Ok(())

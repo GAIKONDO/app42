@@ -1,4 +1,4 @@
-type ViewMode = 'diagram' | 'bubble';
+type ViewMode = 'diagram' | 'bubble' | 'bar';
 
 interface ViewModeSelectorProps {
   viewMode: ViewMode;
@@ -69,6 +69,37 @@ export default function ViewModeSelector({ viewMode, onViewModeChange }: ViewMod
         }}
       >
         バブルチャート
+      </button>
+      <button
+        type="button"
+        onClick={() => onViewModeChange('bar')}
+        style={{
+          padding: '8px 16px',
+          fontSize: '14px',
+          fontWeight: viewMode === 'bar' ? '600' : '400',
+          color: viewMode === 'bar' ? '#FFFFFF' : '#1A1A1A',
+          backgroundColor: viewMode === 'bar' ? '#4262FF' : '#FFFFFF',
+          border: '1.5px solid',
+          borderColor: viewMode === 'bar' ? '#4262FF' : '#E0E0E0',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          transition: 'all 150ms cubic-bezier(0.4, 0, 0.2, 1)',
+          fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        }}
+        onMouseEnter={(e) => {
+          if (viewMode !== 'bar') {
+            e.currentTarget.style.borderColor = '#C4C4C4';
+            e.currentTarget.style.backgroundColor = '#FAFAFA';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (viewMode !== 'bar') {
+            e.currentTarget.style.borderColor = '#E0E0E0';
+            e.currentTarget.style.backgroundColor = '#FFFFFF';
+          }
+        }}
+      >
+        棒グラフ
       </button>
     </div>
   );

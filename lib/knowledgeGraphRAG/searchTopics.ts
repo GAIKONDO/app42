@@ -187,11 +187,38 @@ export async function searchTopics(
     }
 
     // トピックIDとmeetingNoteId/regulationIdのペアを抽出
-    const topicIdsWithParentIds = combinedResults.map(r => ({
-      topicId: r.id,
-      meetingNoteId: r.meetingNoteId,
-      regulationId: r.regulationId,
-    }));
+    // r.idが {meetingNoteId}-topic-{topicId} 形式の場合、パースする
+    const topicIdsWithParentIds = combinedResults.map(r => {
+      let topicId = r.id;
+      let meetingNoteId = r.meetingNoteId;
+      let regulationId = r.regulationId;
+      
+      // topicIdが {parentId}-topic-{actualTopicId} 形式の場合、パースする
+      const topicIdMatch = r.id.match(/^(.+?)-topic-(.+)$/);
+      if (topicIdMatch) {
+        const parentId = topicIdMatch[1];
+        topicId = topicIdMatch[2];
+        
+        // parentIdがmeetingNoteIdかregulationIdかを判定
+        if (!meetingNoteId && !regulationId) {
+          // Graphvizの場合は meetingNoteId
+          if (parentId.startsWith('graphviz_')) {
+            meetingNoteId = parentId;
+          } else if (parentId.startsWith('meeting_')) {
+            meetingNoteId = parentId;
+          } else {
+            // それ以外は regulationId として扱う
+            regulationId = parentId;
+          }
+        }
+      }
+      
+      return {
+        topicId,
+        meetingNoteId,
+        regulationId,
+      };
+    });
 
     // バッチでトピックの詳細情報を取得（N+1問題を回避）
     const topics = await getTopicsByIds(topicIdsWithParentIds);
@@ -210,30 +237,32 @@ export async function searchTopics(
     });
     const topicFiles = await getTopicFilesByTopicIds(topicIdsForFiles);
     
-    // トピックIDをキーにしたファイルマップを作成
-    const filesMap = new Map<string, Array<{
-      id: string;
-      filePath: string;
-      fileName: string;
-      mimeType?: string;
-      description?: string;
-      detailedDescription?: string;
-      fileSize?: number;
-    }>>();
-    for (const file of topicFiles) {
-      if (!filesMap.has(file.topicId)) {
-        filesMap.set(file.topicId, []);
+      // トピックIDをキーにしたファイルマップを作成
+      // キーは {parentId}-topic-{topicId} 形式
+      const filesMap = new Map<string, Array<{
+        id: string;
+        filePath: string;
+        fileName: string;
+        mimeType?: string;
+        description?: string;
+        detailedDescription?: string;
+        fileSize?: number;
+      }>>();
+      for (const file of topicFiles) {
+        // file.topicIdは既に {parentId}-topic-{topicId} 形式
+        if (!filesMap.has(file.topicId)) {
+          filesMap.set(file.topicId, []);
+        }
+        filesMap.get(file.topicId)!.push({
+          id: file.id,
+          filePath: file.filePath,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+          description: file.description,
+          detailedDescription: file.detailedDescription,
+          fileSize: file.fileSize,
+        });
       }
-      filesMap.get(file.topicId)!.push({
-        id: file.id,
-        filePath: file.filePath,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-        description: file.description,
-        detailedDescription: file.detailedDescription,
-        fileSize: file.fileSize,
-      });
-    }
     
     console.log(`[searchTopics] 取得したファイル数: ${topicFiles.length}件 (トピック数: ${topicIdsForFiles.length})`);
     console.log(`[searchTopics] filesMapの内容:`, {
@@ -249,22 +278,79 @@ export async function searchTopics(
     // 結果を構築
     const results: KnowledgeGraphSearchResult[] = [];
 
-    for (const { id: topicId, similarity, bm25Score, meetingNoteId, regulationId, title, contentSummary, organizationId: chromaOrgId } of combinedResults) {
-      const parentId = meetingNoteId || regulationId || '';
-      let topic = topicMap.get(`${topicId}-${parentId}`);
+    for (const { id: topicId, similarity, bm25Score, meetingNoteId: chromaMeetingNoteId, regulationId: chromaRegulationId, title, contentSummary, organizationId: chromaOrgId } of combinedResults) {
+      // topicIdからmeetingNoteIdとregulationIdを抽出
+      // ChromaDBのID形式: {meetingNoteId}-topic-{topicId} または {regulationId}-topic-{topicId}
+      let extractedMeetingNoteId = chromaMeetingNoteId;
+      let extractedRegulationId = chromaRegulationId;
+      let actualTopicId = topicId;
+      
+      // topicIdが {parentId}-topic-{actualTopicId} 形式の場合、パースする
+      const topicIdMatch = topicId.match(/^(.+?)-topic-(.+)$/);
+      if (topicIdMatch) {
+        const parentId = topicIdMatch[1];
+        actualTopicId = topicIdMatch[2];
+        
+        // parentIdがmeetingNoteIdかregulationIdかを判定
+        if (!extractedMeetingNoteId && !extractedRegulationId) {
+          // Graphvizの場合は meetingNoteId
+          if (parentId.startsWith('graphviz_')) {
+            extractedMeetingNoteId = parentId;
+          } else if (parentId.startsWith('meeting_')) {
+            extractedMeetingNoteId = parentId;
+          } else {
+            // それ以外は regulationId として扱う
+            extractedRegulationId = parentId;
+          }
+        }
+      }
+      
+      const parentId = extractedMeetingNoteId || extractedRegulationId || '';
+      let topic = topicMap.get(`${actualTopicId}-${parentId}`);
       
       // トピックが見つからない場合、ChromaDBから取得した情報を直接使用
       if (!topic) {
-        const parentType = meetingNoteId ? '会議メモ' : '制度';
-        const parentIdStr = meetingNoteId || regulationId || '不明';
-        console.warn(`[searchTopics] トピックID ${topicId} (${parentType}ID: ${parentIdStr}) の詳細情報が見つかりませんでした。ChromaDBの情報を使用します。`);
+        const parentType = extractedMeetingNoteId ? '会議メモ' : '制度';
+        const parentIdStr = extractedMeetingNoteId || extractedRegulationId || '不明';
+        console.warn(`[searchTopics] トピックID ${actualTopicId} (${parentType}ID: ${parentIdStr}) の詳細情報が見つかりませんでした。ChromaDBの情報を使用します。`);
+        
+        // titleが空の場合、データベースから再取得を試みる
+        let finalTitle = title;
+        if (!finalTitle || finalTitle.trim() === '') {
+          try {
+            const { getTopicById } = await import('../topicApi');
+            const retryTopic = await getTopicById(actualTopicId, extractedMeetingNoteId, extractedRegulationId);
+            if (retryTopic && retryTopic.title && retryTopic.title.trim() !== '') {
+              finalTitle = retryTopic.title;
+              console.log(`[searchTopics] データベースから再取得したタイトル: ${finalTitle}`);
+            }
+          } catch (retryError) {
+            console.warn(`[searchTopics] タイトル再取得エラー:`, retryError);
+          }
+        }
+        
+        // それでもタイトルが空の場合、contentSummaryから推測するか、topicIdを使用
+        if (!finalTitle || finalTitle.trim() === '') {
+          if (contentSummary && contentSummary.trim() !== '') {
+            // contentSummaryの最初の50文字をタイトルとして使用
+            finalTitle = contentSummary.substring(0, 50).trim();
+            if (contentSummary.length > 50) {
+              finalTitle += '...';
+            }
+            console.log(`[searchTopics] contentSummaryからタイトルを生成: ${finalTitle}`);
+          } else {
+            // 最後の手段としてtopicIdを使用
+            finalTitle = `トピック ${actualTopicId}`;
+            console.log(`[searchTopics] topicIdをタイトルとして使用: ${finalTitle}`);
+          }
+        }
         
         // ChromaDBから取得した情報から最小限のTopicSearchInfoを作成
         topic = {
-          topicId: topicId,
-          meetingNoteId: meetingNoteId,
-          regulationId: regulationId,
-          title: title || 'タイトル不明',
+          topicId: actualTopicId,
+          meetingNoteId: extractedMeetingNoteId,
+          regulationId: extractedRegulationId,
+          title: finalTitle,
           content: contentSummary || '',
           summary: contentSummary,
           semanticCategory: undefined,
@@ -278,6 +364,12 @@ export async function searchTopics(
       } else if (!topic.organizationId && chromaOrgId) {
         // トピックが見つかったがorganizationIdが空の場合、ChromaDBから取得した値を設定
         topic.organizationId = chromaOrgId;
+      }
+      
+      // トピックが見つかったがタイトルが空の場合、ChromaDBから取得したタイトルを使用
+      if (topic && (!topic.title || topic.title.trim() === '') && title && title.trim() !== '') {
+        topic.title = title;
+        console.log(`[searchTopics] ChromaDBからタイトルを補完: ${title}`);
       }
 
       // フィルタリング
@@ -315,8 +407,9 @@ export async function searchTopics(
       const normalizedSimilarity = similarity > 0 ? normalizeSimilarity(similarity) : 0;
       
       console.log('[searchTopics] 類似度処理:', {
-        topicId,
-        meetingNoteId,
+        topicId: actualTopicId,
+        meetingNoteId: extractedMeetingNoteId,
+        regulationId: extractedRegulationId,
         rawSimilarity: similarity,
         normalizedSimilarity,
         bm25Score,
@@ -362,8 +455,9 @@ export async function searchTopics(
       const score = baseScore;
 
       console.log('[searchTopics] スコア計算結果:', {
-        topicId,
-        meetingNoteId,
+        topicId: actualTopicId,
+        meetingNoteId: extractedMeetingNoteId,
+        regulationId: extractedRegulationId,
         normalizedSimilarity,
         score,
         scoreType: typeof score,
@@ -372,12 +466,13 @@ export async function searchTopics(
       });
 
       // このトピックに紐づくファイル情報を取得
-      const topicIdForFiles = `${parentId}-topic-${topicId}`;
+      // topicIdForFilesは {parentId}-topic-{actualTopicId} 形式
+      const topicIdForFiles = parentId ? `${parentId}-topic-${actualTopicId}` : `-topic-${actualTopicId}`;
       const files = filesMap.get(topicIdForFiles) || [];
       
-      const parentType = meetingNoteId ? 'meetingNoteId' : 'regulationId';
-      const parentIdStr = meetingNoteId || regulationId || '不明';
-      console.log(`[searchTopics] トピック ${topicId} (${parentType}: ${parentIdStr}) のファイル情報:`, {
+      const parentType = extractedMeetingNoteId ? 'meetingNoteId' : 'regulationId';
+      const parentIdStr = extractedMeetingNoteId || extractedRegulationId || '不明';
+      console.log(`[searchTopics] トピック ${actualTopicId} (${parentType}: ${parentIdStr}) のファイル情報:`, {
         topicIdForFiles,
         filesCount: files.length,
         filesMapHasKey: filesMap.has(topicIdForFiles),
@@ -386,19 +481,19 @@ export async function searchTopics(
 
       results.push({
         type: 'topic',
-        id: topicId, // トピックのIDとしてtopicIdを使用
+        id: actualTopicId, // トピックのIDとしてactualTopicIdを使用
         score: typeof score === 'number' && !isNaN(score) ? score : 0,
         similarity: normalizedSimilarity,
-        topicId: topicId,
-        meetingNoteId: meetingNoteId,
+        topicId: actualTopicId,
+        meetingNoteId: extractedMeetingNoteId,
         topic: {
           topicId: topic.topicId,
           title: topic.title || title || '',
           contentSummary: topic.summary || contentSummary || topic.content?.substring(0, 200) || '',
           semanticCategory: topic.semanticCategory,
           keywords: topic.keywords,
-          meetingNoteId: topic.meetingNoteId,
-          regulationId: topic.regulationId,
+          meetingNoteId: topic.meetingNoteId || extractedMeetingNoteId,
+          regulationId: topic.regulationId || extractedRegulationId,
           organizationId: topic.organizationId,
           files: files.length > 0 ? files.map(f => ({
             id: f.id,

@@ -1,7 +1,7 @@
 export interface RelationshipNode {
   id: string;
   label: string;
-  type: 'theme' | 'organization' | 'initiative' | 'topic' | 'company';
+  type: 'theme' | 'organization' | 'initiative' | 'topic' | 'company' | 'category' | 'startup';
   data?: any;
   x?: number;
   y?: number;

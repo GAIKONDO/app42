@@ -241,6 +241,9 @@ impl WriteWorker {
             .and_then(|v| serde_json::to_string(v).ok())
             .unwrap_or_else(|| "[]".to_string());
         
+        // topicDateを取得（登録日）
+        let topic_date = payload.get("topicDate").and_then(|v| v.as_str());
+        
         // companyIdを取得（事業会社の議事録の場合）
         let company_id = payload.get("companyId").and_then(|v| v.as_str());
         
@@ -248,8 +251,8 @@ impl WriteWorker {
         let org_id = if company_id.is_some() { None } else { Some(organization_id) };
         
         tx.execute(
-            r#"INSERT INTO topics (id, topicId, meetingNoteId, organizationId, companyId, title, description, content, semanticCategory, keywords, tags, chromaSynced, createdAt, updatedAt)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, datetime('now'), datetime('now'))
+            r#"INSERT INTO topics (id, topicId, meetingNoteId, organizationId, companyId, title, description, content, semanticCategory, keywords, tags, topicDate, chromaSynced, createdAt, updatedAt)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, datetime('now'), datetime('now'))
                ON CONFLICT(id) DO UPDATE SET
                    title = excluded.title,
                    description = excluded.description,
@@ -257,11 +260,12 @@ impl WriteWorker {
                    semanticCategory = excluded.semanticCategory,
                    keywords = excluded.keywords,
                    tags = excluded.tags,
+                   topicDate = excluded.topicDate,
                    organizationId = excluded.organizationId,
                    companyId = excluded.companyId,
                    chromaSynced = 0,
                    updatedAt = datetime('now')"#,
-            params![topic_id, topic_id, meeting_note_id, org_id, company_id, title, description, content, semantic_category, keywords_json, tags_json],
+            params![topic_id, topic_id, meeting_note_id, org_id, company_id, title, description, content, semantic_category, keywords_json, tags_json, topic_date],
         )?;
         
         tx.commit()?;

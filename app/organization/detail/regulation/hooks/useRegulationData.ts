@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getRegulationById, saveRegulation, getOrgTreeFromDb, generateUniqueId } from '@/lib/orgApi';
+import { getRegulationById, saveRegulation, getOrgTreeFromDb, getAllOrganizationsFromTree, generateUniqueId } from '@/lib/orgApi';
 import type { Regulation, OrgNodeData } from '@/lib/orgApi';
 import type { TabType, MonthContent, RegulationData } from '../types';
 import { MONTHS, SUMMARY_TABS } from '../constants';
@@ -23,6 +23,7 @@ export function useRegulationData({
 }: UseRegulationDataProps) {
   const [regulation, setRegulation] = useState<Regulation | null>(null);
   const [orgData, setOrgData] = useState<OrgNodeData | null>(null);
+  const [allOrganizations, setAllOrganizations] = useState<Array<{ id: string; name: string; title?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [monthContents, setMonthContents] = useState<RegulationData>({});
@@ -168,8 +169,9 @@ export function useRegulationData({
         }
         
         // 組織データを取得（organizationIdが指定されている場合のみ）
+        let orgTree: OrgNodeData | null = null;
         if (organizationId) {
-          const orgTree = await getOrgTreeFromDb();
+          orgTree = await getOrgTreeFromDb();
           if (orgTree) {
             const findOrganization = (node: OrgNodeData): OrgNodeData | null => {
               if (node.id === organizationId) {
@@ -189,6 +191,25 @@ export function useRegulationData({
         } else {
           // 組織データを設定
           setOrgData(null);
+        }
+        
+        // すべての組織を取得（組織選択用）
+        if (orgTree) {
+          const allOrgs = getAllOrganizationsFromTree(orgTree);
+          setAllOrganizations(allOrgs);
+        } else {
+          try {
+            const tree = await getOrgTreeFromDb();
+            if (tree) {
+              const allOrgs = getAllOrganizationsFromTree(tree);
+              setAllOrganizations(allOrgs);
+            } else {
+              setAllOrganizations([]);
+            }
+          } catch (treeError) {
+            console.warn('⚠️ [useRegulationData] 全組織取得エラー（無視します）:', treeError);
+            setAllOrganizations([]);
+          }
         }
         
         setError(null);
@@ -1010,6 +1031,7 @@ export function useRegulationData({
   return {
     regulation,
     orgData,
+    allOrganizations,
     loading,
     error,
     monthContents,

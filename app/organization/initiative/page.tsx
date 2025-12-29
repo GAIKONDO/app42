@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
 import type { FocusInitiative } from '@/lib/orgApi';
 import MermaidLoader from '@/components/MermaidLoader';
-import { generateUniqueId } from '@/lib/orgApi';
+import { generateUniqueId, saveFocusInitiative } from '@/lib/orgApi';
 import { InitiativeTabBar } from './components/InitiativeTabBar';
 import AIGenerationModal from './components/modals/AIGenerationModal';
 import { useInitiativeData } from './hooks/useInitiativeData';
@@ -23,6 +23,7 @@ import type { InitiativeTab } from './components/InitiativeTabBar';
 
 function FocusInitiativeDetailPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const organizationId = searchParams?.get('organizationId') as string;
   const initiativeId = searchParams?.get('initiativeId') as string;
   
@@ -88,6 +89,36 @@ function FocusInitiativeDetailPageContent() {
   const [manualAssigneeInput, setManualAssigneeInput] = useState('');
   const assigneeInputRef = useRef<HTMLInputElement>(null);
   const assigneeDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 組織変更ハンドラー
+  const handleOrganizationChange = async (newOrganizationId: string) => {
+    if (!initiative || !initiativeId) {
+      console.error('❌ [ページ] 注力施策データがありません');
+      return;
+    }
+
+    try {
+      console.log('🔄 [ページ] 組織変更を開始:', {
+        initiativeId,
+        currentOrganizationId: organizationId,
+        newOrganizationId,
+      });
+
+      // 注力施策のorganizationIdを更新
+      await saveFocusInitiative({
+        ...initiative,
+        organizationId: newOrganizationId,
+      });
+
+      console.log('✅ [ページ] 組織変更が完了しました。ページを遷移します。');
+
+      // 新しい組織の注力施策ページに遷移
+      router.push(`/organization/initiative?organizationId=${newOrganizationId}&initiativeId=${initiativeId}`);
+    } catch (error: any) {
+      console.error('❌ [ページ] 組織変更エラー:', error);
+      throw error;
+    }
+  };
   
   // initialLocalStateが更新されたらローカル状態を更新
   useEffect(() => {
@@ -222,9 +253,11 @@ function FocusInitiativeDetailPageContent() {
           orgData={orgData}
           initiative={initiative}
           organizationId={organizationId}
+          allOrganizations={allOrganizations}
           savingStatus={savingStatus}
           onSave={handleManualSave}
           onDownloadJson={handleDownloadJson}
+          onOrganizationChange={handleOrganizationChange}
           activeTab={activeTab}
           isEditing={isEditing}
           setIsEditing={setIsEditing}

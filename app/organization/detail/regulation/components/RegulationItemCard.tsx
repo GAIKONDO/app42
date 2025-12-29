@@ -690,6 +690,11 @@ export default function RegulationItemCard({
                     
                     // Topicsテーブルに各トピックを保存
                     for (const topic of newTopics) {
+                      // topicDateを取得（mentionedDateまたはitem.dateから）
+                      const topicDate = (topic as any).mentionedDate !== undefined 
+                        ? (topic as any).mentionedDate 
+                        : (item?.date || undefined);
+                      
                       saveTopicEmbeddingAsync(
                         topic.id,
                         undefined, // meetingNoteId
@@ -702,7 +707,8 @@ export default function RegulationItemCard({
                           importance: topic.importance,
                           summary: topic.summary,
                         },
-                        regulationId // regulationId
+                        regulationId, // regulationId
+                        topicDate
                       ).catch((error: any) => {
                         console.warn(`トピック ${topic.id} のTopicsテーブルへの保存に失敗しました:`, error);
                       });
@@ -916,6 +922,11 @@ export default function RegulationItemCard({
 
                           // Topicsテーブルに保存
                           try {
+                            // topicDateを取得（mentionedDateまたはitem.dateから）
+                            const topicDate = (topic as any).mentionedDate !== undefined 
+                              ? (topic as any).mentionedDate 
+                              : (item?.date || undefined);
+                            
                             await saveTopicEmbeddingAsync(
                               topic.id,
                               undefined, // meetingNoteId
@@ -928,7 +939,8 @@ export default function RegulationItemCard({
                                 importance: metadata.importance,
                                 summary: metadata.summary,
                               },
-                              regulationId // regulationId
+                              regulationId, // regulationId
+                              topicDate
                             );
                             console.log(`✅ [RegulationItemCard] Topicsテーブルへの保存成功: ${topic.id}`);
                           } catch (saveError: any) {

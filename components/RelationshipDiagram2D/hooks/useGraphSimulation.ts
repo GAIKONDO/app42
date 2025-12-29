@@ -328,6 +328,8 @@ export function useGraphSimulation({
         if (d.data?.isParent) return '#808080'; // 灰色
         if (d.type === 'theme') return DESIGN.colors.theme.fill;
         if (d.type === 'organization') return DESIGN.colors.organization.fill;
+        if (d.type === 'category') return DESIGN.colors.category.fill;
+        if (d.type === 'startup') return DESIGN.colors.startup.fill;
         if (d.type === 'initiative') return DESIGN.colors.initiative.fill;
         if (d.type === 'topic') return DESIGN.colors.topic.fill;
         return '#CCCCCC';
@@ -337,6 +339,8 @@ export function useGraphSimulation({
         if (d.data?.isParent) return '#666666'; // 濃い灰色
         if (d.type === 'theme') return DESIGN.colors.theme.stroke;
         if (d.type === 'organization') return DESIGN.colors.organization.stroke;
+        if (d.type === 'category') return DESIGN.colors.category.stroke;
+        if (d.type === 'startup') return DESIGN.colors.startup.stroke;
         if (d.type === 'initiative') return DESIGN.colors.initiative.stroke;
         if (d.type === 'topic') return DESIGN.colors.topic.stroke;
         return '#999999';
@@ -355,6 +359,8 @@ export function useGraphSimulation({
         if (d.data?.isParent) return '#FFFFFF'; // 白
         if (d.type === 'theme') return DESIGN.colors.theme.text;
         if (d.type === 'organization') return DESIGN.colors.organization.text;
+        if (d.type === 'category') return DESIGN.colors.category.text;
+        if (d.type === 'startup') return DESIGN.colors.startup.text;
         if (d.type === 'initiative') return DESIGN.colors.initiative.text;
         if (d.type === 'topic') return DESIGN.colors.topic.text;
         return '#000000';
@@ -362,6 +368,8 @@ export function useGraphSimulation({
       .attr('font-size', (d) => {
         if (d.type === 'theme') return DESIGN.typography.theme.fontSize;
         if (d.type === 'organization') return DESIGN.typography.organization.fontSize;
+        if (d.type === 'category') return DESIGN.typography.category.fontSize;
+        if (d.type === 'startup') return DESIGN.typography.startup.fontSize;
         if (d.type === 'initiative') return DESIGN.typography.initiative.fontSize;
         if (d.type === 'topic') return DESIGN.typography.topic.fontSize;
         return '14px';
@@ -369,6 +377,8 @@ export function useGraphSimulation({
       .attr('font-weight', (d) => {
         if (d.type === 'theme') return DESIGN.typography.theme.fontWeight;
         if (d.type === 'organization') return DESIGN.typography.organization.fontWeight;
+        if (d.type === 'category') return DESIGN.typography.category.fontWeight;
+        if (d.type === 'startup') return DESIGN.typography.startup.fontWeight;
         if (d.type === 'initiative') return DESIGN.typography.initiative.fontWeight;
         if (d.type === 'topic') return DESIGN.typography.topic.fontWeight;
         return '500';
@@ -533,6 +543,8 @@ export function useGraphSimulation({
         if (d.data?.isParent) circle.attr('fill', '#666666'); // 親ノードのホバー色（濃いグレー）
         else if (d.type === 'theme') circle.attr('fill', DESIGN.colors.theme.hover);
         else if (d.type === 'organization') circle.attr('fill', DESIGN.colors.organization.hover);
+        else if (d.type === 'category') circle.attr('fill', DESIGN.colors.category.hover);
+        else if (d.type === 'startup') circle.attr('fill', DESIGN.colors.startup.hover);
         else if (d.type === 'initiative') circle.attr('fill', DESIGN.colors.initiative.hover);
         else if (d.type === 'topic') circle.attr('fill', DESIGN.colors.topic.hover);
         nodeGroup
@@ -552,6 +564,8 @@ export function useGraphSimulation({
         if (d.data?.isParent) circle.attr('fill', '#808080'); // 親ノードの通常色（灰色）
         else if (d.type === 'theme') circle.attr('fill', DESIGN.colors.theme.fill);
         else if (d.type === 'organization') circle.attr('fill', DESIGN.colors.organization.fill);
+        else if (d.type === 'category') circle.attr('fill', DESIGN.colors.category.fill);
+        else if (d.type === 'startup') circle.attr('fill', DESIGN.colors.startup.fill);
         else if (d.type === 'initiative') circle.attr('fill', DESIGN.colors.initiative.fill);
         else if (d.type === 'topic') circle.attr('fill', DESIGN.colors.topic.fill);
         nodeGroup

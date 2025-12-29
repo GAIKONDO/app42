@@ -1016,6 +1016,9 @@ export interface Startup {
   themeId?: string; // 関連するテーマID（後方互換性のため残す）
   themeIds?: string[]; // 関連するテーマIDの配列（複数のテーマにリンク可能）
   topicIds?: string[]; // 関連する個別トピックIDの配列（複数のトピックにリンク可能）
+  categoryIds?: string[]; // 関連するカテゴリーIDの配列（複数選択可能）
+  relatedVCS?: string[]; // 関連VCの配列（複数選択可能）
+  responsibleDepartments?: string[]; // 主管事業部署の配列（複数選択可能）
   createdAt?: any;
   updatedAt?: any;
 }

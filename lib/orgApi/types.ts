@@ -251,6 +251,8 @@ export interface TopicInfo {
   companyId?: string; // 事業会社ID（事業会社の議事録の場合）
   topicDate?: string | null; // トピックの日時（isAllPeriodsがtrueの場合は無視される）
   isAllPeriods?: boolean; // 全期間に反映するかどうか（trueの場合は日付に関係なく全期間に表示）
+  createdAt?: string; // 作成日時（topicsテーブルから取得）
+  updatedAt?: string; // 更新日時（topicsテーブルから取得）
   // メタデータ
   semanticCategory?: TopicSemanticCategory;
   importance?: 'high' | 'medium' | 'low';

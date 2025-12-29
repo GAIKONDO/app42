@@ -84,10 +84,24 @@ const VegaChart = memo(function VegaChart({ spec, language = 'vega-lite', title,
               viewRef.current.addEventListener('click', (event: any, item: any) => {
                 try {
                   if (item && item.datum) {
-                    // クリックされたデータからテーマIDを取得
+                    // クリックされたデータからテーマIDまたはカテゴリーIDを取得
                     const themeId = item.datum.themeId;
+                    const categoryId = item.datum.categoryId;
+                    const category = item.datum.category;
+                    const subCategoryId = item.datum.subCategoryId;
+                    const subCategory = item.datum.subCategory;
+                    
                     if (themeId) {
-                      onSignal('clicked_theme', { themeId });
+                      onSignal('clicked_theme', { themeId, datum: item.datum });
+                      return;
+                    } else if (subCategoryId) {
+                      onSignal('clicked_theme', { subCategoryId, subCategory, categoryId, category, datum: item.datum });
+                      return;
+                    } else if (categoryId) {
+                      onSignal('clicked_theme', { categoryId, category, datum: item.datum });
+                      return;
+                    } else if (category) {
+                      onSignal('clicked_theme', { category, datum: item.datum });
                       return;
                     }
                   }
@@ -142,9 +156,21 @@ const VegaChart = memo(function VegaChart({ spec, language = 'vega-lite', title,
                           
                           findClosestItem(scene.items);
                           
-                          if (closestItem && closestItem.datum && closestItem.datum.themeId) {
-                            onSignal('clicked_theme', { themeId: closestItem.datum.themeId });
-                            return;
+                          if (closestItem && closestItem.datum) {
+                            const datum = closestItem.datum;
+                            if (datum.themeId) {
+                              onSignal('clicked_theme', { themeId: datum.themeId, datum });
+                              return;
+                            } else if (datum.subCategoryId) {
+                              onSignal('clicked_theme', { subCategoryId: datum.subCategoryId, subCategory: datum.subCategory, categoryId: datum.categoryId, category: datum.category, datum });
+                              return;
+                            } else if (datum.categoryId) {
+                              onSignal('clicked_theme', { categoryId: datum.categoryId, category: datum.category, datum });
+                              return;
+                            } else if (datum.category) {
+                              onSignal('clicked_theme', { category: datum.category, datum });
+                              return;
+                            }
                           }
                         }
                       } catch (sceneError) {
@@ -164,10 +190,25 @@ const VegaChart = memo(function VegaChart({ spec, language = 'vega-lite', title,
                           
                           if (clickedTheme !== undefined && clickedTheme !== null) {
                             const themeName = String(clickedTheme);
+                            // テーマまたはカテゴリーのデータを検索
                             const themeData = chartData.find((d: any) => d.theme === themeName);
-                            if (themeData && themeData.themeId) {
-                              onSignal('clicked_theme', { themeId: themeData.themeId });
-                              return;
+                            const categoryData = chartData.find((d: any) => d.category === themeName);
+                            const data = themeData || categoryData;
+                            
+                            if (data) {
+                              if (data.themeId) {
+                                onSignal('clicked_theme', { themeId: data.themeId, datum: data });
+                                return;
+                              } else if (data.subCategoryId) {
+                                onSignal('clicked_theme', { subCategoryId: data.subCategoryId, subCategory: data.subCategory, categoryId: data.categoryId, category: data.category, datum: data });
+                                return;
+                              } else if (data.categoryId) {
+                                onSignal('clicked_theme', { categoryId: data.categoryId, category: data.category, datum: data });
+                                return;
+                              } else if (data.category) {
+                                onSignal('clicked_theme', { category: data.category, datum: data });
+                                return;
+                              }
                             }
                           }
                         }
@@ -190,9 +231,19 @@ const VegaChart = memo(function VegaChart({ spec, language = 'vega-lite', title,
                         
                         if (clickedThemeIndex >= 0 && clickedThemeIndex < uniqueThemes.length) {
                           const clickedTheme = uniqueThemes[clickedThemeIndex];
+                          // テーマまたはカテゴリーのデータを検索
                           const themeData = chartData.find((d: any) => d.theme === clickedTheme);
-                          if (themeData && themeData.themeId) {
-                            onSignal('clicked_theme', { themeId: themeData.themeId });
+                          const categoryData = chartData.find((d: any) => d.category === clickedTheme);
+                          const data = themeData || categoryData;
+                          
+                          if (data) {
+                            if (data.themeId) {
+                              onSignal('clicked_theme', { themeId: data.themeId, datum: data });
+                            } else if (data.categoryId) {
+                              onSignal('clicked_theme', { categoryId: data.categoryId, category: data.category, datum: data });
+                            } else if (data.category) {
+                              onSignal('clicked_theme', { category: data.category, datum: data });
+                            }
                           }
                         }
                       }

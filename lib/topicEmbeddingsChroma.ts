@@ -29,6 +29,25 @@ export async function saveTopicEmbeddingToChroma(
     throw new Error('トピック埋め込みの保存はクライアント側でのみ実行可能です');
   }
 
+  // タイトルが空の場合の警告とフォールバック処理
+  if (!title || title.trim() === '') {
+    console.warn(`[saveTopicEmbeddingToChroma] ⚠️ タイトルが空です: topicId=${topicId}, meetingNoteId=${meetingNoteId}, regulationId=${regulationId}`);
+    console.warn(`[saveTopicEmbeddingToChroma] contentの最初の50文字: ${content?.substring(0, 50) || 'なし'}`);
+    
+    // contentからタイトルを推測（最初の50文字）
+    if (content && content.trim() !== '') {
+      title = content.substring(0, 50).trim();
+      if (content.length > 50) {
+        title += '...';
+      }
+      console.log(`[saveTopicEmbeddingToChroma] contentからタイトルを生成: ${title}`);
+    } else {
+      // 最後の手段としてtopicIdを使用
+      title = `トピック ${topicId}`;
+      console.log(`[saveTopicEmbeddingToChroma] topicIdをタイトルとして使用: ${title}`);
+    }
+  }
+
   try {
     const now = new Date().toISOString();
     const embeddingVersion = metadata ? '2.0' : '1.0';

@@ -6,17 +6,17 @@ import { devLog } from '../utils/devLog';
 export function useCategoryStartupDiagramData({
   categories,
   startups,
-  selectedCategoryId,
+  selectedCategoryIds,
 }: {
   categories: Category[];
   startups: Startup[];
-  selectedCategoryId?: string | null;
+  selectedCategoryIds?: string[];
 }) {
   const { nodes, links } = useMemo(() => {
     devLog('🔍 [カテゴリー-スタートアップ関係性図] useMemo実行:', {
       categoriesCount: categories.length,
       startupsCount: startups.length,
-      selectedCategoryId,
+      selectedCategoryIds,
     });
 
     if (categories.length === 0) {
@@ -31,18 +31,66 @@ export function useCategoryStartupDiagramData({
     let topLevelCategories = categories.filter(cat => !cat.parentCategoryId);
     
     // 選択されたカテゴリーがある場合、そのカテゴリーとその子孫のみを表示
-    if (selectedCategoryId) {
-      const selectedCategory = categories.find(cat => cat.id === selectedCategoryId);
-      if (selectedCategory) {
-        topLevelCategories = [selectedCategory];
+    if (selectedCategoryIds && selectedCategoryIds.length > 0) {
+      const selectedCategories = categories.filter(cat => selectedCategoryIds.includes(cat.id));
+      if (selectedCategories.length > 0) {
+        // 選択されたカテゴリーの親カテゴリーを取得（再帰的に）
+        const getTopLevelCategory = (category: Category): Category => {
+          if (!category.parentCategoryId) {
+            return category;
+          }
+          const parent = categories.find(c => c.id === category.parentCategoryId);
+          if (!parent) {
+            return category;
+          }
+          return getTopLevelCategory(parent);
+        };
+        
+        // 選択されたカテゴリーのトップレベルカテゴリーを取得
+        const topLevelCats = selectedCategories
+          .map(cat => getTopLevelCategory(cat))
+          .filter((cat, index, self) => self.findIndex(c => c.id === cat.id) === index);
+        
+        topLevelCategories = topLevelCats;
       }
     }
 
     // カテゴリー階層を構築
     const getChildren = (parentId: string) => categories.filter(cat => cat.parentCategoryId === parentId);
+    
+    // 選択されたカテゴリーとその子孫を取得する関数
+    const shouldIncludeCategory = (category: Category): boolean => {
+      if (!selectedCategoryIds || selectedCategoryIds.length === 0) {
+        return true;
+      }
+      // 選択されたカテゴリー自体
+      if (selectedCategoryIds.includes(category.id)) {
+        return true;
+      }
+      // 選択されたカテゴリーの子孫かチェック
+      const isDescendant = (cat: Category, selectedIds: string[]): boolean => {
+        if (selectedIds.includes(cat.id)) {
+          return true;
+        }
+        if (!cat.parentCategoryId) {
+          return false;
+        }
+        const parent = categories.find(c => c.id === cat.parentCategoryId);
+        if (!parent) {
+          return false;
+        }
+        return isDescendant(parent, selectedIds);
+      };
+      return isDescendant(category, selectedCategoryIds);
+    };
 
     // 親カテゴリーをノードに追加
     topLevelCategories.forEach((parentCategory) => {
+      // 選択されたカテゴリーのみ表示する場合、親カテゴリーが選択されていない場合はスキップ
+      if (selectedCategoryIds && selectedCategoryIds.length > 0 && !shouldIncludeCategory(parentCategory)) {
+        return;
+      }
+      
       diagramNodes.push({
         id: `category_${parentCategory.id}`,
         label: parentCategory.title,
@@ -55,6 +103,10 @@ export function useCategoryStartupDiagramData({
 
       // 子カテゴリーをノードに追加し、親へのリンクを作成
       childCategories.forEach((childCategory) => {
+        // 選択されたカテゴリーのみ表示する場合、子カテゴリーが選択されていない場合はスキップ
+        if (selectedCategoryIds && selectedCategoryIds.length > 0 && !shouldIncludeCategory(childCategory)) {
+          return;
+        }
         diagramNodes.push({
           id: `category_${childCategory.id}`,
           label: childCategory.title,
@@ -147,7 +199,7 @@ export function useCategoryStartupDiagramData({
     devLog('✅ [カテゴリー-スタートアップ関係性図] ノード数:', diagramNodes.length, 'リンク数:', diagramLinks.length);
 
     return { nodes: diagramNodes, links: diagramLinks };
-  }, [categories, startups, selectedCategoryId]);
+  }, [categories, startups, selectedCategoryIds]);
 
   return { nodes, links };
 }

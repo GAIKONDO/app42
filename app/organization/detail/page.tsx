@@ -58,10 +58,13 @@ function OrganizationDetailPageContent() {
     initiativesByOrg,
     meetingNotes,
     setMeetingNotes,
+    meetingNotesByOrg,
     regulations,
     setRegulations,
+    regulationsByOrg,
     startups,
     setStartups,
+    startupsByOrg,
     loading,
     error,
     reloadInitiatives,
@@ -330,6 +333,9 @@ function OrganizationDetailPageContent() {
           <StartupsTab
             organizationId={organizationId}
             startups={startups}
+            startupsByOrg={startupsByOrg}
+            expandedOrgIds={expandedOrgIds}
+            setExpandedOrgIds={setExpandedOrgIds}
             editingStartupId={startupHandlers.editingStartupId}
             editingStartupTitle={startupHandlers.editingStartupTitle}
             setEditingStartupTitle={startupHandlers.setEditingStartupTitle}
@@ -396,6 +402,9 @@ function OrganizationDetailPageContent() {
           <MeetingNotesTab
             organizationId={organizationId}
             meetingNotes={meetingNotes}
+            meetingNotesByOrg={meetingNotesByOrg}
+            expandedOrgIds={expandedOrgIds}
+            setExpandedOrgIds={setExpandedOrgIds}
             editingMeetingNoteId={meetingNoteHandlers.editingMeetingNoteId}
             editingMeetingNoteTitle={meetingNoteHandlers.editingMeetingNoteTitle}
             setEditingMeetingNoteTitle={meetingNoteHandlers.setEditingMeetingNoteTitle}
@@ -414,6 +423,9 @@ function OrganizationDetailPageContent() {
           <RegulationsTab
             organizationId={organizationId}
             regulations={regulations}
+            regulationsByOrg={regulationsByOrg}
+            expandedOrgIds={expandedOrgIds}
+            setExpandedOrgIds={setExpandedOrgIds}
             editingRegulationId={regulationHandlers.editingRegulationId}
             editingRegulationTitle={regulationHandlers.editingRegulationTitle}
             setEditingRegulationTitle={regulationHandlers.setEditingRegulationTitle}

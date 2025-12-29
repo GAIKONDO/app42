@@ -25,6 +25,7 @@ interface UseKnowledgeGraphFiltersProps {
   topicSearchQuery: string;
   selectedOrganizationIds: Set<string>;
   selectedMemberIds: Set<string>;
+  dateFilterType: 'none' | 'created' | 'updated' | 'registered';
   dateRangeStart: string;
   dateRangeEnd: string;
   selectedImportance: Set<'high' | 'medium' | 'low'>;
@@ -65,6 +66,7 @@ export function useKnowledgeGraphFilters({
   topicSearchQuery,
   selectedOrganizationIds,
   selectedMemberIds,
+  dateFilterType,
   dateRangeStart,
   dateRangeEnd,
   selectedImportance,
@@ -121,7 +123,7 @@ export function useKnowledgeGraphFilters({
   const filteredRelationIds = useMemo(() => {
     const hasOrganizationFilter = selectedOrganizationIds.size > 0;
     const hasMemberFilter = selectedMemberIds.size > 0;
-    const hasDateFilter = dateRangeStart || dateRangeEnd;
+    const hasDateFilter = dateFilterType !== 'none' && (dateRangeStart || dateRangeEnd);
     const hasImportanceFilter = selectedImportance.size > 0;
     
     if (!hasOrganizationFilter && !hasMemberFilter && !hasDateFilter && !hasImportanceFilter) {
@@ -147,21 +149,32 @@ export function useKnowledgeGraphFilters({
       
       // 期間フィルター
       if (hasDateFilter && shouldInclude) {
-        const topic = relation.topicId ? topicMap.get(relation.topicId) : null;
-        if (topic) {
-          if (topic.isAllPeriods === true) {
-            // 全期間に反映の場合は常に表示
-            shouldInclude = true;
-          } else if (topic.topicDate !== undefined) {
-            shouldInclude = isDateInRange(topic.topicDate, dateRangeStart, dateRangeEnd);
-          } else {
-            // トピックに日付がない場合は除外
-            shouldInclude = false;
+        let matchesDateFilter = false;
+        
+        if (dateFilterType === 'registered') {
+          // 登録日（トピックの日付）でフィルタリング
+          const topic = relation.topicId ? topicMap.get(relation.topicId) : null;
+          if (topic) {
+            if (topic.isAllPeriods === true) {
+              // 全期間に反映の場合は常に表示
+              matchesDateFilter = true;
+            } else if (topic.topicDate !== undefined) {
+              matchesDateFilter = isDateInRange(topic.topicDate, dateRangeStart, dateRangeEnd);
+            }
           }
-        } else {
-          // トピックが見つからない場合は除外
-          shouldInclude = false;
+        } else if (dateFilterType === 'created') {
+          // 作成日でフィルタリング
+          if (relation.createdAt) {
+            matchesDateFilter = isDateInRange(relation.createdAt, dateRangeStart, dateRangeEnd);
+          }
+        } else if (dateFilterType === 'updated') {
+          // 更新日でフィルタリング
+          if (relation.updatedAt) {
+            matchesDateFilter = isDateInRange(relation.updatedAt, dateRangeStart, dateRangeEnd);
+          }
         }
+        
+        shouldInclude = matchesDateFilter;
       }
       
       // 重要度フィルター
@@ -209,7 +222,7 @@ export function useKnowledgeGraphFilters({
     }
     
     return filteredIds;
-  }, [relations, selectedOrganizationIds, selectedMemberIds, dateRangeStart, dateRangeEnd, selectedImportance, topicMap, members, entities, isDateInRange]);
+  }, [relations, selectedOrganizationIds, selectedMemberIds, dateFilterType, dateRangeStart, dateRangeEnd, selectedImportance, topicMap, members, entities, isDateInRange]);
 
   // フィルタリング
   const filteredEntities = useMemo(() => {
@@ -254,7 +267,7 @@ export function useKnowledgeGraphFilters({
     
     const hasOrganizationFilter = selectedOrganizationIds.size > 0;
     const hasMemberFilter = selectedMemberIds.size > 0;
-    const hasDateFilter = dateRangeStart || dateRangeEnd;
+    const hasDateFilter = dateFilterType !== 'none' && (dateRangeStart || dateRangeEnd);
     const hasImportanceFilter = selectedImportance.size > 0;
     
     if (!hasOrganizationFilter && !hasMemberFilter && !hasDateFilter && !hasImportanceFilter) {
@@ -311,8 +324,79 @@ export function useKnowledgeGraphFilters({
         }
       }
       
-      // フィルタリングされたリレーションに関連するエンティティのみ表示
-      if (hasDateFilter || hasImportanceFilter || hasMemberFilter) {
+      // 期間フィルター
+      if (hasDateFilter) {
+        let matchesDateFilter = false;
+        
+        if (dateFilterType === 'registered') {
+          // 登録日（トピックの日付）でフィルタリング
+          // 1. エンティティが直接関連するトピックの日付（topicDate）でチェック
+          const directTopicId = entity.metadata?.topicId;
+          if (directTopicId) {
+            const directTopic = topicMap.get(directTopicId);
+            if (directTopic) {
+              if (directTopic.isAllPeriods === true) {
+                // 全期間に反映の場合は常に表示
+                matchesDateFilter = true;
+              } else if (directTopic.topicDate !== undefined) {
+                matchesDateFilter = isDateInRange(directTopic.topicDate, dateRangeStart, dateRangeEnd);
+              }
+            }
+          }
+          
+          // 2. 直接関連するトピックがない場合、リレーション経由で関連するトピックの日付でチェック
+          if (!matchesDateFilter) {
+            for (const relation of relations) {
+              if ((relation.sourceEntityId === entity.id || relation.targetEntityId === entity.id) && relation.topicId) {
+                const relatedTopic = topicMap.get(relation.topicId);
+                if (relatedTopic) {
+                  if (relatedTopic.isAllPeriods === true) {
+                    matchesDateFilter = true;
+                    break;
+                  } else if (relatedTopic.topicDate !== undefined) {
+                    if (isDateInRange(relatedTopic.topicDate, dateRangeStart, dateRangeEnd)) {
+                      matchesDateFilter = true;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+          
+          // 3. トピックの日付で一致しない場合、フィルタリングされたリレーションに関連するエンティティを表示（フォールバック）
+          if (!matchesDateFilter) {
+            if (!relatedEntityIds.has(entity.id)) {
+              return false;
+            }
+          }
+        } else if (dateFilterType === 'created') {
+          // 作成日でフィルタリング
+          if (entity.createdAt) {
+            matchesDateFilter = isDateInRange(entity.createdAt, dateRangeStart, dateRangeEnd);
+          }
+          // 作成日で一致しない場合、フィルタリングされたリレーションに関連するエンティティを表示（フォールバック）
+          if (!matchesDateFilter) {
+            if (!relatedEntityIds.has(entity.id)) {
+              return false;
+            }
+          }
+        } else if (dateFilterType === 'updated') {
+          // 更新日でフィルタリング
+          if (entity.updatedAt) {
+            matchesDateFilter = isDateInRange(entity.updatedAt, dateRangeStart, dateRangeEnd);
+          }
+          // 更新日で一致しない場合、フィルタリングされたリレーションに関連するエンティティを表示（フォールバック）
+          if (!matchesDateFilter) {
+            if (!relatedEntityIds.has(entity.id)) {
+              return false;
+            }
+          }
+        }
+      }
+      
+      // 重要度フィルターまたは担当者フィルターがある場合、フィルタリングされたリレーションに関連するエンティティのみ表示
+      if (hasImportanceFilter || hasMemberFilter) {
         if (!relatedEntityIds.has(entity.id)) {
           return false;
         }
@@ -320,7 +404,7 @@ export function useKnowledgeGraphFilters({
       
       return true;
     });
-  }, [entities, entitySearchQuery, entityTypeFilter, selectedOrganizationIds, selectedMemberIds, dateRangeStart, dateRangeEnd, selectedImportance, filteredRelationIds, relations, searchResultEntityIds, searchResultRelationIds]);
+  }, [entities, entitySearchQuery, entityTypeFilter, selectedOrganizationIds, selectedMemberIds, dateFilterType, dateRangeStart, dateRangeEnd, selectedImportance, filteredRelationIds, relations, searchResultEntityIds, searchResultRelationIds, topicMap, isDateInRange]);
   
   // エンティティのページネーション
   const paginatedEntities = useMemo(() => {
@@ -414,15 +498,36 @@ export function useKnowledgeGraphFilters({
       }
       
       // 期間フィルター
-      if (dateRangeStart || dateRangeEnd) {
-        if (topic.isAllPeriods === true) {
-          // 全期間に反映の場合は常に表示
-          return true;
-        } else if (topic.topicDate !== undefined) {
-          return isDateInRange(topic.topicDate, dateRangeStart, dateRangeEnd);
-        } else {
-          // トピックに日付がない場合は除外
-          return false;
+      if (dateFilterType !== 'none' && (dateRangeStart || dateRangeEnd)) {
+        if (dateFilterType === 'registered') {
+          // 登録日（トピックの日付）でフィルタリング
+          if (topic.isAllPeriods === true) {
+            // 全期間に反映の場合は常に表示
+            return true;
+          } else if (topic.topicDate !== undefined) {
+            return isDateInRange(topic.topicDate, dateRangeStart, dateRangeEnd);
+          } else {
+            // トピックに日付がない場合は除外
+            return false;
+          }
+        } else if (dateFilterType === 'created') {
+          // 作成日でフィルタリング（トピックにはcreatedAtがないため、topicDateを使用）
+          if (topic.isAllPeriods === true) {
+            return true;
+          } else if (topic.topicDate !== undefined) {
+            return isDateInRange(topic.topicDate, dateRangeStart, dateRangeEnd);
+          } else {
+            return false;
+          }
+        } else if (dateFilterType === 'updated') {
+          // 更新日でフィルタリング（トピックにはupdatedAtがないため、topicDateを使用）
+          if (topic.isAllPeriods === true) {
+            return true;
+          } else if (topic.topicDate !== undefined) {
+            return isDateInRange(topic.topicDate, dateRangeStart, dateRangeEnd);
+          } else {
+            return false;
+          }
         }
       }
       
@@ -435,7 +540,7 @@ export function useKnowledgeGraphFilters({
       
       return true;
     });
-  }, [topics, topicSearchQuery, selectedOrganizationIds, dateRangeStart, dateRangeEnd, selectedImportance, isDateInRange]);
+  }, [topics, topicSearchQuery, selectedOrganizationIds, dateFilterType, dateRangeStart, dateRangeEnd, selectedImportance, isDateInRange]);
   
   // トピックのページネーション
   const paginatedTopics = useMemo(() => {

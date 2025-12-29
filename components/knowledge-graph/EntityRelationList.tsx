@@ -383,6 +383,24 @@ export default function EntityRelationList({
                       別名: {entity.aliases.join(', ')}
                     </div>
                   )}
+                  {/* 日付情報 */}
+                  <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+                    {entity.createdAt && (
+                      <span>
+                        📅 作成日: {new Date(entity.createdAt).toLocaleDateString('ja-JP')}
+                      </span>
+                    )}
+                    {entity.updatedAt && (
+                      <span>
+                        🔄 更新日: {new Date(entity.updatedAt).toLocaleDateString('ja-JP')}
+                      </span>
+                    )}
+                    {linkedTopic?.topicDate && (
+                      <span>
+                        📝 登録日: {new Date(linkedTopic.topicDate).toLocaleDateString('ja-JP')}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -496,6 +514,9 @@ export default function EntityRelationList({
             const targetName = targetEntity?.name || relation.targetEntityId || '不明';
             const relationTypeLabel = relationTypeLabels[relation.relationType] || relation.relationType;
             
+            // リレーションに関連するトピックを取得
+            const relatedTopic = topics.find(t => t.id === relation.topicId) || null;
+            
             return (
               <div
                 key={relation.id}
@@ -517,6 +538,24 @@ export default function EntityRelationList({
                     {relation.description}
                   </div>
                 )}
+                {/* 日付情報 */}
+                <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+                  {relation.createdAt && (
+                    <span>
+                      📅 作成日: {new Date(relation.createdAt).toLocaleDateString('ja-JP')}
+                    </span>
+                  )}
+                  {relation.updatedAt && (
+                    <span>
+                      🔄 更新日: {new Date(relation.updatedAt).toLocaleDateString('ja-JP')}
+                    </span>
+                  )}
+                  {relatedTopic?.topicDate && (
+                    <span>
+                      📝 登録日: {new Date(relatedTopic.topicDate).toLocaleDateString('ja-JP')}
+                    </span>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -645,7 +684,7 @@ export default function EntityRelationList({
                     議事録: {topic.meetingNoteTitle}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: '12px', marginTop: '8px', fontSize: '12px', color: '#6B7280' }}>
+                <div style={{ display: 'flex', gap: '12px', marginTop: '8px', fontSize: '12px', color: '#6B7280', flexWrap: 'wrap' }}>
                   {relatedEntitiesCount > 0 && (
                     <span>
                       📌 エンティティ: {relatedEntitiesCount}件
@@ -669,9 +708,22 @@ export default function EntityRelationList({
                       {topic.importance === 'high' ? '🔴 高' : topic.importance === 'medium' ? '🟡 中' : '⚪ 低'}
                     </span>
                   )}
+                </div>
+                {/* 日付情報 */}
+                <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+                  {topic.createdAt && (
+                    <span>
+                      📅 作成日: {new Date(topic.createdAt).toLocaleDateString('ja-JP')}
+                    </span>
+                  )}
+                  {topic.updatedAt && (
+                    <span>
+                      🔄 更新日: {new Date(topic.updatedAt).toLocaleDateString('ja-JP')}
+                    </span>
+                  )}
                   {topic.topicDate && (
                     <span>
-                      📅 {new Date(topic.topicDate).toLocaleDateString('ja-JP')}
+                      📝 登録日: {new Date(topic.topicDate).toLocaleDateString('ja-JP')}
                     </span>
                   )}
                 </div>

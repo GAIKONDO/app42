@@ -17,23 +17,6 @@ export function SubTabBar({ activeTab, onTabChange, managementLabel, diagramLabe
     }}>
       <button
         type="button"
-        onClick={() => onTabChange('management')}
-        style={{
-          padding: '12px 20px',
-          fontSize: '14px',
-          fontWeight: '500',
-          color: activeTab === 'management' ? '#4262FF' : '#6B7280',
-          backgroundColor: 'transparent',
-          border: 'none',
-          borderBottom: activeTab === 'management' ? '2px solid #4262FF' : '2px solid transparent',
-          cursor: 'pointer',
-          fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        }}
-      >
-        {managementLabel}
-      </button>
-      <button
-        type="button"
         onClick={() => onTabChange('diagram')}
         style={{
           padding: '12px 20px',
@@ -48,6 +31,23 @@ export function SubTabBar({ activeTab, onTabChange, managementLabel, diagramLabe
         }}
       >
         {diagramLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => onTabChange('management')}
+        style={{
+          padding: '12px 20px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: activeTab === 'management' ? '#4262FF' : '#6B7280',
+          backgroundColor: 'transparent',
+          border: 'none',
+          borderBottom: activeTab === 'management' ? '2px solid #4262FF' : '2px solid transparent',
+          cursor: 'pointer',
+          fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        }}
+      >
+        {managementLabel}
       </button>
     </div>
   );

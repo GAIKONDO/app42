@@ -10,6 +10,7 @@ import CategorySelector from '../CategorySelector';
 import type { RelationshipNode } from '@/components/RelationshipDiagram2D';
 import dynamic from 'next/dynamic';
 import { SubTabBar } from './SubTabBar';
+import { formatStartupDate } from '@/lib/orgApi/utils';
 
 const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
   ssr: false,
@@ -1738,18 +1739,18 @@ export function CategorySection({
                           }}>
                             {startup.title}
                           </div>
-                          {startup.description && (
-                            <div style={{
-                              fontSize: '14px',
-                              color: '#6B7280',
-                              lineHeight: '1.5',
-                              fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
-                            }}>
-                              {startup.description.length > 100 
-                                ? `${startup.description.substring(0, 100)}...` 
-                                : startup.description}
-                            </div>
-                          )}
+                          {startup.createdAt && (() => {
+                            const formattedDate = formatStartupDate(startup.createdAt);
+                            return formattedDate ? (
+                              <div style={{
+                                fontSize: '12px',
+                                color: '#9CA3AF',
+                                marginTop: '8px',
+                              }}>
+                                作成日: {formattedDate}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -1956,21 +1957,19 @@ export function CategorySection({
                               }}>
                                 {startup.title}
                               </div>
-                              {startup.description && (
-                                <div style={{
-                                  fontSize: '14px',
-                                  color: '#6B7280',
-                                  marginTop: '8px',
-                                  lineHeight: '1.5',
-                                  fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
-                                  display: '-webkit-box',
-                                  WebkitLineClamp: 3,
-                                  WebkitBoxOrient: 'vertical',
-                                  overflow: 'hidden',
-                                }}>
-                                  {startup.description}
-                                </div>
-                              )}
+                              {startup.createdAt && (() => {
+                                const { formatStartupDate } = require('@/lib/orgApi/utils');
+                                const formattedDate = formatStartupDate(startup.createdAt);
+                                return formattedDate ? (
+                                  <div style={{
+                                    fontSize: '12px',
+                                    color: '#9CA3AF',
+                                    marginTop: '8px',
+                                  }}>
+                                    作成日: {formattedDate}
+                                  </div>
+                                ) : null;
+                              })()}
                             </div>
                           ))}
                         </div>

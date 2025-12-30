@@ -19,20 +19,20 @@ const CHART_CENTER = CHART_SIZE / 2;
 const CHART_RADIUS = 250;
 const MAX_SCORE = 5;
 
-// 12の評価軸の定義
+// 12の評価軸の定義（3つ時計回りに進めた順番）
 const EVALUATION_AXES = [
-  { id: 'tech_superiority', label: '技術優位性・独自性', angle: -90 },
-  { id: 'concept_clarity', label: 'コンセプトの分かりやすさ', angle: -60 },
-  { id: 'relationship_value', label: '関係値', angle: -30 },
-  { id: 'japan_readiness', label: '日本進出準備度', angle: 0 },
-  { id: 'vc_recommendation', label: 'VC推薦・推し', angle: 30 },
-  { id: 'front_interest', label: 'フロント部署の興味度', angle: 60 },
-  { id: 'responsible_interest', label: '主管部署の興味度', angle: 90 },
-  { id: 'customer_interest', label: '顧客の興味度', angle: 120 },
-  { id: 'poc_pipeline', label: 'PoC/案件のパイプライン', angle: 150 },
-  { id: 'poc_amount', label: 'PoC/案件の見込み金額規模', angle: 180 },
-  { id: 'affinity', label: '既存商材との親和性', angle: 210 },
-  { id: 'sales_impact', label: '売上インパクト/戦略性', angle: 240 },
+  { id: 'tech_superiority', label: '技術優位性・独自性', angle: 0 },
+  { id: 'concept_clarity', label: 'コンセプトの分かりやすさ', angle: 30 },
+  { id: 'relationship_value', label: '関係値', angle: 60 },
+  { id: 'japan_readiness', label: '日本進出準備度', angle: 90 },
+  { id: 'vc_recommendation', label: 'VC推薦・推し', angle: 120 },
+  { id: 'front_interest', label: 'フロント部署の興味度', angle: 150 },
+  { id: 'responsible_interest', label: '主管部署の興味度', angle: 180 },
+  { id: 'customer_interest', label: '顧客の興味度', angle: 210 },
+  { id: 'poc_pipeline', label: 'PoC/案件のパイプライン', angle: 240 },
+  { id: 'poc_amount', label: 'PoC/案件の見込み金額規模', angle: 270 },
+  { id: 'affinity', label: '既存商材との親和性', angle: 300 },
+  { id: 'sales_impact', label: '売上インパクト/戦略性', angle: 330 },
 ];
 
 export default function EvaluationChart({

@@ -241,6 +241,7 @@ fn main() {
             commands::fs::save_topic_image, // 後方互換性のため保持
             commands::fs::save_graphviz_yaml_file_attachment,
             commands::fs::open_file,
+            commands::fs::open_url,
             // PlantUMLコマンド
             commands::plantuml::render_plantuml,
             commands::plantuml::check_java_installed,

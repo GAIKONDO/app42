@@ -6,6 +6,7 @@ import type { VC, Startup, BizDevPhase } from '@/lib/orgApi';
 import { useVcManagement } from '../../hooks/useVcManagement';
 import { SubTabBar } from './SubTabBar';
 import dynamic from 'next/dynamic';
+import { formatStartupDate } from '@/lib/orgApi/utils';
 
 const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
   ssr: false,
@@ -874,26 +875,18 @@ export function VcSection({
                           }}>
                             {startup.title}
                           </h5>
-                          {startup.description && (
-                            <p style={{
-                              fontSize: '14px',
-                              color: '#6B7280',
-                              margin: '0 0 8px 0',
-                              lineHeight: '1.5',
-                              fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
-                            }}>
-                              {startup.description}
-                            </p>
-                          )}
-                          {startup.createdAt && (
-                            <div style={{
-                              fontSize: '12px',
-                              color: '#9CA3AF',
-                              marginTop: '8px',
-                            }}>
-                              作成日: {new Date(startup.createdAt).toLocaleDateString('ja-JP')}
-                            </div>
-                          )}
+                          {startup.createdAt && (() => {
+                            const formattedDate = formatStartupDate(startup.createdAt);
+                            return formattedDate ? (
+                              <div style={{
+                                fontSize: '12px',
+                                color: '#9CA3AF',
+                                marginTop: '8px',
+                              }}>
+                                作成日: {formattedDate}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -1102,26 +1095,19 @@ export function VcSection({
                                 }}>
                                   {startup.title}
                                 </h5>
-                                {startup.description && (
-                                  <p style={{
-                                    fontSize: '14px',
-                                    color: '#6B7280',
-                                    margin: '0 0 8px 0',
-                                    lineHeight: '1.5',
-                                    fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
-                                  }}>
-                                    {startup.description}
-                                  </p>
-                                )}
-                                {startup.createdAt && (
-                                  <div style={{
-                                    fontSize: '12px',
-                                    color: '#9CA3AF',
-                                    marginTop: '8px',
-                                  }}>
-                                    作成日: {new Date(startup.createdAt).toLocaleDateString('ja-JP')}
-                                  </div>
-                                )}
+                                {startup.createdAt && (() => {
+                                  const { formatStartupDate } = require('@/lib/orgApi/utils');
+                                  const formattedDate = formatStartupDate(startup.createdAt);
+                                  return formattedDate ? (
+                                    <div style={{
+                                      fontSize: '12px',
+                                      color: '#9CA3AF',
+                                      marginTop: '8px',
+                                    }}>
+                                      作成日: {formattedDate}
+                                    </div>
+                                  ) : null;
+                                })()}
                               </div>
                             ))}
                           </div>

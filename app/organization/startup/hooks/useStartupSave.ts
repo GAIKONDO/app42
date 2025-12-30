@@ -25,9 +25,13 @@ interface UseStartupSaveProps {
   localEvaluation: string;
   localEvaluationChart: any;
   localEvaluationChartSnapshots: any[];
-  localConsiderationPeriod: string;
-  localExecutionPeriod: string;
-  localMonetizationPeriod: string;
+  localConsiderationStartPeriod: string;
+  localConsiderationEndPeriod: string;
+  localExecutionStartPeriod: string;
+  localExecutionEndPeriod: string;
+  localMonetizationStartPeriod: string;
+  localMonetizationEndPeriod: string;
+  localMonetizationRenewalNotRequired: boolean;
   localRelatedOrganizations: string[];
   localRelatedGroupCompanies: string[];
   localMonetizationDiagram: string;
@@ -57,9 +61,13 @@ interface UseStartupSaveProps {
   setLocalEvaluation: (evaluation: string) => void;
   setLocalEvaluationChart: (chart: any) => void;
   setLocalEvaluationChartSnapshots: (snapshots: any[]) => void;
-  setLocalConsiderationPeriod: (period: string) => void;
-  setLocalExecutionPeriod: (period: string) => void;
-  setLocalMonetizationPeriod: (period: string) => void;
+  setLocalConsiderationStartPeriod: (period: string) => void;
+  setLocalConsiderationEndPeriod: (period: string) => void;
+  setLocalExecutionStartPeriod: (period: string) => void;
+  setLocalExecutionEndPeriod: (period: string) => void;
+  setLocalMonetizationStartPeriod: (period: string) => void;
+  setLocalMonetizationEndPeriod: (period: string) => void;
+  setLocalMonetizationRenewalNotRequired: (value: boolean) => void;
   setLocalRelatedOrganizations: (orgs: string[]) => void;
   setLocalRelatedGroupCompanies: (companies: string[]) => void;
   setLocalMonetizationDiagram: (diagram: string) => void;
@@ -93,9 +101,13 @@ export function useStartupSave({
   localEvaluation,
   localEvaluationChart,
   localEvaluationChartSnapshots,
-  localConsiderationPeriod,
-  localExecutionPeriod,
-  localMonetizationPeriod,
+  localConsiderationStartPeriod,
+  localConsiderationEndPeriod,
+  localExecutionStartPeriod,
+  localExecutionEndPeriod,
+  localMonetizationStartPeriod,
+  localMonetizationEndPeriod,
+  localMonetizationRenewalNotRequired,
   localRelatedOrganizations,
   localRelatedGroupCompanies,
   localMonetizationDiagram,
@@ -125,9 +137,13 @@ export function useStartupSave({
   setLocalEvaluation,
   setLocalEvaluationChart,
   setLocalEvaluationChartSnapshots,
-  setLocalConsiderationPeriod,
-  setLocalExecutionPeriod,
-  setLocalMonetizationPeriod,
+  setLocalConsiderationStartPeriod,
+  setLocalConsiderationEndPeriod,
+  setLocalExecutionStartPeriod,
+  setLocalExecutionEndPeriod,
+  setLocalMonetizationStartPeriod,
+  setLocalMonetizationEndPeriod,
+  setLocalMonetizationRenewalNotRequired,
   setLocalRelatedOrganizations,
   setLocalRelatedGroupCompanies,
   setLocalMonetizationDiagram,
@@ -221,9 +237,29 @@ export function useStartupSave({
       evaluation: localEvaluation,
       evaluationChart: localEvaluationChart,
       evaluationChartSnapshots: localEvaluationChartSnapshots,
-      considerationPeriod: localConsiderationPeriod,
-      executionPeriod: localExecutionPeriod,
-      monetizationPeriod: localMonetizationPeriod,
+      // 開始期間と終了期間を結合して保存
+      // 年月日形式（YYYY-MM-DD）で保存
+      considerationPeriod: localConsiderationStartPeriod && localConsiderationEndPeriod
+        ? `${localConsiderationStartPeriod}/${localConsiderationEndPeriod}`
+        : localConsiderationStartPeriod || localConsiderationEndPeriod || undefined,
+      executionPeriod: localExecutionStartPeriod && localExecutionEndPeriod
+        ? `${localExecutionStartPeriod}/${localExecutionEndPeriod}`
+        : localExecutionStartPeriod || localExecutionEndPeriod || undefined,
+      // NDA更新予定日は開始予定日のみ（終了期間は不要）
+      monetizationPeriod: localMonetizationStartPeriod || undefined,
+      monetizationRenewalNotRequired: (() => {
+        const value = localMonetizationRenewalNotRequired;
+        console.log('💾 [handleManualSave] monetizationRenewalNotRequired保存前:', {
+          rawValue: value,
+          type: typeof value,
+          isUndefined: value === undefined,
+          isNull: value === null,
+          isTrue: value === true,
+          isFalse: value === false,
+          result: value !== undefined ? value : undefined
+        });
+        return value !== undefined ? value : undefined;
+      })(),
       relatedOrganizations: localRelatedOrganizations,
       relatedGroupCompanies: localRelatedGroupCompanies,
       monetizationDiagram: localMonetizationDiagram,
@@ -332,9 +368,44 @@ export function useStartupSave({
       setLocalEvaluation(dataToSave.evaluation || '');
       setLocalEvaluationChart(dataToSave.evaluationChart || null);
       setLocalEvaluationChartSnapshots(Array.isArray(dataToSave.evaluationChartSnapshots) ? dataToSave.evaluationChartSnapshots : []);
-      setLocalConsiderationPeriod(dataToSave.considerationPeriod || '');
-      setLocalExecutionPeriod(dataToSave.executionPeriod || '');
-      setLocalMonetizationPeriod(dataToSave.monetizationPeriod || '');
+      // 保存したデータを開始期間と終了期間に分割
+      // 既存データが「YYYY-MM」形式の場合は「YYYY-MM-01」に変換
+      const parsePeriod = (period: string): { start: string; end: string } => {
+        if (!period) return { start: '', end: '' };
+        const parts = period.split('/');
+        if (parts.length === 2) {
+          let start = parts[0].trim();
+          let end = parts[1].trim();
+          
+          // 「YYYY-MM」形式を「YYYY-MM-01」に変換
+          if (start.match(/^\d{4}-\d{2}$/)) {
+            start = `${start}-01`;
+          }
+          if (end.match(/^\d{4}-\d{2}$/)) {
+            end = `${end}-01`;
+          }
+          
+          return { start, end };
+        }
+        // 単一の値の場合（NDA更新予定日など）
+        let single = period.trim();
+        if (single.match(/^\d{4}-\d{2}$/)) {
+          single = `${single}-01`;
+        }
+        return { start: single, end: '' };
+      };
+      
+      const savedConsiderationPeriod = parsePeriod(dataToSave.considerationPeriod || '');
+      const savedExecutionPeriod = parsePeriod(dataToSave.executionPeriod || '');
+      const savedMonetizationPeriod = parsePeriod(dataToSave.monetizationPeriod || '');
+      
+      setLocalConsiderationStartPeriod(savedConsiderationPeriod.start);
+      setLocalConsiderationEndPeriod(savedConsiderationPeriod.end);
+      setLocalExecutionStartPeriod(savedExecutionPeriod.start);
+      setLocalExecutionEndPeriod(savedExecutionPeriod.end);
+      setLocalMonetizationStartPeriod(savedMonetizationPeriod.start);
+      setLocalMonetizationEndPeriod(savedMonetizationPeriod.end);
+      setLocalMonetizationRenewalNotRequired(dataToSave.monetizationRenewalNotRequired || false);
       setLocalRelatedOrganizations(Array.isArray(dataToSave.relatedOrganizations) ? dataToSave.relatedOrganizations : []);
       setLocalRelatedGroupCompanies(Array.isArray(dataToSave.relatedGroupCompanies) ? dataToSave.relatedGroupCompanies : []);
       setLocalMonetizationDiagram(dataToSave.monetizationDiagram || '');
@@ -410,9 +481,12 @@ export function useStartupSave({
     localEvaluation,
     localEvaluationChart,
     localEvaluationChartSnapshots,
-    localConsiderationPeriod,
-    localExecutionPeriod,
-    localMonetizationPeriod,
+    localConsiderationStartPeriod,
+    localConsiderationEndPeriod,
+    localExecutionStartPeriod,
+    localExecutionEndPeriod,
+    localMonetizationStartPeriod,
+    localMonetizationEndPeriod,
     localRelatedOrganizations,
     localRelatedGroupCompanies,
     localMonetizationDiagram,
@@ -430,9 +504,13 @@ export function useStartupSave({
     setLocalMeansOther,
     setLocalObjective,
     setLocalEvaluation,
-    setLocalConsiderationPeriod,
-    setLocalExecutionPeriod,
-    setLocalMonetizationPeriod,
+    setLocalConsiderationStartPeriod,
+    setLocalConsiderationEndPeriod,
+    setLocalExecutionStartPeriod,
+    setLocalExecutionEndPeriod,
+    setLocalMonetizationStartPeriod,
+    setLocalMonetizationEndPeriod,
+    setLocalMonetizationRenewalNotRequired,
     setLocalRelatedOrganizations,
     setLocalRelatedGroupCompanies,
     setLocalMonetizationDiagram,
@@ -477,9 +555,17 @@ export function useStartupSave({
         means: localMeans,
         meansOther: localMeansOther,
         objective: localObjective,
-        considerationPeriod: localConsiderationPeriod,
-        executionPeriod: localExecutionPeriod,
-        monetizationPeriod: localMonetizationPeriod,
+        // 開始期間と終了期間を結合して保存
+        // 年月日形式（YYYY-MM-DD）で保存
+        considerationPeriod: localConsiderationStartPeriod && localConsiderationEndPeriod
+          ? `${localConsiderationStartPeriod}/${localConsiderationEndPeriod}`
+          : localConsiderationStartPeriod || localConsiderationEndPeriod || undefined,
+        executionPeriod: localExecutionStartPeriod && localExecutionEndPeriod
+          ? `${localExecutionStartPeriod}/${localExecutionEndPeriod}`
+          : localExecutionStartPeriod || localExecutionEndPeriod || undefined,
+        // NDA更新予定日は開始予定日のみ（終了期間は不要）
+        monetizationPeriod: localMonetizationStartPeriod || undefined,
+        monetizationRenewalNotRequired: localMonetizationRenewalNotRequired !== undefined ? localMonetizationRenewalNotRequired : undefined,
         relatedOrganizations: localRelatedOrganizations,
         relatedGroupCompanies: localRelatedGroupCompanies,
         monetizationDiagram: localMonetizationDiagram,
@@ -524,9 +610,12 @@ export function useStartupSave({
     localMeans,
     localMeansOther,
     localObjective,
-    localConsiderationPeriod,
-    localExecutionPeriod,
-    localMonetizationPeriod,
+    localConsiderationStartPeriod,
+    localConsiderationEndPeriod,
+    localExecutionStartPeriod,
+    localExecutionEndPeriod,
+    localMonetizationStartPeriod,
+    localMonetizationEndPeriod,
     localRelatedOrganizations,
     localRelatedGroupCompanies,
     localMonetizationDiagram,

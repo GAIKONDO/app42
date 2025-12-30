@@ -310,6 +310,9 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
           docId,
           dataKeys: Object.keys(data || {}),
           dataPreview: JSON.stringify(data || {}).substring(0, 200),
+          hasMonetizationRenewalNotRequired: 'monetizationRenewalNotRequired' in (data || {}),
+          monetizationRenewalNotRequiredValue: data?.monetizationRenewalNotRequired,
+          monetizationRenewalNotRequiredType: typeof data?.monetizationRenewalNotRequired,
         });
         try {
           const result = await callTauriCommand('doc_set', { collectionName: collectionName, docId: docId, data });
@@ -329,6 +332,8 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
             errorStack: error?.stack,
             error: error,
             dataKeys: Object.keys(data || {}),
+            hasMonetizationRenewalNotRequired: 'monetizationRenewalNotRequired' in (data || {}),
+            monetizationRenewalNotRequiredValue: data?.monetizationRenewalNotRequired,
           });
           throw error;
         }

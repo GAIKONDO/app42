@@ -138,6 +138,21 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
       considerationPeriod: startup.considerationPeriod || '',
       executionPeriod: startup.executionPeriod || '',
       monetizationPeriod: startup.monetizationPeriod || '',
+      monetizationRenewalNotRequired: (() => {
+        const value = startup.monetizationRenewalNotRequired;
+        // データベースから読み込んだ値が1の場合はtrue、0の場合はfalseに変換
+        if (value === 1) {
+          return true;
+        } else if (value === 0) {
+          return false;
+        } else if (value === true) {
+          return true;
+        } else if (value === false) {
+          return false;
+        } else {
+          return false;
+        }
+      })(),
       relatedOrganizations: startup.relatedOrganizations || [],
       relatedGroupCompanies: startup.relatedGroupCompanies || [],
       monetizationDiagram: startup.monetizationDiagram || '',
@@ -254,9 +269,30 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
           responsibleDepartments: Array.isArray(data.responsibleDepartments) ? (data.responsibleDepartments.length > 0 ? JSON.stringify(data.responsibleDepartments) : '[]') : '[]',
           evaluationChart: data.evaluationChart ? JSON.stringify(data.evaluationChart) : null,
           evaluationChartSnapshots: Array.isArray(data.evaluationChartSnapshots) && data.evaluationChartSnapshots.length > 0 ? JSON.stringify(data.evaluationChartSnapshots) : null,
-      competitorComparison: data.competitorComparison ? JSON.stringify(data.competitorComparison) : null,
-      deepSearch: data.deepSearch ? JSON.stringify(data.deepSearch) : null,
-    };
+          competitorComparison: data.competitorComparison ? JSON.stringify(data.competitorComparison) : null,
+          deepSearch: data.deepSearch ? JSON.stringify(data.deepSearch) : null,
+          monetizationRenewalNotRequired: (() => {
+            const value = data.monetizationRenewalNotRequired;
+            console.log('💾 [saveStartup] monetizationRenewalNotRequired保存:', {
+              rawValue: value,
+              type: typeof value,
+              isUndefined: value === undefined,
+              isNull: value === null,
+              isTrue: value === true,
+              isFalse: value === false,
+              result: value !== undefined ? value : undefined
+            });
+            // Tauriのdoc_setでboolean値が正しく保存されない可能性があるため、
+            // trueの場合は1、falseの場合は0に変換して保存する
+            if (value === true) {
+              return 1;
+            } else if (value === false) {
+              return 0;
+            } else {
+              return undefined;
+            }
+          })(),
+        };
         
         // dataForDb構築直後にcompetitorComparisonを確認
         console.log('💾 [saveStartup] dataForDb構築直後確認:', {
@@ -268,6 +304,16 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
           competitorComparisonInDataForDbType: typeof dataForDb.competitorComparison,
           competitorComparisonInDataForDbIsNull: dataForDb.competitorComparison === null,
           competitorComparisonInDataForDbIsUndefined: dataForDb.competitorComparison === undefined,
+        });
+        
+        // monetizationRenewalNotRequiredの確認
+        console.log('💾 [saveStartup] monetizationRenewalNotRequired確認:', {
+          inData: data.monetizationRenewalNotRequired,
+          inDataForDb: dataForDb.monetizationRenewalNotRequired,
+          inDataForDbType: typeof dataForDb.monetizationRenewalNotRequired,
+          hasInDataForDb: 'monetizationRenewalNotRequired' in dataForDb,
+          dataForDbKeys: Object.keys(dataForDb),
+          hasMonetizationRenewalNotRequiredInKeys: Object.keys(dataForDb).includes('monetizationRenewalNotRequired'),
         });
         
         console.log('💾 [saveStartup] dataForDb確認:', {
@@ -300,6 +346,25 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
           competitorComparisonType: typeof dataForDb.competitorComparison,
           competitorComparisonValue: data.competitorComparison,
           competitorComparisonValueId: data.competitorComparison?.id,
+        });
+        
+        // doc_setに渡すデータを確認
+        console.log('💾 [saveStartup] doc_set呼び出し前のデータ確認:', {
+          hasMonetizationRenewalNotRequired: 'monetizationRenewalNotRequired' in dataForDb,
+          monetizationRenewalNotRequiredValue: dataForDb.monetizationRenewalNotRequired,
+          monetizationRenewalNotRequiredType: typeof dataForDb.monetizationRenewalNotRequired,
+          dataForDbKeys: Object.keys(dataForDb),
+          dataForDbKeysCount: Object.keys(dataForDb).length,
+          dataForDbMonetizationRenewalNotRequired: dataForDb.monetizationRenewalNotRequired,
+        });
+        
+        // doc_setに渡すデータのJSON文字列化（デバッグ用）
+        const dataForDbString = JSON.stringify(dataForDb);
+        console.log('💾 [saveStartup] doc_setに渡すデータ（JSON）:', {
+          dataLength: dataForDbString.length,
+          hasMonetizationRenewalNotRequired: dataForDbString.includes('monetizationRenewalNotRequired'),
+          monetizationRenewalNotRequiredIndex: dataForDbString.indexOf('monetizationRenewalNotRequired'),
+          preview: dataForDbString.substring(Math.max(0, dataForDbString.indexOf('monetizationRenewalNotRequired') - 50), Math.min(dataForDbString.length, dataForDbString.indexOf('monetizationRenewalNotRequired') + 100)),
         });
         
         await callTauriCommand('doc_set', {
@@ -395,6 +460,15 @@ export async function getStartupById(startupId: string): Promise<Startup | null>
       if (result && result.exists) {
         const data = result.data || result;
         
+        // データベースから読み込んだデータのJSON文字列化（デバッグ用）
+        const dataString = JSON.stringify(data);
+        console.log('📖 [getStartupById] データベースから読み込んだデータ（JSON）:', {
+          dataLength: dataString.length,
+          hasMonetizationRenewalNotRequired: dataString.includes('monetizationRenewalNotRequired'),
+          monetizationRenewalNotRequiredIndex: dataString.indexOf('monetizationRenewalNotRequired'),
+          preview: dataString.indexOf('monetizationRenewalNotRequired') >= 0 ? dataString.substring(Math.max(0, dataString.indexOf('monetizationRenewalNotRequired') - 50), Math.min(dataString.length, dataString.indexOf('monetizationRenewalNotRequired') + 100)) : 'not found',
+        });
+        
         const allDataKeys = Object.keys(data);
         const hasCompetitorComparisonInData = 'competitorComparison' in data;
         const competitorComparisonInAllDataKeys = allDataKeys.includes('competitorComparison');
@@ -427,6 +501,12 @@ export async function getStartupById(startupId: string): Promise<Startup | null>
           competitorComparisonType: typeof data.competitorComparison,
           competitorComparisonIsNull: data.competitorComparison === null,
           competitorComparisonIsUndefined: data.competitorComparison === undefined,
+        });
+        console.log('📖 [getStartupById] monetizationRenewalNotRequired存在確認:', {
+          hasMonetizationRenewalNotRequiredInData: 'monetizationRenewalNotRequired' in data,
+          monetizationRenewalNotRequiredInAllDataKeys: allDataKeys.includes('monetizationRenewalNotRequired'),
+          monetizationRenewalNotRequiredValue: data.monetizationRenewalNotRequired,
+          monetizationRenewalNotRequiredType: typeof data.monetizationRenewalNotRequired,
         });
         
         const parseJsonArray = (value: any, fieldName: string = 'unknown'): string[] => {
@@ -506,6 +586,32 @@ export async function getStartupById(startupId: string): Promise<Startup | null>
           considerationPeriod: data.considerationPeriod || '',
           executionPeriod: data.executionPeriod || '',
           monetizationPeriod: data.monetizationPeriod || '',
+          monetizationRenewalNotRequired: (() => {
+            const value = data.monetizationRenewalNotRequired;
+            console.log('📖 [getStartupById] monetizationRenewalNotRequired読み込み:', {
+              rawValue: value,
+              type: typeof value,
+              isUndefined: value === undefined,
+              isNull: value === null,
+              isTrue: value === true,
+              isFalse: value === false,
+              isOne: value === 1,
+              isZero: value === 0,
+              result: value !== undefined ? (value === 1 ? true : (value === 0 ? false : value)) : false
+            });
+            // データベースから読み込んだ値が1の場合はtrue、0の場合はfalseに変換
+            if (value === 1) {
+              return true;
+            } else if (value === 0) {
+              return false;
+            } else if (value === true) {
+              return true;
+            } else if (value === false) {
+              return false;
+            } else {
+              return false;
+            }
+          })(),
           relatedOrganizations: parseJsonArray(data.relatedOrganizations),
           relatedGroupCompanies: parseJsonArray(data.relatedGroupCompanies),
           monetizationDiagram: data.monetizationDiagram || '',
@@ -746,6 +852,21 @@ export async function getAllStartups(): Promise<Startup[]> {
           considerationPeriod: data.considerationPeriod,
           executionPeriod: data.executionPeriod,
           monetizationPeriod: data.monetizationPeriod,
+          monetizationRenewalNotRequired: (() => {
+            const value = data.monetizationRenewalNotRequired;
+            // データベースから読み込んだ値が1の場合はtrue、0の場合はfalseに変換
+            if (value === 1) {
+              return true;
+            } else if (value === 0) {
+              return false;
+            } else if (value === true) {
+              return true;
+            } else if (value === false) {
+              return false;
+            } else {
+              return false;
+            }
+          })(),
           relatedOrganizations: parseJsonArray(data.relatedOrganizations),
           relatedGroupCompanies: parseJsonArray(data.relatedGroupCompanies),
           monetizationDiagram: data.monetizationDiagram,

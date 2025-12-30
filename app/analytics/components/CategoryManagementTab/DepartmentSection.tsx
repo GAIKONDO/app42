@@ -6,6 +6,7 @@ import type { Department, Startup, BizDevPhase } from '@/lib/orgApi';
 import { useDepartmentManagement } from '../../hooks/useDepartmentManagement';
 import { SubTabBar } from './SubTabBar';
 import dynamic from 'next/dynamic';
+import { formatStartupDate } from '@/lib/orgApi/utils';
 
 const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
   ssr: false,
@@ -703,19 +704,18 @@ export function DepartmentSection({
                           }}>
                             {startup.title}
                           </div>
-                          {startup.description && (
-                            <div style={{
-                              fontSize: '13px',
-                              color: '#6B7280',
-                              lineHeight: '1.5',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                            }}>
-                              {startup.description}
-                            </div>
-                          )}
+                          {startup.createdAt && (() => {
+                            const formattedDate = formatStartupDate(startup.createdAt);
+                            return formattedDate ? (
+                              <div style={{
+                                fontSize: '12px',
+                                color: '#9CA3AF',
+                                marginTop: '8px',
+                              }}>
+                                作成日: {formattedDate}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       ))}
                     </div>

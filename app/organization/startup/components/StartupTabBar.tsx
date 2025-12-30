@@ -13,7 +13,7 @@ export function StartupTabBar({ activeTab, onTabChange }: StartupTabBarProps) {
     { id: 'details', label: '詳細' },
     { id: 'deepsearch', label: 'Deepsearch' },
     { id: 'competitor-comparison', label: '競合比較' },
-    { id: 'periods', label: '期間' },
+    { id: 'periods', label: 'NDA期間' },
     { id: 'relations', label: '特性要因図' },
     { id: 'monetization', label: 'マネタイズ' },
     { id: 'relation', label: '相関図' },

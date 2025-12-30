@@ -229,3 +229,49 @@ export async function saveInitiativeToJson(initiative: any): Promise<void> {
   return;
 }
 
+/**
+ * スタートアップの作成日をフォーマット
+ * createdAtが様々な形式（Firestore Timestamp、文字列、数値など）に対応
+ */
+export function formatStartupDate(createdAt: any): string | null {
+  if (!createdAt) return null;
+  
+  try {
+    let date: Date;
+    
+    // Firestore Timestamp形式（{seconds: number, nanoseconds: number}）
+    if (typeof createdAt === 'object' && createdAt !== null && 'seconds' in createdAt) {
+      date = new Date(createdAt.seconds * 1000);
+    }
+    // 文字列形式
+    else if (typeof createdAt === 'string') {
+      date = new Date(createdAt);
+    }
+    // 数値形式（Unix timestamp in milliseconds）
+    else if (typeof createdAt === 'number') {
+      date = new Date(createdAt);
+    }
+    // Dateオブジェクト
+    else if (createdAt instanceof Date) {
+      date = createdAt;
+    }
+    else {
+      return null;
+    }
+    
+    // Invalid Dateチェック
+    if (isNaN(date.getTime())) {
+      return null;
+    }
+    
+    return date.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch (error) {
+    console.warn('日付フォーマットエラー:', error, createdAt);
+    return null;
+  }
+}
+

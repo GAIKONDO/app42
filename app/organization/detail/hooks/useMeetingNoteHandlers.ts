@@ -119,10 +119,14 @@ export function useMeetingNoteHandlers({
       
       devLog('✅ 議事録を追加しました。ID:', noteId);
       
-      // リストを再取得
-      const notes = await getMeetingNotes(validOrgId);
-      devLog('📋 再取得した議事録リスト数:', notes.length);
-      setMeetingNotes(notes);
+      // 現在の組織の議事録を再取得
+      const newNotes = await getMeetingNotes(validOrgId);
+      devLog('📋 再取得した議事録リスト数:', newNotes.length);
+      
+      // 既存の議事録から、現在の組織の議事録を除外し、新しい議事録を追加
+      const otherOrgNotes = meetingNotes.filter(n => n.organizationId !== validOrgId);
+      const updatedNotes = [...otherOrgNotes, ...newNotes];
+      setMeetingNotes(updatedNotes);
       
       // モーダルを閉じてフォームをリセット
       setShowAddMeetingNoteModal(false);
@@ -171,8 +175,13 @@ export function useMeetingNoteHandlers({
       });
 
       const validOrgId = organization?.id || organizationId;
-      const notes = await getMeetingNotes(validOrgId);
-      setMeetingNotes(notes);
+      const newNotes = await getMeetingNotes(validOrgId);
+      
+      // 既存の議事録から、現在の組織の議事録を除外し、新しい議事録を追加
+      const otherOrgNotes = meetingNotes.filter(n => n.organizationId !== validOrgId);
+      const updatedNotes = [...otherOrgNotes, ...newNotes];
+      setMeetingNotes(updatedNotes);
+      
       setEditingMeetingNoteId(null);
       setEditingMeetingNoteTitle('');
       
@@ -209,8 +218,12 @@ export function useMeetingNoteHandlers({
       await deleteMeetingNote(noteId);
       
       const validOrgId = organization?.id || organizationId;
-      const notes = await getMeetingNotes(validOrgId);
-      setMeetingNotes(notes);
+      const newNotes = await getMeetingNotes(validOrgId);
+      
+      // 既存の議事録から、現在の組織の議事録を除外し、新しい議事録を追加
+      const otherOrgNotes = meetingNotes.filter(n => n.organizationId !== validOrgId);
+      const updatedNotes = [...otherOrgNotes, ...newNotes];
+      setMeetingNotes(updatedNotes);
       
       await tauriAlert('議事録を削除しました');
     } catch (error: any) {

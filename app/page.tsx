@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import { setupDebugFunctions } from './utils/debugUtils';
 import { useDashboardData } from './hooks/useDashboardData';
+import { useNDARenewalAlerts } from './hooks/useNDARenewalAlerts';
 import { DashboardHeader } from './components/dashboard/DashboardHeader';
 import { DashboardTabBar } from './components/dashboard/TabBar';
 import { ThemeInitiativeAnalysisTab } from './components/dashboard/ThemeInitiativeAnalysisTab';
 import { PlaceholderTab } from './components/dashboard/PlaceholderTab';
 import { CategoryBizDevPhaseSnapshotTab } from './components/dashboard/CategoryBizDevPhaseSnapshotTab';
+import { NDARenewalAlert } from './components/dashboard/NDARenewalAlert';
 
 // 表示モードの型定義（typeベースのフィルターに変更）
 type DashboardViewMode = 'all' | 'organization' | 'company' | 'person';
@@ -41,6 +43,9 @@ export default function DashboardPage() {
     selectedLevel,
     setSelectedLevel,
   });
+
+  // NDA更新予定期間のアラート
+  const { alerts: ndaAlerts, loading: ndaAlertsLoading } = useNDARenewalAlerts();
 
   // level1And2Orgsを計算（フィルターボタン用）
   const level1And2Orgs = useMemo(() => {
@@ -138,6 +143,14 @@ export default function DashboardPage() {
 
   return (
     <Layout>
+      {/* NDA更新アラート */}
+      {!ndaAlertsLoading && (
+        <NDARenewalAlert
+          approaching={ndaAlerts.approaching}
+          overdue={ndaAlerts.overdue}
+        />
+      )}
+      
       <div className="card" style={{ padding: '32px' }}>
         <DashboardHeader selectedTypeFilter={selectedTypeFilter} />
         

@@ -783,6 +783,134 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
     };
   }, [organizationId]);
 
+  // meetingNotesが変更されたときにmeetingNotesByOrgを再計算
+  useEffect(() => {
+    if (!organization || (meetingNotes.length === 0 && meetingNotesByOrg.size === 0)) {
+      return; // 初期化前またはデータがない場合はスキップ
+    }
+
+    devLog('🔄 [useEffect] meetingNotesが変更されたため、meetingNotesByOrgを再計算します:', {
+      meetingNotesCount: meetingNotes.length,
+      organizationId: organization.id,
+    });
+
+    // 組織ごとにグループ化
+    const meetingNotesByOrgMap = new Map<string, { orgName: string; meetingNotes: MeetingNote[] }>();
+    
+    // 現在の組織とその子組織のIDを収集
+    const allOrgIds: string[] = [];
+    const collectOrgIds = (org: OrgNodeData) => {
+      if (org.id) {
+        allOrgIds.push(org.id);
+      }
+      if (org.children) {
+        for (const child of org.children) {
+          collectOrgIds(child);
+        }
+      }
+    };
+    
+    if (organization) {
+      collectOrgIds(organization);
+    }
+    
+    // 各組織の議事録をグループ化
+    for (const orgId of allOrgIds) {
+      const orgMeetingNotes = meetingNotes.filter(n => n.organizationId === orgId);
+      if (orgMeetingNotes.length > 0) {
+        const findOrgName = (org: OrgNodeData, targetId: string): string | null => {
+          if (org.id === targetId) {
+            return org.name || org.title || targetId;
+          }
+          if (org.children) {
+            for (const child of org.children) {
+              const found = findOrgName(child, targetId);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+        
+        const orgName = organization ? findOrgName(organization, orgId) : null;
+        meetingNotesByOrgMap.set(orgId, {
+          orgName: orgName || orgId,
+          meetingNotes: orgMeetingNotes,
+        });
+      }
+    }
+    
+    setMeetingNotesByOrg(meetingNotesByOrgMap);
+    
+    devLog('✅ [useEffect] meetingNotesByOrgを更新しました:', {
+      byOrgCount: meetingNotesByOrgMap.size,
+      totalMeetingNotes: meetingNotes.length,
+    });
+  }, [meetingNotes, organization]);
+
+  // startupsが変更されたときにstartupsByOrgを再計算
+  useEffect(() => {
+    if (!organization || (startups.length === 0 && startupsByOrg.size === 0)) {
+      return; // 初期化前またはデータがない場合はスキップ
+    }
+
+    devLog('🔄 [useEffect] startupsが変更されたため、startupsByOrgを再計算します:', {
+      startupsCount: startups.length,
+      organizationId: organization.id,
+    });
+
+    // 組織ごとにグループ化
+    const startupsByOrgMap = new Map<string, { orgName: string; startups: Startup[] }>();
+    
+    // 現在の組織とその子組織のIDを収集
+    const allOrgIds: string[] = [];
+    const collectOrgIds = (org: OrgNodeData) => {
+      if (org.id) {
+        allOrgIds.push(org.id);
+      }
+      if (org.children) {
+        for (const child of org.children) {
+          collectOrgIds(child);
+        }
+      }
+    };
+    
+    if (organization) {
+      collectOrgIds(organization);
+    }
+    
+    // 各組織のスタートアップをグループ化
+    for (const orgId of allOrgIds) {
+      const orgStartups = startups.filter(s => s.organizationId === orgId);
+      if (orgStartups.length > 0) {
+        const findOrgName = (org: OrgNodeData, targetId: string): string | null => {
+          if (org.id === targetId) {
+            return org.name || org.title || targetId;
+          }
+          if (org.children) {
+            for (const child of org.children) {
+              const found = findOrgName(child, targetId);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+        
+        const orgName = organization ? findOrgName(organization, orgId) : null;
+        startupsByOrgMap.set(orgId, {
+          orgName: orgName || orgId,
+          startups: orgStartups,
+        });
+      }
+    }
+    
+    setStartupsByOrg(startupsByOrgMap);
+    
+    devLog('✅ [useEffect] startupsByOrgを更新しました:', {
+      byOrgCount: startupsByOrgMap.size,
+      totalStartups: startups.length,
+    });
+  }, [startups, organization]);
+
   return {
     organization,
     organizationContent,

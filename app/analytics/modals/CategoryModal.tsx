@@ -160,12 +160,19 @@ export default function CategoryModal({
           }}>
             親カテゴリー
           </label>
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '8px',
-            marginBottom: '8px',
-          }}>
+          <div 
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '8px',
+              maxHeight: availableParentCategories.length >= 10 ? '200px' : 'none',
+              overflowY: availableParentCategories.length >= 10 ? 'auto' : 'visible',
+              paddingRight: availableParentCategories.length >= 10 ? '4px' : '0',
+              scrollbarWidth: 'thin',
+              scrollbarColor: '#D1D5DB #F3F4F6',
+            }}
+          >
             <button
               type="button"
               onClick={() => onParentIdChange(null)}
@@ -180,6 +187,7 @@ export default function CategoryModal({
                 fontWeight: !categoryFormParentId ? '500' : '400',
                 transition: 'all 0.2s',
                 fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                flexShrink: 0,
               }}
               onMouseEnter={(e) => {
                 if (categoryFormParentId) {
@@ -212,6 +220,7 @@ export default function CategoryModal({
                   fontWeight: categoryFormParentId === cat.id ? '500' : '400',
                   transition: 'all 0.2s',
                   fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                  flexShrink: 0,
                 }}
                 onMouseEnter={(e) => {
                   if (categoryFormParentId !== cat.id) {

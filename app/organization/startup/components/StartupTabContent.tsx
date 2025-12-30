@@ -96,12 +96,20 @@ interface StartupTabContentProps {
   engagementLevels: EngagementLevel[];
   bizDevPhases: BizDevPhase[];
   // Periods Tab
-  localConsiderationPeriod: string;
-  setLocalConsiderationPeriod: (period: string) => void;
-  localExecutionPeriod: string;
-  setLocalExecutionPeriod: (period: string) => void;
-  localMonetizationPeriod: string;
-  setLocalMonetizationPeriod: (period: string) => void;
+  localConsiderationStartPeriod: string;
+  setLocalConsiderationStartPeriod: (period: string) => void;
+  localConsiderationEndPeriod: string;
+  setLocalConsiderationEndPeriod: (period: string) => void;
+  localExecutionStartPeriod: string;
+  setLocalExecutionStartPeriod: (period: string) => void;
+  localExecutionEndPeriod: string;
+  setLocalExecutionEndPeriod: (period: string) => void;
+  localMonetizationStartPeriod: string;
+  setLocalMonetizationStartPeriod: (period: string) => void;
+  localMonetizationEndPeriod: string;
+  setLocalMonetizationEndPeriod: (period: string) => void;
+  localMonetizationRenewalNotRequired: boolean;
+  setLocalMonetizationRenewalNotRequired: (value: boolean) => void;
   // Relations Tab
   localCauseEffectCode: string;
   setLocalCauseEffectCode: (code: string) => void;
@@ -207,12 +215,20 @@ export default function StartupTabContent({
   statuses,
   engagementLevels,
   bizDevPhases,
-  localConsiderationPeriod,
-  setLocalConsiderationPeriod,
-  localExecutionPeriod,
-  setLocalExecutionPeriod,
-  localMonetizationPeriod,
-  setLocalMonetizationPeriod,
+  localConsiderationStartPeriod,
+  setLocalConsiderationStartPeriod,
+  localConsiderationEndPeriod,
+  setLocalConsiderationEndPeriod,
+  localExecutionStartPeriod,
+  setLocalExecutionStartPeriod,
+  localExecutionEndPeriod,
+  setLocalExecutionEndPeriod,
+  localMonetizationStartPeriod,
+  setLocalMonetizationStartPeriod,
+  localMonetizationEndPeriod,
+  setLocalMonetizationEndPeriod,
+  localMonetizationRenewalNotRequired,
+  setLocalMonetizationRenewalNotRequired,
   localCauseEffectCode,
   setLocalCauseEffectCode,
   localMethodForDiagram,
@@ -294,6 +310,7 @@ export default function StartupTabContent({
           isEditing={isEditing}
           editingContent={editingContent}
           setEditingContent={setEditingContent}
+          startup={startup}
           localCategory={localCategory}
           setLocalCategory={setLocalCategory}
           localStatus={localStatus}
@@ -344,12 +361,20 @@ export default function StartupTabContent({
     case 'periods':
       return (
         <PeriodsTab
-          localConsiderationPeriod={localConsiderationPeriod}
-          setLocalConsiderationPeriod={setLocalConsiderationPeriod}
-          localExecutionPeriod={localExecutionPeriod}
-          setLocalExecutionPeriod={setLocalExecutionPeriod}
-          localMonetizationPeriod={localMonetizationPeriod}
-          setLocalMonetizationPeriod={setLocalMonetizationPeriod}
+          localConsiderationStartPeriod={localConsiderationStartPeriod}
+          setLocalConsiderationStartPeriod={setLocalConsiderationStartPeriod}
+          localConsiderationEndPeriod={localConsiderationEndPeriod}
+          setLocalConsiderationEndPeriod={setLocalConsiderationEndPeriod}
+          localExecutionStartPeriod={localExecutionStartPeriod}
+          setLocalExecutionStartPeriod={setLocalExecutionStartPeriod}
+          localExecutionEndPeriod={localExecutionEndPeriod}
+          setLocalExecutionEndPeriod={setLocalExecutionEndPeriod}
+          localMonetizationStartPeriod={localMonetizationStartPeriod}
+          setLocalMonetizationStartPeriod={setLocalMonetizationStartPeriod}
+          localMonetizationEndPeriod={localMonetizationEndPeriod}
+          setLocalMonetizationEndPeriod={setLocalMonetizationEndPeriod}
+          localMonetizationRenewalNotRequired={localMonetizationRenewalNotRequired}
+          setLocalMonetizationRenewalNotRequired={setLocalMonetizationRenewalNotRequired}
         />
       );
       

@@ -246,6 +246,7 @@ export interface Startup {
   considerationPeriod?: string; // 検討期間
   executionPeriod?: string; // 実行期間
   monetizationPeriod?: string; // 収益化期間
+  monetizationRenewalNotRequired?: boolean; // NDA更新不要フラグ
   relatedOrganizations?: string[]; // 関連組織
   relatedGroupCompanies?: string[]; // 関連グループ会社
   monetizationDiagram?: string; // マネタイズ図（Mermaid図）

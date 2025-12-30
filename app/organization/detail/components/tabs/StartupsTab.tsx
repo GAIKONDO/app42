@@ -3,6 +3,7 @@
 import { useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Startup } from '@/lib/orgApi';
+import { formatStartupDate } from '@/lib/orgApi/utils';
 
 interface StartupsTabProps {
   organizationId: string;
@@ -447,16 +448,14 @@ export default function StartupsTab({
                       </button>
                     </div>
                   </div>
-                  {startup.description && (
-                    <p style={{ fontSize: '14px', color: 'var(--color-text-light)', marginBottom: '8px', lineHeight: '1.5' }}>
-                      {startup.description}
-                    </p>
-                  )}
-                  {startup.createdAt && (
-                    <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '8px' }}>
-                      作成日: {new Date(startup.createdAt).toLocaleDateString('ja-JP')}
-                    </div>
-                  )}
+                  {startup.createdAt && (() => {
+                    const formattedDate = formatStartupDate(startup.createdAt);
+                    return formattedDate ? (
+                      <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '8px' }}>
+                        作成日: {formattedDate}
+                      </div>
+                    ) : null;
+                  })()}
                 </>
               )}
             </div>

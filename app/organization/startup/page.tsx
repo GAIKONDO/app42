@@ -77,9 +77,13 @@ function StartupDetailPageContent() {
   const [localEvaluationChart, setLocalEvaluationChart] = useState<any>(null);
   const [localEvaluationChartSnapshots, setLocalEvaluationChartSnapshots] = useState<any[]>([]);
   const [isEditingChart, setIsEditingChart] = useState(false);
-  const [localConsiderationPeriod, setLocalConsiderationPeriod] = useState(initialLocalState.considerationPeriod);
-  const [localExecutionPeriod, setLocalExecutionPeriod] = useState(initialLocalState.executionPeriod);
-  const [localMonetizationPeriod, setLocalMonetizationPeriod] = useState(initialLocalState.monetizationPeriod);
+  const [localConsiderationStartPeriod, setLocalConsiderationStartPeriod] = useState(initialLocalState.considerationStartPeriod);
+  const [localConsiderationEndPeriod, setLocalConsiderationEndPeriod] = useState(initialLocalState.considerationEndPeriod);
+  const [localExecutionStartPeriod, setLocalExecutionStartPeriod] = useState(initialLocalState.executionStartPeriod);
+  const [localExecutionEndPeriod, setLocalExecutionEndPeriod] = useState(initialLocalState.executionEndPeriod);
+  const [localMonetizationStartPeriod, setLocalMonetizationStartPeriod] = useState(initialLocalState.monetizationStartPeriod);
+  const [localMonetizationEndPeriod, setLocalMonetizationEndPeriod] = useState(initialLocalState.monetizationEndPeriod);
+  const [localMonetizationRenewalNotRequired, setLocalMonetizationRenewalNotRequired] = useState(initialLocalState.monetizationRenewalNotRequired);
   const [localRelatedOrganizations, setLocalRelatedOrganizations] = useState<string[]>(initialLocalState.relatedOrganizations);
   const [localRelatedGroupCompanies, setLocalRelatedGroupCompanies] = useState<string[]>(initialLocalState.relatedGroupCompanies);
   const [localMonetizationDiagram, setLocalMonetizationDiagram] = useState(initialLocalState.monetizationDiagram);
@@ -142,9 +146,13 @@ function StartupDetailPageContent() {
     } else {
       setLocalEvaluationChartSnapshots([]);
     }
-    setLocalConsiderationPeriod(initialLocalState.considerationPeriod);
-    setLocalExecutionPeriod(initialLocalState.executionPeriod);
-    setLocalMonetizationPeriod(initialLocalState.monetizationPeriod);
+    setLocalConsiderationStartPeriod(initialLocalState.considerationStartPeriod);
+    setLocalConsiderationEndPeriod(initialLocalState.considerationEndPeriod);
+    setLocalExecutionStartPeriod(initialLocalState.executionStartPeriod);
+    setLocalExecutionEndPeriod(initialLocalState.executionEndPeriod);
+    setLocalMonetizationStartPeriod(initialLocalState.monetizationStartPeriod);
+    setLocalMonetizationEndPeriod(initialLocalState.monetizationEndPeriod);
+    setLocalMonetizationRenewalNotRequired(initialLocalState.monetizationRenewalNotRequired);
     setLocalRelatedOrganizations(initialLocalState.relatedOrganizations);
     setLocalRelatedGroupCompanies(initialLocalState.relatedGroupCompanies);
     setLocalMonetizationDiagram(initialLocalState.monetizationDiagram);
@@ -304,9 +312,13 @@ function StartupDetailPageContent() {
     localEvaluation,
     localEvaluationChart,
     localEvaluationChartSnapshots,
-    localConsiderationPeriod,
-    localExecutionPeriod,
-    localMonetizationPeriod,
+    localConsiderationStartPeriod,
+    localConsiderationEndPeriod,
+    localExecutionStartPeriod,
+    localExecutionEndPeriod,
+    localMonetizationStartPeriod,
+    localMonetizationEndPeriod,
+    localMonetizationRenewalNotRequired,
     localRelatedOrganizations,
     localRelatedGroupCompanies,
     localMonetizationDiagram,
@@ -336,9 +348,13 @@ function StartupDetailPageContent() {
     setLocalEvaluation,
     setLocalEvaluationChart,
     setLocalEvaluationChartSnapshots,
-    setLocalConsiderationPeriod,
-    setLocalExecutionPeriod,
-    setLocalMonetizationPeriod,
+    setLocalConsiderationStartPeriod,
+    setLocalConsiderationEndPeriod,
+    setLocalExecutionStartPeriod,
+    setLocalExecutionEndPeriod,
+    setLocalMonetizationStartPeriod,
+    setLocalMonetizationEndPeriod,
+    setLocalMonetizationRenewalNotRequired,
     setLocalRelatedOrganizations,
     setLocalRelatedGroupCompanies,
     setLocalMonetizationDiagram,
@@ -529,12 +545,20 @@ function StartupDetailPageContent() {
           statuses={statuses}
           engagementLevels={engagementLevels}
           bizDevPhases={bizDevPhases}
-          localConsiderationPeriod={localConsiderationPeriod}
-          setLocalConsiderationPeriod={setLocalConsiderationPeriod}
-          localExecutionPeriod={localExecutionPeriod}
-          setLocalExecutionPeriod={setLocalExecutionPeriod}
-          localMonetizationPeriod={localMonetizationPeriod}
-          setLocalMonetizationPeriod={setLocalMonetizationPeriod}
+          localConsiderationStartPeriod={localConsiderationStartPeriod}
+          setLocalConsiderationStartPeriod={setLocalConsiderationStartPeriod}
+          localConsiderationEndPeriod={localConsiderationEndPeriod}
+          setLocalConsiderationEndPeriod={setLocalConsiderationEndPeriod}
+          localExecutionStartPeriod={localExecutionStartPeriod}
+          setLocalExecutionStartPeriod={setLocalExecutionStartPeriod}
+          localExecutionEndPeriod={localExecutionEndPeriod}
+          setLocalExecutionEndPeriod={setLocalExecutionEndPeriod}
+          localMonetizationStartPeriod={localMonetizationStartPeriod}
+          setLocalMonetizationStartPeriod={setLocalMonetizationStartPeriod}
+          localMonetizationEndPeriod={localMonetizationEndPeriod}
+          setLocalMonetizationEndPeriod={setLocalMonetizationEndPeriod}
+          localMonetizationRenewalNotRequired={localMonetizationRenewalNotRequired}
+          setLocalMonetizationRenewalNotRequired={setLocalMonetizationRenewalNotRequired}
           localCauseEffectCode={localCauseEffectCode}
           setLocalCauseEffectCode={setLocalCauseEffectCode}
           localMethodForDiagram={localMethod}

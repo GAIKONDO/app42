@@ -21,6 +21,7 @@ import {
   type Startup,
   type CategoryBizDevPhaseSnapshot,
 } from '@/lib/orgApi';
+import { formatStartupDate } from '@/lib/orgApi/utils';
 
 // VegaChartを動的インポート（SSRを回避）
 const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
@@ -1200,7 +1201,7 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
     <div>
       <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>
-          {currentYear}年の各月での数値の変化
+          現在の数値
         </h3>
         {/* 表示形式切り替えボタン */}
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -1234,6 +1235,211 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
           >
             折れ線グラフ
           </button>
+        </div>
+      </div>
+
+      {/* 統計情報カード */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: typeof window !== 'undefined' && window.innerWidth < 768 
+          ? '1fr' 
+          : 'repeat(3, 1fr)',
+        gap: typeof window !== 'undefined' && window.innerWidth < 768 ? '16px' : '20px',
+        marginBottom: '32px',
+      }}>
+        {/* カテゴリー数 */}
+        <div style={{
+          padding: '24px',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+          transition: 'all 0.2s ease',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+        >
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '60px',
+            height: '60px',
+            background: 'linear-gradient(135deg, #F0F4FF 0%, #E0E8FF 100%)',
+            borderRadius: '0 12px 0 60px',
+            opacity: 0.5,
+          }} />
+          <div style={{
+            fontSize: '13px',
+            color: '#6B7280',
+            marginBottom: '12px',
+            fontWeight: '500',
+            letterSpacing: '0.02em',
+            textTransform: 'uppercase',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            カテゴリー数
+          </div>
+          <div style={{
+            fontSize: '40px',
+            fontWeight: '700',
+            color: '#1A1A1A',
+            lineHeight: '1',
+            marginBottom: '4px',
+            position: 'relative',
+            zIndex: 1,
+            fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
+          }}>
+            {categories.filter(c => !c.parentCategoryId).length}
+          </div>
+          <div style={{
+            fontSize: '13px',
+            color: '#9CA3AF',
+            fontWeight: '400',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            件のカテゴリー
+          </div>
+        </div>
+
+        {/* サブカテゴリー数 */}
+        <div style={{
+          padding: '24px',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+          transition: 'all 0.2s ease',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+        >
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '60px',
+            height: '60px',
+            background: 'linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)',
+            borderRadius: '0 12px 0 60px',
+            opacity: 0.5,
+          }} />
+          <div style={{
+            fontSize: '13px',
+            color: '#6B7280',
+            marginBottom: '12px',
+            fontWeight: '500',
+            letterSpacing: '0.02em',
+            textTransform: 'uppercase',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            サブカテゴリー数
+          </div>
+          <div style={{
+            fontSize: '40px',
+            fontWeight: '700',
+            color: '#1A1A1A',
+            lineHeight: '1',
+            marginBottom: '4px',
+            position: 'relative',
+            zIndex: 1,
+            fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
+          }}>
+            {categories.filter(c => c.parentCategoryId).length}
+          </div>
+          <div style={{
+            fontSize: '13px',
+            color: '#9CA3AF',
+            fontWeight: '400',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            件のサブカテゴリー
+          </div>
+        </div>
+
+        {/* スタートアップ件数 */}
+        <div style={{
+          padding: '24px',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+          transition: 'all 0.2s ease',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+        >
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '60px',
+            height: '60px',
+            background: 'linear-gradient(135deg, #FEF3F2 0%, #FEE2E2 100%)',
+            borderRadius: '0 12px 0 60px',
+            opacity: 0.5,
+          }} />
+          <div style={{
+            fontSize: '13px',
+            color: '#6B7280',
+            marginBottom: '12px',
+            fontWeight: '500',
+            letterSpacing: '0.02em',
+            textTransform: 'uppercase',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            スタートアップ件数
+          </div>
+          <div style={{
+            fontSize: '40px',
+            fontWeight: '700',
+            color: '#1A1A1A',
+            lineHeight: '1',
+            marginBottom: '4px',
+            position: 'relative',
+            zIndex: 1,
+            fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
+          }}>
+            {startups.length}
+          </div>
+          <div style={{
+            fontSize: '13px',
+            color: '#9CA3AF',
+            fontWeight: '400',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            件のスタートアップ
+          </div>
         </div>
       </div>
 
@@ -1758,19 +1964,18 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
                 }}>
                   {startup.title}
                 </div>
-                {startup.description && (
-                  <div style={{
-                    fontSize: '13px',
-                    color: '#6B7280',
-                    lineHeight: '1.5',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                  }}>
-                    {startup.description}
-                  </div>
-                )}
+                {startup.createdAt && (() => {
+                  const formattedDate = formatStartupDate(startup.createdAt);
+                  return formattedDate ? (
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#9CA3AF',
+                      marginTop: '8px',
+                    }}>
+                      作成日: {formattedDate}
+                    </div>
+                  ) : null;
+                })()}
               </div>
             ))}
           </div>

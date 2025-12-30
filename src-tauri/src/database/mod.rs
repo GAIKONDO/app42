@@ -645,6 +645,7 @@ impl Database {
             ("hpUrl", "TEXT"),
             ("asanaUrl", "TEXT"),
             ("boxUrl", "TEXT"),
+            ("monetizationRenewalNotRequired", "INTEGER"),
         ];
         for (column_name, column_type) in startups_columns_to_add {
             let column_exists: bool = conn.query_row(

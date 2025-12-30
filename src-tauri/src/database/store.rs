@@ -278,7 +278,7 @@ pub fn set_doc(collection_name: &str, doc_id: &str, data: HashMap<String, Value>
         "titleBorderEnabled", "keyVisualHeight", "keyVisualScale",
         "keyVisualLogoSize", "titlePositionX", "titlePositionY",
         "titleFontSize", "fileSize", "sequenceNumber",
-        "position",
+        "position", "monetizationRenewalNotRequired",
     ];
     
     // JSONフィールドを文字列化（既に文字列の場合はそのまま）
@@ -592,7 +592,7 @@ pub fn update_doc(collection_name: &str, doc_id: &str, data: HashMap<String, Val
         "titleBorderEnabled", "keyVisualHeight", "keyVisualScale",
         "keyVisualLogoSize", "titlePositionX", "titlePositionY",
         "titleFontSize", "fileSize", "sequenceNumber",
-        "position",
+        "position", "monetizationRenewalNotRequired",
     ];
     
     // JSONフィールドを文字列化（既に文字列の場合はそのまま）

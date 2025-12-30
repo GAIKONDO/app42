@@ -510,3 +510,60 @@ pub async fn open_file(file_path: String) -> Result<HashMap<String, Value>, Stri
     }
 }
 
+/// URLをブラウザで開く
+/// 
+/// # Arguments
+/// * `url` - 開くURL（http://またはhttps://で始まる）
+/// 
+/// # Returns
+/// * `success`: 成功したかどうか
+/// * `error`: エラーメッセージ（失敗時）
+#[tauri::command]
+pub async fn open_url(url: String) -> Result<HashMap<String, Value>, String> {
+    // URLがhttp://またはhttps://で始まることを確認
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        let mut result = HashMap::new();
+        result.insert("success".to_string(), Value::Bool(false));
+        result.insert("error".to_string(), Value::String("無効なURLです。http://またはhttps://で始まる必要があります。".to_string()));
+        return Ok(result);
+    }
+    
+    // プラットフォームごとに適切なコマンドを実行
+    let output = if cfg!(target_os = "macos") {
+        Command::new("open")
+            .arg(&url)
+            .output()
+    } else if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .output()
+    } else {
+        // Linux
+        Command::new("xdg-open")
+            .arg(&url)
+            .output()
+    };
+    
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                let mut result = HashMap::new();
+                result.insert("success".to_string(), Value::Bool(true));
+                Ok(result)
+            } else {
+                let error_msg = String::from_utf8_lossy(&output.stderr);
+                let mut result = HashMap::new();
+                result.insert("success".to_string(), Value::Bool(false));
+                result.insert("error".to_string(), Value::String(format!("URLを開けませんでした: {}", error_msg)));
+                Ok(result)
+            }
+        }
+        Err(e) => {
+            let mut result = HashMap::new();
+            result.insert("success".to_string(), Value::Bool(false));
+            result.insert("error".to_string(), Value::String(format!("コマンド実行エラー: {}", e)));
+            Ok(result)
+        }
+    }
+}
+

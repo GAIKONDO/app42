@@ -51,9 +51,13 @@ interface UseStartupDataReturn {
     evaluation: string;
     evaluationChart: any;
     evaluationChartSnapshots: any[];
-    considerationPeriod: string;
-    executionPeriod: string;
-    monetizationPeriod: string;
+    considerationStartPeriod: string;
+    considerationEndPeriod: string;
+    executionStartPeriod: string;
+    executionEndPeriod: string;
+    monetizationStartPeriod: string;
+    monetizationEndPeriod: string;
+    monetizationRenewalNotRequired: boolean;
     relatedOrganizations: string[];
     relatedGroupCompanies: string[];
     monetizationDiagram: string;
@@ -125,9 +129,13 @@ export function useStartupData(
     evaluation: '',
     evaluationChart: null,
     evaluationChartSnapshots: [],
-    considerationPeriod: '',
-    executionPeriod: '',
-    monetizationPeriod: '',
+    considerationStartPeriod: '',
+    considerationEndPeriod: '',
+    executionStartPeriod: '',
+    executionEndPeriod: '',
+    monetizationStartPeriod: '',
+    monetizationEndPeriod: '',
+    monetizationRenewalNotRequired: false,
     relatedOrganizations: [],
     relatedGroupCompanies: [],
     monetizationDiagram: '',
@@ -408,9 +416,45 @@ export function useStartupData(
         const evaluationValue = startupData.evaluation || '';
         const evaluationChartValue = startupData.evaluationChart || null;
         const evaluationChartSnapshotsValue = Array.isArray(startupData.evaluationChartSnapshots) ? startupData.evaluationChartSnapshots : [];
-        const considerationPeriodValue = startupData.considerationPeriod || '';
-        const executionPeriodValue = startupData.executionPeriod || '';
-        const monetizationPeriodValue = startupData.monetizationPeriod || '';
+        // 期間データを開始期間と終了期間に分割
+        // 既存データが「2024-01/2024-12」または「2024-01-01/2024-12-31」形式の場合、スラッシュで分割
+        // 「YYYY-MM」形式の場合は「YYYY-MM-01」に変換（既存データとの互換性のため）
+        const parsePeriod = (period: string): { start: string; end: string } => {
+          if (!period) return { start: '', end: '' };
+          const parts = period.split('/');
+          if (parts.length === 2) {
+            let start = parts[0].trim();
+            let end = parts[1].trim();
+            
+            // 「YYYY-MM」形式を「YYYY-MM-01」に変換
+            if (start.match(/^\d{4}-\d{2}$/)) {
+              start = `${start}-01`;
+            }
+            if (end.match(/^\d{4}-\d{2}$/)) {
+              end = `${end}-01`;
+            }
+            
+            return { start, end };
+          }
+          // 単一の値の場合
+          let single = period.trim();
+          if (single.match(/^\d{4}-\d{2}$/)) {
+            single = `${single}-01`;
+          }
+          return { start: single, end: '' };
+        };
+        
+        const considerationPeriod = parsePeriod(startupData.considerationPeriod || '');
+        const executionPeriod = parsePeriod(startupData.executionPeriod || '');
+        const monetizationPeriod = parsePeriod(startupData.monetizationPeriod || '');
+        
+        const considerationStartPeriodValue = considerationPeriod.start;
+        const considerationEndPeriodValue = considerationPeriod.end;
+        const executionStartPeriodValue = executionPeriod.start;
+        const executionEndPeriodValue = executionPeriod.end;
+        const monetizationStartPeriodValue = monetizationPeriod.start;
+        const monetizationEndPeriodValue = monetizationPeriod.end;
+        const monetizationRenewalNotRequiredValue = startupData.monetizationRenewalNotRequired !== undefined ? startupData.monetizationRenewalNotRequired : false;
         const monetizationDiagramValue = startupData.monetizationDiagram || '';
         const relationDiagramValue = startupData.relationDiagram || '';
         
@@ -512,9 +556,13 @@ export function useStartupData(
           evaluation: evaluationValue,
           evaluationChart: evaluationChartValue,
           evaluationChartSnapshots: evaluationChartSnapshotsValue,
-          considerationPeriod: considerationPeriodValue,
-          executionPeriod: executionPeriodValue,
-          monetizationPeriod: monetizationPeriodValue,
+          considerationStartPeriod: considerationStartPeriodValue,
+          considerationEndPeriod: considerationEndPeriodValue,
+          executionStartPeriod: executionStartPeriodValue,
+          executionEndPeriod: executionEndPeriodValue,
+          monetizationStartPeriod: monetizationStartPeriodValue,
+          monetizationEndPeriod: monetizationEndPeriodValue,
+          monetizationRenewalNotRequired: monetizationRenewalNotRequiredValue,
           relatedOrganizations: Array.isArray(startupData.relatedOrganizations) ? startupData.relatedOrganizations : [],
           relatedGroupCompanies: Array.isArray(startupData.relatedGroupCompanies) ? startupData.relatedGroupCompanies : [],
           monetizationDiagram: monetizationDiagramValue,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Category, Startup, BizDevPhase } from '@/lib/orgApi';
 import { useCategoryManagement } from '../../hooks/useCategoryManagement';
@@ -11,6 +11,7 @@ import type { RelationshipNode } from '@/components/RelationshipDiagram2D';
 import dynamic from 'next/dynamic';
 import { SubTabBar } from './SubTabBar';
 import { formatStartupDate } from '@/lib/orgApi/utils';
+import { StartupListModal } from './StartupListModal';
 
 const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
   ssr: false,
@@ -65,6 +66,17 @@ export function CategorySection({
   const [selectedMatrixCell, setSelectedMatrixCell] = useState<{ parentCategoryId: string; bizDevPhaseId: string } | null>(null);
   const [matrixXAxisMode, setMatrixXAxisMode] = useState<'parent' | 'sub'>('parent');
   const [barXAxisMode, setBarXAxisMode] = useState<'parent' | 'sub'>('parent');
+  const [selectedBizDevPhaseIds, setSelectedBizDevPhaseIds] = useState<string[]>([]);
+  const [isFilterExpanded, setIsFilterExpanded] = useState<boolean>(false);
+  const [showTotalStartupModal, setShowTotalStartupModal] = useState<boolean>(false);
+  const [showMatchingStartupModal, setShowMatchingStartupModal] = useState<boolean>(false);
+
+  // viewModeが'bar'以外に変更された時にフィルターをリセット
+  useEffect(() => {
+    if (viewMode !== 'bar') {
+      setSelectedBizDevPhaseIds([]);
+    }
+  }, [viewMode]);
   
   const { nodes, links } = useCategoryStartupDiagramData({
     categories,
@@ -72,8 +84,20 @@ export function CategorySection({
     selectedCategoryIds,
   });
 
-  // カテゴリーごとのスタートアップ件数を集計（横軸モードに応じて）
+  // フィルター適用後のスタートアップを計算
+  const filteredStartups = useMemo(() => {
+    if (viewMode === 'bar' && selectedBizDevPhaseIds.length > 0) {
+      return startups.filter(startup => {
+        const hasBizDevPhase = (startup as any).bizDevPhase && selectedBizDevPhaseIds.includes((startup as any).bizDevPhase);
+        return hasBizDevPhase;
+      });
+    }
+    return startups;
+  }, [startups, viewMode, selectedBizDevPhaseIds]);
+
+  // カテゴリーごとのスタートアップ件数を集計（横軸モードに応じて、フィルター適用後）
   const categoryChartData = useMemo(() => {
+    const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
     if (barXAxisMode === 'parent') {
       // 親カテゴリー × スタートアップ件数（積み上げなし）
       let targetCategories: Category[] = [];
@@ -113,7 +137,7 @@ export function CategorySection({
           .map(c => c.id);
         const allCategoryIds = [parentCategory.id, ...childCategoryIds];
         
-        const matchingStartups = startups.filter(startup => 
+        const matchingStartups = startupsToUse.filter(startup => 
           startup.categoryIds && startup.categoryIds.some(catId => allCategoryIds.includes(catId))
         );
         
@@ -144,7 +168,7 @@ export function CategorySection({
       }> = [];
 
       targetSubCategories.forEach(subCategory => {
-        const matchingStartups = startups.filter(startup => 
+        const matchingStartups = startupsToUse.filter(startup => 
           startup.categoryIds && startup.categoryIds.includes(subCategory.id)
         );
         
@@ -157,7 +181,7 @@ export function CategorySection({
 
       return chartData.filter(item => item.count > 0 || selectedCategoryIds.length === 0);
     }
-  }, [categories, startups, selectedCategoryIds, barXAxisMode]);
+  }, [categories, startups, selectedCategoryIds, barXAxisMode, viewMode, filteredStartups]);
 
   // マトリクスデータを生成（親カテゴリー × Biz-Devフェーズ または サブカテゴリー × Biz-Devフェーズ）
   // orderedBizDevPhasesとorderedCategoriesの順序を使用（管理タブの順序に合わせる）
@@ -481,6 +505,9 @@ export function CategorySection({
 
   // 統計情報を計算
   const statistics = useMemo(() => {
+    // 使用するスタートアップデータ（フィルター適用後）
+    const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
+    
     // 表示対象のカテゴリーを決定
     let targetCategories: Category[] = [];
     
@@ -515,9 +542,13 @@ export function CategorySection({
       return count + children.length;
     }, 0);
     
-    // スタートアップ数（選択されたカテゴリーに紐づくスタートアップ、重複除去）
+    // 全スタートアップ数（フィルター適用後の全スタートアップ数）
+    const totalStartupCount = startupsToUse.length;
+    const totalStartups = startupsToUse;
+    
+    // 該当スタートアップ数（選択されたカテゴリーに紐づくスタートアップ、重複除去）
     const getCategoryStartups = (cat: Category): Startup[] => {
-      const directStartups = startups.filter(startup => 
+      const directStartups = startupsToUse.filter(startup => 
         startup.categoryIds && startup.categoryIds.includes(cat.id)
       );
       
@@ -530,14 +561,18 @@ export function CategorySection({
     
     const allStartups = targetCategories.flatMap(cat => getCategoryStartups(cat));
     const uniqueStartups = Array.from(new Map(allStartups.map(s => [s.id, s])).values());
-    const startupCount = uniqueStartups.length;
+    const matchingStartupCount = uniqueStartups.length;
+    const matchingStartups = uniqueStartups;
     
     return {
       parentCategoryCount,
       subCategoryCount,
-      startupCount,
+      totalStartupCount,
+      totalStartups,
+      matchingStartupCount,
+      matchingStartups,
     };
-  }, [categories, startups, selectedCategoryIds]);
+  }, [categories, startups, selectedCategoryIds, viewMode, filteredStartups]);
 
   // 棒グラフのクリックイベントを処理
   const handleBarChartSignal = (signalName: string, value: any) => {
@@ -567,12 +602,14 @@ export function CategorySection({
     }
   };
 
-  // 選択されたカテゴリーに紐づくスタートアップを取得
+  // 選択されたカテゴリーに紐づくスタートアップを取得（フィルター適用後）
   const getSelectedCategoryStartups = useMemo(() => {
     if (!selectedBarCategoryId) return [];
 
+    const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
+
     const getCategoryStartups = (cat: Category): Startup[] => {
-      const directStartups = startups.filter(startup => 
+      const directStartups = startupsToUse.filter(startup => 
         startup.categoryIds && startup.categoryIds.includes(cat.id)
       );
       
@@ -589,7 +626,7 @@ export function CategorySection({
     if (!selectedCategory) return [];
 
     return getCategoryStartups(selectedCategory);
-  }, [selectedBarCategoryId, categories, startups]);
+  }, [selectedBarCategoryId, categories, startups, viewMode, filteredStartups]);
 
   // 選択されたカテゴリーのスタートアップをBiz-Devフェーズごとにグループ化
   const getSelectedCategoryStartupsByBizDevPhase = useMemo(() => {
@@ -1172,7 +1209,7 @@ export function CategorySection({
             display: 'grid',
             gridTemplateColumns: typeof window !== 'undefined' && window.innerWidth < 768 
               ? '1fr' 
-              : 'repeat(3, 1fr)',
+              : 'repeat(4, 1fr)',
             gap: typeof window !== 'undefined' && window.innerWidth < 768 ? '16px' : '20px',
             marginBottom: '32px',
           }}>
@@ -1306,25 +1343,28 @@ export function CategorySection({
               </div>
             </div>
 
-            {/* スタートアップ数カード */}
-            <div style={{
-              padding: '24px',
-              backgroundColor: '#FFFFFF',
-              border: '1px solid #E5E7EB',
-              borderRadius: '12px',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-              transition: 'all 0.2s ease',
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
+            {/* 全スタートアップ数カード */}
+            <div 
+              onClick={() => setShowTotalStartupModal(true)}
+              style={{
+                padding: '24px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E5E7EB',
+                borderRadius: '12px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
             >
               <div style={{
                 position: 'absolute',
@@ -1345,8 +1385,25 @@ export function CategorySection({
                 textTransform: 'uppercase',
                 position: 'relative',
                 zIndex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
               }}>
-                スタートアップ数
+                全スタートアップ数
+                {viewMode === 'bar' && selectedBizDevPhaseIds.length > 0 && (
+                  <span style={{
+                    padding: '2px 8px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#4262FF',
+                    backgroundColor: '#E0E8FF',
+                    borderRadius: '4px',
+                    textTransform: 'none',
+                    letterSpacing: '0',
+                  }}>
+                    フィルター適用中
+                  </span>
+                )}
               </div>
               <div style={{
                 fontSize: '40px',
@@ -1358,7 +1415,92 @@ export function CategorySection({
                 zIndex: 1,
                 fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
               }}>
-                {statistics.startupCount}
+                {statistics.totalStartupCount}
+              </div>
+              <div style={{
+                fontSize: '13px',
+                color: '#9CA3AF',
+                fontWeight: '400',
+                position: 'relative',
+                zIndex: 1,
+              }}>
+                件のスタートアップ
+              </div>
+            </div>
+
+            {/* 該当スタートアップ数カード */}
+            <div 
+              onClick={() => setShowMatchingStartupModal(true)}
+              style={{
+                padding: '24px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E5E7EB',
+                borderRadius: '12px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                width: '60px',
+                height: '60px',
+                background: 'linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)',
+                borderRadius: '0 12px 0 60px',
+                opacity: 0.5,
+              }} />
+              <div style={{
+                fontSize: '13px',
+                color: '#6B7280',
+                marginBottom: '12px',
+                fontWeight: '500',
+                letterSpacing: '0.02em',
+                textTransform: 'uppercase',
+                position: 'relative',
+                zIndex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                該当スタートアップ数
+                {viewMode === 'bar' && selectedBizDevPhaseIds.length > 0 && (
+                  <span style={{
+                    padding: '2px 8px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#4262FF',
+                    backgroundColor: '#E0E8FF',
+                    borderRadius: '4px',
+                    textTransform: 'none',
+                    letterSpacing: '0',
+                  }}>
+                    フィルター適用中
+                  </span>
+                )}
+              </div>
+              <div style={{
+                fontSize: '40px',
+                fontWeight: '700',
+                color: '#1A1A1A',
+                lineHeight: '1',
+                marginBottom: '4px',
+                position: 'relative',
+                zIndex: 1,
+                fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
+              }}>
+                {statistics.matchingStartupCount}
               </div>
               <div style={{
                 fontSize: '13px',
@@ -1509,6 +1651,146 @@ export function CategorySection({
               >
                 サブカテゴリー
               </button>
+            </div>
+          )}
+
+          {/* Biz-Devフェーズフィルター（棒グラフ表示時のみ） */}
+          {viewMode === 'bar' && (
+            <div style={{ 
+              marginBottom: '24px',
+              padding: '16px',
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: '8px',
+            }}>
+              <div 
+                onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                style={{
+                  marginBottom: isFilterExpanded ? '12px' : '0',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#1A1A1A',
+                  fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  userSelect: 'none',
+                }}
+              >
+                <span style={{
+                  display: 'inline-block',
+                  transform: isFilterExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s',
+                  fontSize: '12px',
+                }}>
+                  ▶
+                </span>
+                Biz-Devフェーズでフィルター
+                {selectedBizDevPhaseIds.length > 0 && (
+                  <span style={{
+                    marginLeft: '8px',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#4262FF',
+                    backgroundColor: '#E0E8FF',
+                    borderRadius: '4px',
+                  }}>
+                    {selectedBizDevPhaseIds.length}件選択中
+                  </span>
+                )}
+              </div>
+              {isFilterExpanded && (
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                }}>
+                {bizDevPhases.map(phase => {
+                  const isSelected = selectedBizDevPhaseIds.includes(phase.id);
+                  return (
+                    <label
+                      key={phase.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 12px',
+                        backgroundColor: isSelected ? '#E0E8FF' : '#FFFFFF',
+                        border: `1.5px solid ${isSelected ? '#4262FF' : '#E0E0E0'}`,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 150ms',
+                        fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
+                        fontSize: '14px',
+                        color: isSelected ? '#4262FF' : '#1A1A1A',
+                        fontWeight: isSelected ? '500' : '400',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor = '#F5F5F5';
+                          e.currentTarget.style.borderColor = '#C4C4C4';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor = '#FFFFFF';
+                          e.currentTarget.style.borderColor = '#E0E0E0';
+                        }
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedBizDevPhaseIds([...selectedBizDevPhaseIds, phase.id]);
+                          } else {
+                            setSelectedBizDevPhaseIds(selectedBizDevPhaseIds.filter(id => id !== phase.id));
+                          }
+                        }}
+                        style={{
+                          width: '16px',
+                          height: '16px',
+                          cursor: 'pointer',
+                          accentColor: '#4262FF',
+                        }}
+                      />
+                      <span>{phase.title}</span>
+                    </label>
+                  );
+                })}
+                {selectedBizDevPhaseIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBizDevPhaseIds([])}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: '#6B7280',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #E0E0E0',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 150ms',
+                      fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#F5F5F5';
+                      e.currentTarget.style.borderColor = '#C4C4C4';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#FFFFFF';
+                      e.currentTarget.style.borderColor = '#E0E0E0';
+                    }}
+                  >
+                    フィルターをクリア
+                  </button>
+                )}
+                </div>
+              )}
             </div>
           )}
 
@@ -2029,6 +2311,20 @@ export function CategorySection({
           )}
         </div>
       )}
+
+      {/* スタートアップ一覧モーダル */}
+      <StartupListModal
+        isOpen={showTotalStartupModal}
+        onClose={() => setShowTotalStartupModal(false)}
+        startups={statistics.totalStartups || []}
+        title="全スタートアップ一覧"
+      />
+      <StartupListModal
+        isOpen={showMatchingStartupModal}
+        onClose={() => setShowMatchingStartupModal(false)}
+        startups={statistics.matchingStartups || []}
+        title="該当スタートアップ一覧"
+      />
     </>
   );
 }

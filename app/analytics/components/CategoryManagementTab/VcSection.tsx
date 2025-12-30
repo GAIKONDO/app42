@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { VC, Startup, BizDevPhase } from '@/lib/orgApi';
 import { useVcManagement } from '../../hooks/useVcManagement';
 import { SubTabBar } from './SubTabBar';
 import dynamic from 'next/dynamic';
 import { formatStartupDate } from '@/lib/orgApi/utils';
+import { StartupListModal } from './StartupListModal';
 
 const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
   ssr: false,
@@ -39,18 +40,51 @@ export function VcSection({
   const [viewMode, setViewMode] = useState<'diagram' | 'bar' | 'matrix'>('matrix');
   const [selectedBarVcId, setSelectedBarVcId] = useState<string | null>(null);
   const [selectedMatrixCell, setSelectedMatrixCell] = useState<{ vcId: string; bizDevPhaseId: string } | null>(null);
+  const [selectedBizDevPhaseIds, setSelectedBizDevPhaseIds] = useState<string[]>([]);
+  const [isFilterExpanded, setIsFilterExpanded] = useState<boolean>(false);
+  const [showTotalStartupModal, setShowTotalStartupModal] = useState<boolean>(false);
+  const [showMatchingStartupModal, setShowMatchingStartupModal] = useState<boolean>(false);
+
+  // viewModeが'bar'以外に変更された時にフィルターをリセット
+  useEffect(() => {
+    if (viewMode !== 'bar') {
+      setSelectedBizDevPhaseIds([]);
+    }
+  }, [viewMode]);
+
+  // フィルター適用後のスタートアップを計算
+  const filteredStartups = useMemo(() => {
+    if (viewMode === 'bar' && selectedBizDevPhaseIds.length > 0) {
+      return startups.filter(startup => {
+        const hasBizDevPhase = (startup as any).bizDevPhase && selectedBizDevPhaseIds.includes((startup as any).bizDevPhase);
+        return hasBizDevPhase;
+      });
+    }
+    return startups;
+  }, [startups, viewMode, selectedBizDevPhaseIds]);
 
   // 統計情報を計算
   const statistics = useMemo(() => {
     const vcCount = vcs.length;
     
-    // 関連スタートアップ数（重複除去）
+    // 使用するスタートアップデータ（フィルター適用後）
+    const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
+    
+    // 全スタートアップ数（フィルター適用後の全スタートアップ数）
+    const totalStartupCount = startupsToUse.length;
+    const totalStartups = startupsToUse;
+    
+    // 該当スタートアップ数（VCに紐づくスタートアップ、重複除去）
     const uniqueStartupIds = new Set<string>();
-    startups.forEach(startup => {
+    const matchingStartups: Startup[] = [];
+    startupsToUse.forEach(startup => {
       if (startup.relatedVCS && startup.relatedVCS.length > 0) {
         startup.relatedVCS.forEach(vcId => {
           if (vcs.some(vc => vc.id === vcId)) {
-            uniqueStartupIds.add(startup.id);
+            if (!uniqueStartupIds.has(startup.id)) {
+              uniqueStartupIds.add(startup.id);
+              matchingStartups.push(startup);
+            }
           }
         });
       }
@@ -58,14 +92,18 @@ export function VcSection({
     
     return {
       vcCount,
-      startupCount: uniqueStartupIds.size,
+      totalStartupCount,
+      totalStartups,
+      matchingStartupCount: uniqueStartupIds.size,
+      matchingStartups,
     };
-  }, [vcs, startups]);
+  }, [vcs, startups, viewMode, filteredStartups]);
 
-  // VCごとのスタートアップ件数を集計
+  // VCごとのスタートアップ件数を集計（フィルター適用後）
   const vcChartData = useMemo(() => {
+    const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
     return vcs.map(vc => {
-      const relatedStartups = startups.filter(startup => 
+      const relatedStartups = startupsToUse.filter(startup => 
         startup.relatedVCS && startup.relatedVCS.includes(vc.id)
       );
       
@@ -75,7 +113,7 @@ export function VcSection({
         count: relatedStartups.length,
       };
     }).filter(item => item.count > 0); // 0件のVCは除外
-  }, [vcs, startups]);
+  }, [vcs, startups, viewMode, filteredStartups]);
 
   // 棒グラフの仕様を生成
   const barChartSpec = useMemo(() => {
@@ -167,14 +205,15 @@ export function VcSection({
     };
   }, [vcChartData]);
 
-  // 選択されたVCに紐づくスタートアップを取得
+  // 選択されたVCに紐づくスタートアップを取得（フィルター適用後）
   const getSelectedVcStartups = useMemo(() => {
     if (!selectedBarVcId) return [];
 
-    return startups.filter(startup => 
+    const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
+    return startupsToUse.filter(startup => 
       startup.relatedVCS && startup.relatedVCS.includes(selectedBarVcId)
     );
-  }, [selectedBarVcId, startups]);
+  }, [selectedBarVcId, startups, viewMode, filteredStartups]);
 
   // 選択されたVCのスタートアップをBiz-Devフェーズごとにグループ化
   const getSelectedVcStartupsByBizDevPhase = useMemo(() => {
@@ -525,7 +564,7 @@ export function VcSection({
             display: 'grid',
             gridTemplateColumns: typeof window !== 'undefined' && window.innerWidth < 768 
               ? '1fr' 
-              : 'repeat(2, 1fr)',
+              : 'repeat(3, 1fr)',
             gap: typeof window !== 'undefined' && window.innerWidth < 768 ? '16px' : '20px',
             marginBottom: '24px',
           }}>
@@ -594,25 +633,113 @@ export function VcSection({
               </div>
             </div>
 
-            {/* スタートアップ数カード */}
-            <div style={{
-              padding: '24px',
-              backgroundColor: '#FFFFFF',
-              border: '1px solid #E5E7EB',
-              borderRadius: '12px',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-              transition: 'all 0.2s ease',
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
+            {/* 全スタートアップ数カード */}
+            <div 
+              onClick={() => setShowTotalStartupModal(true)}
+              style={{
+                padding: '24px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E5E7EB',
+                borderRadius: '12px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                width: '60px',
+                height: '60px',
+                background: 'linear-gradient(135deg, #FDF2F8 0%, #FCE7F3 100%)',
+                borderRadius: '0 12px 0 60px',
+                opacity: 0.5,
+              }} />
+              <div style={{
+                fontSize: '13px',
+                color: '#6B7280',
+                marginBottom: '12px',
+                fontWeight: '500',
+                letterSpacing: '0.02em',
+                textTransform: 'uppercase',
+                position: 'relative',
+                zIndex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                全スタートアップ数
+                {viewMode === 'bar' && selectedBizDevPhaseIds.length > 0 && (
+                  <span style={{
+                    padding: '2px 8px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#4262FF',
+                    backgroundColor: '#E0E8FF',
+                    borderRadius: '4px',
+                    textTransform: 'none',
+                    letterSpacing: '0',
+                  }}>
+                    フィルター適用中
+                  </span>
+                )}
+              </div>
+              <div style={{
+                fontSize: '40px',
+                fontWeight: '700',
+                color: '#1A1A1A',
+                lineHeight: '1',
+                marginBottom: '4px',
+                position: 'relative',
+                zIndex: 1,
+                fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
+              }}>
+                {statistics.totalStartupCount}
+              </div>
+              <div style={{
+                fontSize: '13px',
+                color: '#9CA3AF',
+                fontWeight: '400',
+                position: 'relative',
+                zIndex: 1,
+              }}>
+                件のスタートアップ
+              </div>
+            </div>
+
+            {/* 該当スタートアップ数カード */}
+            <div 
+              onClick={() => setShowMatchingStartupModal(true)}
+              style={{
+                padding: '24px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E5E7EB',
+                borderRadius: '12px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                transition: 'all 0.2s ease',
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
             >
               <div style={{
                 position: 'absolute',
@@ -633,8 +760,25 @@ export function VcSection({
                 textTransform: 'uppercase',
                 position: 'relative',
                 zIndex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
               }}>
-                スタートアップ数
+                該当スタートアップ数
+                {viewMode === 'bar' && selectedBizDevPhaseIds.length > 0 && (
+                  <span style={{
+                    padding: '2px 8px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#4262FF',
+                    backgroundColor: '#E0E8FF',
+                    borderRadius: '4px',
+                    textTransform: 'none',
+                    letterSpacing: '0',
+                  }}>
+                    フィルター適用中
+                  </span>
+                )}
               </div>
               <div style={{
                 fontSize: '40px',
@@ -646,7 +790,7 @@ export function VcSection({
                 zIndex: 1,
                 fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
               }}>
-                {statistics.startupCount}
+                {statistics.matchingStartupCount}
               </div>
               <div style={{
                 fontSize: '13px',
@@ -726,6 +870,146 @@ export function VcSection({
               棒グラフ
             </button>
           </div>
+
+          {/* Biz-Devフェーズフィルター（棒グラフ表示時のみ） */}
+          {viewMode === 'bar' && (
+            <div style={{ 
+              marginBottom: '24px',
+              padding: '16px',
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: '8px',
+            }}>
+              <div 
+                onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                style={{
+                  marginBottom: isFilterExpanded ? '12px' : '0',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#1A1A1A',
+                  fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  userSelect: 'none',
+                }}
+              >
+                <span style={{
+                  display: 'inline-block',
+                  transform: isFilterExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s',
+                  fontSize: '12px',
+                }}>
+                  ▶
+                </span>
+                Biz-Devフェーズでフィルター
+                {selectedBizDevPhaseIds.length > 0 && (
+                  <span style={{
+                    marginLeft: '8px',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#4262FF',
+                    backgroundColor: '#E0E8FF',
+                    borderRadius: '4px',
+                  }}>
+                    {selectedBizDevPhaseIds.length}件選択中
+                  </span>
+                )}
+              </div>
+              {isFilterExpanded && (
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                }}>
+                  {bizDevPhases.map(phase => {
+                    const isSelected = selectedBizDevPhaseIds.includes(phase.id);
+                    return (
+                      <label
+                        key={phase.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 12px',
+                          backgroundColor: isSelected ? '#E0E8FF' : '#FFFFFF',
+                          border: `1.5px solid ${isSelected ? '#4262FF' : '#E0E0E0'}`,
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          transition: 'all 150ms',
+                          fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
+                          fontSize: '14px',
+                          color: isSelected ? '#4262FF' : '#1A1A1A',
+                          fontWeight: isSelected ? '500' : '400',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.backgroundColor = '#F5F5F5';
+                            e.currentTarget.style.borderColor = '#C4C4C4';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.backgroundColor = '#FFFFFF';
+                            e.currentTarget.style.borderColor = '#E0E0E0';
+                          }
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedBizDevPhaseIds([...selectedBizDevPhaseIds, phase.id]);
+                            } else {
+                              setSelectedBizDevPhaseIds(selectedBizDevPhaseIds.filter(id => id !== phase.id));
+                            }
+                          }}
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            cursor: 'pointer',
+                            accentColor: '#4262FF',
+                          }}
+                        />
+                        <span>{phase.title}</span>
+                      </label>
+                    );
+                  })}
+                  {selectedBizDevPhaseIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBizDevPhaseIds([])}
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        color: '#6B7280',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E0E0E0',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 150ms',
+                        fontFamily: 'var(--font-inter), var(--font-noto), sans-serif',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#F5F5F5';
+                        e.currentTarget.style.borderColor = '#C4C4C4';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#FFFFFF';
+                        e.currentTarget.style.borderColor = '#E0E0E0';
+                      }}
+                    >
+                      フィルターをクリア
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 2D関係性図、棒グラフ、またはマトリクス */}
           {viewMode === 'matrix' ? (
@@ -1147,6 +1431,20 @@ export function VcSection({
           )}
         </div>
       )}
+
+      {/* スタートアップ一覧モーダル */}
+      <StartupListModal
+        isOpen={showTotalStartupModal}
+        onClose={() => setShowTotalStartupModal(false)}
+        startups={statistics.totalStartups || []}
+        title="全スタートアップ一覧"
+      />
+      <StartupListModal
+        isOpen={showMatchingStartupModal}
+        onClose={() => setShowMatchingStartupModal(false)}
+        startups={statistics.matchingStartups || []}
+        title="該当スタートアップ一覧"
+      />
     </>
   );
 }

@@ -51,9 +51,9 @@ impl ChromaDBServer {
         }
 
         // chromaコマンドを探す（優先順位: chroma > chromadb）
-        let (chroma_cmd, use_python_module) = Self::find_chroma_command()?;
+        let (chroma_cmd, use_python_module, module_name) = Self::find_chroma_command()?;
         if use_python_module {
-            eprintln!("   ChromaDBコマンド: {} -m chromadb.cli", chroma_cmd);
+            eprintln!("   ChromaDBコマンド: {} -m {}", chroma_cmd, module_name);
         } else {
             eprintln!("   ChromaDBコマンド: {}", chroma_cmd);
         }
@@ -94,8 +94,22 @@ impl ChromaDBServer {
         // ChromaDBサーバーを起動
         let mut command = TokioCommand::new(&chroma_cmd);
         if use_python_module {
-            command.arg("-m").arg("chromadb.cli");
+            command.arg("-m").arg(&module_name);
         }
+        
+        // macOSの場合、PATH環境変数を設定（GUIアプリから起動した場合でも動作するように）
+        #[cfg(target_os = "macos")]
+        {
+            let path_env = std::env::var("PATH").unwrap_or_default();
+            let common_paths = "/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin";
+            let new_path = if path_env.is_empty() {
+                common_paths.to_string()
+            } else {
+                format!("{}:{}", common_paths, path_env)
+            };
+            command.env("PATH", &new_path);
+        }
+        
         let mut child = command
             .arg("run")
             .arg("--host")
@@ -109,7 +123,7 @@ impl ChromaDBServer {
             .spawn()
             .map_err(|e| {
                 let cmd_str = if use_python_module {
-                    format!("{} -m chromadb.cli", chroma_cmd)
+                    format!("{} -m {}", chroma_cmd, module_name)
                 } else {
                     chroma_cmd.clone()
                 };
@@ -230,77 +244,320 @@ impl ChromaDBServer {
 
     /// Python環境を検出
     fn find_python() -> Result<String, String> {
-        // Python 3.8以上を探す（3.12も許可）
-        let candidates = vec!["python3.12", "python3.11", "python3.10", "python3.9", "python3.8", "python3", "python"];
-        
-        for cmd in candidates {
-            let output = Command::new(cmd)
-                .arg("--version")
-                .output();
+        // macOSの場合、GUIアプリから起動した場合でもPATHが正しく設定されるようにする
+        #[cfg(target_os = "macos")]
+        {
+            // PATH環境変数を設定（GUIアプリから起動した場合でも動作するように）
+            let path_env = std::env::var("PATH").unwrap_or_default();
+            let common_paths = "/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin";
+            let new_path = if path_env.is_empty() {
+                common_paths.to_string()
+            } else {
+                format!("{}:{}", common_paths, path_env)
+            };
             
-            if let Ok(output) = output {
-                if output.status.success() {
-                    let version = String::from_utf8_lossy(&output.stdout);
-                    eprintln!("   Python環境を検出: {} ({})", cmd, version.trim());
-                    return Ok(cmd.to_string());
+            // Python 3.8以上を探す（3.12も許可）
+            let candidates = vec!["python3.12", "python3.11", "python3.10", "python3.9", "python3.8", "python3", "python"];
+            
+            for cmd in &candidates {
+                let mut command = Command::new(cmd);
+                command.arg("--version");
+                command.env("PATH", &new_path);
+                
+                if let Ok(output) = command.output() {
+                    if output.status.success() {
+                        let version = String::from_utf8_lossy(&output.stdout);
+                        eprintln!("   Python環境を検出: {} ({})", cmd, version.trim());
+                        return Ok(cmd.to_string());
+                    }
+                }
+            }
+            
+            // フルパスで確認（HomebrewのPython + ユーザーのローカルPython環境）
+            let home_dir = std::env::var("HOME").unwrap_or_default();
+            let mut homebrew_python_paths: Vec<String> = vec![
+                "/opt/homebrew/bin/python3.12".to_string(),
+                "/opt/homebrew/bin/python3.11".to_string(),
+                "/opt/homebrew/bin/python3.10".to_string(),
+                "/opt/homebrew/bin/python3".to_string(),
+                "/opt/homebrew/opt/python@3.12/bin/python3".to_string(),
+                "/opt/homebrew/opt/python@3.11/bin/python3".to_string(),
+                "/opt/homebrew/opt/python@3.10/bin/python3".to_string(),
+                "/usr/local/bin/python3.12".to_string(),
+                "/usr/local/bin/python3.11".to_string(),
+                "/usr/local/bin/python3.10".to_string(),
+                "/usr/local/bin/python3".to_string(),
+                "/usr/bin/python3".to_string(),
+            ];
+            
+            // ユーザーのローカルPython環境も追加（開発環境でよく使われる）
+            if !home_dir.is_empty() {
+                homebrew_python_paths.extend(vec![
+                    format!("{}/Library/Python/3.12/bin/python3", home_dir),
+                    format!("{}/Library/Python/3.11/bin/python3", home_dir),
+                    format!("{}/Library/Python/3.10/bin/python3", home_dir),
+                    format!("{}/Library/Python/3.9/bin/python3", home_dir),
+                    format!("{}/Library/Python/3.8/bin/python3", home_dir),
+                ]);
+            }
+            
+            for python_path in &homebrew_python_paths {
+                let mut command = Command::new(python_path);
+                command.arg("--version");
+                command.env("PATH", &new_path);
+                
+                if let Ok(output) = command.output() {
+                    if output.status.success() {
+                        let version = String::from_utf8_lossy(&output.stdout);
+                        eprintln!("   Python環境を検出（フルパス）: {} ({})", python_path, version.trim());
+                        return Ok(python_path.to_string());
+                    }
                 }
             }
         }
         
-        Err("Python環境が見つかりません。Python 3.8以上が必要です。".to_string())
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Python 3.8以上を探す（3.12も許可）
+            let candidates = vec!["python3.12", "python3.11", "python3.10", "python3.9", "python3.8", "python3", "python"];
+            
+            for cmd in candidates {
+                let output = Command::new(cmd)
+                    .arg("--version")
+                    .output();
+                
+                if let Ok(output) = output {
+                    if output.status.success() {
+                        let version = String::from_utf8_lossy(&output.stdout);
+                        eprintln!("   Python環境を検出: {} ({})", cmd, version.trim());
+                        return Ok(cmd.to_string());
+                    }
+                }
+            }
+        }
+        
+        Err("Python環境が見つかりません。Python 3.8以上が必要です。\n\nインストール方法:\n- macOS: `brew install python@3.12` または `brew install python3`\n- または公式サイトからインストール: https://www.python.org/downloads/\n\nインストール後、アプリケーションを再起動してください。".to_string())
     }
 
     /// chromaコマンドを探す
-    /// 戻り値: (コマンドパス, Pythonモジュールとして実行するかどうか)
-    fn find_chroma_command() -> Result<(String, bool), String> {
+    /// 戻り値: (コマンドパス, Pythonモジュールとして実行するかどうか, モジュール名)
+    fn find_chroma_command() -> Result<(String, bool, String), String> {
         // chromaコマンドを探す（優先順位: chroma > chromadb）
         let candidates = vec!["chroma", "chromadb"];
         
-        for cmd in candidates {
-            let output = Command::new(cmd)
-                .arg("--version")
-                .output();
+        #[cfg(target_os = "macos")]
+        {
+            let path_env = std::env::var("PATH").unwrap_or_default();
+            // ユーザーのローカルPython環境も含める（開発環境でよく使われる）
+            let home_dir = std::env::var("HOME").unwrap_or_default();
+            let user_python_bins = if !home_dir.is_empty() {
+                format!("{}/Library/Python/3.12/bin:{}/Library/Python/3.11/bin:{}/Library/Python/3.10/bin:{}/Library/Python/3.9/bin:{}/Library/Python/3.8/bin", 
+                    home_dir, home_dir, home_dir, home_dir, home_dir)
+            } else {
+                String::new()
+            };
+            let common_paths = if !user_python_bins.is_empty() {
+                format!("/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin:{}", user_python_bins)
+            } else {
+                "/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin".to_string()
+            };
+            let new_path = if path_env.is_empty() {
+                common_paths
+            } else {
+                format!("{}:{}", common_paths, path_env)
+            };
             
-            if let Ok(output) = output {
-                if output.status.success() {
-                    eprintln!("   chromaコマンドを検出: {}", cmd);
-                    return Ok((cmd.to_string(), false));
+            for cmd in &candidates {
+                let mut command = Command::new(cmd);
+                command.arg("--version");
+                command.env("PATH", &new_path);
+                
+                if let Ok(output) = command.output() {
+                    if output.status.success() {
+                        eprintln!("   chromaコマンドを検出: {}", cmd);
+                        return Ok((cmd.to_string(), false, String::new()));
+                    }
                 }
             }
         }
         
-        // chromaコマンドが見つからない場合、python -m chromadb.cli を試す
-        let python_path = Self::find_python()?;
-        let output = Command::new(&python_path)
-            .arg("-c")
-            .arg("import chromadb.cli; print('ok')")
-            .output();
-        
-        if let Ok(output) = output {
-            if output.status.success() {
-                eprintln!("   chromaコマンドが見つかりません。python -m chromadb.cli を使用します");
-                return Ok((python_path, true));
+        #[cfg(not(target_os = "macos"))]
+        {
+            for cmd in candidates {
+                let output = Command::new(cmd)
+                    .arg("--version")
+                    .output();
+                
+                if let Ok(output) = output {
+                    if output.status.success() {
+                        eprintln!("   chromaコマンドを検出: {}", cmd);
+                        return Ok((cmd.to_string(), false, String::new()));
+                    }
+                }
             }
         }
         
-        Err("chromaコマンドが見つかりません。`pip3 install chromadb`でインストールしてください。".to_string())
+        // chromaコマンドが見つからない場合、python -m chromadb を試す（chromadb.cli ではなく）
+        let python_path = Self::find_python()?;
+        
+        #[cfg(target_os = "macos")]
+        {
+            // macOSの場合、PATH環境変数を設定
+            let path_env = std::env::var("PATH").unwrap_or_default();
+            // ユーザーのローカルPython環境も含める（開発環境でよく使われる）
+            let home_dir = std::env::var("HOME").unwrap_or_default();
+            let user_python_bins = if !home_dir.is_empty() {
+                format!("{}/Library/Python/3.12/bin:{}/Library/Python/3.11/bin:{}/Library/Python/3.10/bin:{}/Library/Python/3.9/bin:{}/Library/Python/3.8/bin", 
+                    home_dir, home_dir, home_dir, home_dir, home_dir)
+            } else {
+                String::new()
+            };
+            let common_paths = if !user_python_bins.is_empty() {
+                format!("/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin:{}", user_python_bins)
+            } else {
+                "/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin".to_string()
+            };
+            let new_path = if path_env.is_empty() {
+                common_paths
+            } else {
+                format!("{}:{}", common_paths, path_env)
+            };
+            
+            // chromadb.cli は新しいバージョンでは使えない可能性があるため、エラーメッセージを改善
+            // まず chromadb.cli を試す（古いバージョン）
+            let mut command = Command::new(&python_path);
+            command.arg("-c");
+            command.arg("import chromadb.cli; print('ok')");
+            command.env("PATH", &new_path);
+            
+            if let Ok(output) = command.output() {
+                if output.status.success() {
+                    // chromadb.cli が使える場合でも、実際に実行できるか確認
+                    let mut test_cmd = Command::new(&python_path);
+                    test_cmd.arg("-m");
+                    test_cmd.arg("chromadb.cli");
+                    test_cmd.arg("--help");
+                    test_cmd.env("PATH", &new_path);
+                    
+                    if let Ok(test_output) = test_cmd.output() {
+                        if test_output.status.success() {
+                            eprintln!("   chromaコマンドが見つかりません。python -m chromadb.cli を使用します");
+                            return Ok((python_path, true, "chromadb.cli".to_string()));
+                        }
+                    }
+                }
+            }
+            
+            // chromadb.cli が使えない場合、エラーメッセージを改善
+            eprintln!("   ⚠️ chromadb.cli は使用できません（新しいバージョンのChromaDBでは非推奨）");
+            eprintln!("   chroma コマンドをインストールしてください: pip3 install chromadb");
+        }
+        
+        #[cfg(not(target_os = "macos"))]
+        {
+            // まず chromadb.cli を試す（古いバージョン、確実に動作する）
+            let output = Command::new(&python_path)
+                .arg("-c")
+                .arg("import chromadb.cli; print('ok')")
+                .output();
+            
+            if let Ok(output) = output {
+                if output.status.success() {
+                    eprintln!("   chromaコマンドが見つかりません。python -m chromadb.cli を使用します");
+                    return Ok((python_path, true, "chromadb.cli".to_string()));
+                }
+            }
+            
+            // chromadb.cli が使えない場合、chromadb モジュールを試す（新しいバージョン）
+            // ただし、chromadb モジュールを直接使う場合、run コマンドが使えるか確認する
+            let output = Command::new(&python_path)
+                .arg("-m")
+                .arg("chromadb")
+                .arg("--help")
+                .output();
+            
+            if let Ok(output) = output {
+                if output.status.success() {
+                    // chromadb モジュールが使える場合、run コマンドが使えるか確認
+                    let output = Command::new(&python_path)
+                        .arg("-m")
+                        .arg("chromadb")
+                        .arg("run")
+                        .arg("--help")
+                        .output();
+                    
+                    if let Ok(output) = output {
+                        if output.status.success() {
+                            eprintln!("   chromaコマンドが見つかりません。python -m chromadb を使用します");
+                            return Ok((python_path, true, "chromadb".to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        
+        Err(format!("chromaコマンドが見つかりません。\n\nPythonパス: {}\n\nインストール方法:\n1. ターミナルを開く\n2. 以下のコマンドを実行:\n   {} -m pip install chromadb\n\nまたは:\n   pip3 install chromadb\n\n注意: 新しいバージョンのChromaDBでは、`chromadb.cli` を `-m` で実行できません。\n`chromadb` をインストールすると、`chroma` コマンドが自動的にインストールされます。\n\nインストール後、アプリケーションを再起動してください。", python_path, python_path))
     }
 
     /// ChromaDBがインストールされているか確認
     fn check_chromadb_installed(python_path: &str) -> Result<(), String> {
-        let output = Command::new(python_path)
-            .arg("-c")
-            .arg("import chromadb; print(chromadb.__version__)")
-            .output()
-            .map_err(|e| format!("Pythonの実行に失敗しました: {}", e))?;
-        
-        if !output.status.success() {
-            return Err("ChromaDBがインストールされていません。`pip3 install chromadb`でインストールしてください。".to_string());
+        #[cfg(target_os = "macos")]
+        {
+            // macOSの場合、PATH環境変数を設定
+            let path_env = std::env::var("PATH").unwrap_or_default();
+            let common_paths = "/opt/homebrew/bin:/opt/homebrew/opt/python@3.12/bin:/opt/homebrew/opt/python@3.11/bin:/opt/homebrew/opt/python@3.10/bin:/usr/local/bin:/usr/bin:/bin";
+            let new_path = if path_env.is_empty() {
+                common_paths.to_string()
+            } else {
+                format!("{}:{}", common_paths, path_env)
+            };
+            
+            let mut command = Command::new(python_path);
+            command.arg("-c");
+            command.arg("import chromadb; print(chromadb.__version__)");
+            command.env("PATH", &new_path);
+            
+            let output = command
+                .output()
+                .map_err(|e| format!("Pythonの実行に失敗しました: {}\n\nPythonパス: {}\n\n考えられる原因:\n- Pythonが正しくインストールされていない\n- Pythonの実行権限がない", e, python_path))?;
+            
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "ChromaDBがインストールされていません。\n\nPythonパス: {}\n\nエラー: {}\n\nインストール方法:\n1. ターミナルを開く\n2. 以下のコマンドを実行:\n   {} -m pip install chromadb\n\nまたは:\n   pip3 install chromadb\n\nインストール後、アプリケーションを再起動してください。",
+                    python_path,
+                    stderr.trim(),
+                    python_path
+                ));
+            }
+            
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            eprintln!("   ChromaDBバージョン: {}", version);
+            Ok(())
         }
         
-        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        eprintln!("   ChromaDBバージョン: {}", version);
-        Ok(())
+        #[cfg(not(target_os = "macos"))]
+        {
+            let output = Command::new(python_path)
+                .arg("-c")
+                .arg("import chromadb; print(chromadb.__version__)")
+                .output()
+                .map_err(|e| format!("Pythonの実行に失敗しました: {}\n\nPythonパス: {}\n\n考えられる原因:\n- Pythonが正しくインストールされていない\n- Pythonの実行権限がない", e, python_path))?;
+            
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "ChromaDBがインストールされていません。\n\nPythonパス: {}\n\nエラー: {}\n\nインストール方法:\n1. ターミナルを開く\n2. 以下のコマンドを実行:\n   {} -m pip install chromadb\n\nまたは:\n   pip3 install chromadb\n\nインストール後、アプリケーションを再起動してください。",
+                    python_path,
+                    stderr.trim(),
+                    python_path
+                ));
+            }
+            
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            eprintln!("   ChromaDBバージョン: {}", version);
+            Ok(())
+        }
     }
 
     /// ポートが使用されているかチェック

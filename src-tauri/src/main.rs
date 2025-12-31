@@ -91,13 +91,19 @@ fn main() {
                         eprintln!("✅ ChromaDB Serverの初期化が完了しました");
                     }
                     Err(e) => {
-                        eprintln!("❌ ChromaDB Serverの初期化に失敗しました: {}", e);
-                        eprintln!("   注意: 埋め込みベクトルの保存・検索にはChromaDBが必要です");
+                        eprintln!("❌ ChromaDB Serverの初期化に失敗しました");
+                        eprintln!("{}", e);
+                        eprintln!("\n   注意: 埋め込みベクトルの保存・検索にはChromaDBが必要です");
                         eprintln!("   トラブルシューティング:");
                         eprintln!("   1. Python環境がインストールされているか確認してください");
-                        eprintln!("   2. ChromaDBがインストールされているか確認してください: pip3 install chromadb");
-                        eprintln!("   3. ポート8000が使用可能か確認してください");
-                        eprintln!("   4. アプリケーションを再起動してください");
+                        eprintln!("      - macOS: `brew install python@3.12` または `brew install python3`");
+                        eprintln!("      - または公式サイトから: https://www.python.org/downloads/");
+                        eprintln!("   2. ChromaDBがインストールされているか確認してください");
+                        eprintln!("      - ターミナルで: `pip3 install chromadb` を実行");
+                        eprintln!("      - または: `python3 -m pip install chromadb` を実行");
+                        eprintln!("   3. ポート8001が使用可能か確認してください");
+                        eprintln!("   4. インストール後、アプリケーションを再起動してください");
+                        eprintln!("\n   詳細なエラーメッセージは上記を参照してください。");
                     }
                 }
             });

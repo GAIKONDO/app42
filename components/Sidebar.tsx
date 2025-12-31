@@ -3,18 +3,29 @@
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTransition } from 'react';
-import { DashboardIcon, LineChartIcon, BarChartIcon, DocumentIcon, SettingsIcon, OrganizationIcon, KnowledgeGraphIcon, DesignIcon, MenuIcon, CloseIcon, AgentIcon, GraphvizIcon } from './Icons';
+import { signOut, type User } from '@/lib/localFirebase';
+import { DashboardIcon, LineChartIcon, BarChartIcon, DocumentIcon, SettingsIcon, OrganizationIcon, KnowledgeGraphIcon, DesignIcon, MenuIcon, CloseIcon, AgentIcon, UserIcon, LogOutIcon } from './Icons';
 
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   currentPage?: string;
+  user?: User | null;
 }
 
-export default function Sidebar({ isOpen, onToggle, currentPage }: SidebarProps) {
+export default function Sidebar({ isOpen, onToggle, currentPage, user }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(null);
+      router.push('/');
+    } catch (error) {
+      console.error('ログアウトエラー:', error);
+    }
+  };
 
   const menuItems = [
     { icon: DashboardIcon, label: 'ダッシュボード', id: 'dashboard', path: '/' },
@@ -24,7 +35,8 @@ export default function Sidebar({ isOpen, onToggle, currentPage }: SidebarProps)
     { icon: BarChartIcon, label: 'レポート', id: 'reports', path: '/reports' },
     { icon: AgentIcon, label: 'Agent', id: 'agents', path: '/agents' },
     { icon: DesignIcon, label: '設計', id: 'design', path: '/design' },
-    { icon: GraphvizIcon, label: 'Graphviz', id: 'graphviz', path: '/graphviz' },
+    // Graphvizタブは非表示（機能オフ）
+    // { icon: GraphvizIcon, label: 'Graphviz', id: 'graphviz', path: '/graphviz' },
     { icon: SettingsIcon, label: '設定', id: 'settings', path: '/settings' },
   ];
 
@@ -37,7 +49,8 @@ export default function Sidebar({ isOpen, onToggle, currentPage }: SidebarProps)
     if (pathname.startsWith('/knowledge-graph')) return 'knowledge-graph';
     if (pathname.startsWith('/design')) return 'design';
     if (pathname.startsWith('/agents')) return 'agents';
-    if (pathname.startsWith('/graphviz')) return 'graphviz';
+    // Graphvizタブは非表示（機能オフ）
+    // if (pathname.startsWith('/graphviz')) return 'graphviz';
     const pathWithoutSlash = pathname.replace('/', '');
     return pathWithoutSlash || 'dashboard';
   };
@@ -156,61 +169,145 @@ export default function Sidebar({ isOpen, onToggle, currentPage }: SidebarProps)
             background: 'var(--color-surface)',
             boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
             zIndex: 998,
-            padding: '16px 0',
-            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
             borderRight: `1px solid var(--color-border-color)`,
           }}
         >
-          <div style={{ padding: '0 24px', marginBottom: '18px' }}>
-            <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text-light)', marginBottom: '0', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-              メニュー
-            </h2>
+          {/* メニュー部分 - スクロール可能 */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '16px 0',
+            }}
+          >
+            <div style={{ padding: '0 24px', marginBottom: '18px' }}>
+              <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text-light)', marginBottom: '0', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                メニュー
+              </h2>
+            </div>
+            <nav>
+              {menuItems.map((item) => {
+                const IconComponent = item.icon;
+                const isActive = activePage === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleNavigation(item.path)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '10px 24px',
+                      width: '100%',
+                      color: isActive ? 'var(--color-text)' : 'var(--color-text-light)',
+                      textDecoration: 'none',
+                      transition: 'all 0.2s ease',
+                      borderLeft: isActive ? '2px solid var(--color-primary)' : '2px solid transparent',
+                      backgroundColor: isActive ? 'var(--color-background)' : 'transparent',
+                      fontSize: '14px',
+                      fontWeight: isActive ? 500 : 400,
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.backgroundColor = 'var(--color-background)';
+                        e.currentTarget.style.borderLeftColor = 'rgba(31, 41, 51, 0.2)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.borderLeftColor = 'transparent';
+                      }
+                    }}
+                  >
+                    <span style={{ marginRight: '12px', opacity: isActive ? 1 : 0.6 }}>
+                      <IconComponent size={18} color={isActive ? 'var(--color-text)' : 'var(--color-text-light)'} />
+                    </span>
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
           </div>
-          <nav>
-            {menuItems.map((item) => {
-              const IconComponent = item.icon;
-              const isActive = activePage === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavigation(item.path)}
+
+          {/* アカウント情報とログアウトボタン - サイドメニューの一番下（固定） */}
+          {user && (
+            <div
+              style={{
+                padding: '16px 24px',
+                borderTop: '1px solid var(--color-border-color)',
+                backgroundColor: 'var(--color-surface)',
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '10px 24px',
-                    width: '100%',
-                    color: isActive ? 'var(--color-text)' : 'var(--color-text-light)',
-                    textDecoration: 'none',
-                    transition: 'all 0.2s ease',
-                    borderLeft: isActive ? '2px solid var(--color-primary)' : '2px solid transparent',
-                    backgroundColor: isActive ? 'var(--color-background)' : 'transparent',
-                    fontSize: '14px',
-                    fontWeight: isActive ? 500 : 400,
-                    border: 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.backgroundColor = 'var(--color-background)';
-                      e.currentTarget.style.borderLeftColor = 'rgba(31, 41, 51, 0.2)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.borderLeftColor = 'transparent';
-                    }
+                    gap: '8px',
+                    fontSize: '13px',
+                    color: 'var(--color-text-light)',
+                    marginBottom: '4px',
                   }}
                 >
-                  <span style={{ marginRight: '12px', opacity: isActive ? 1 : 0.6 }}>
-                    <IconComponent size={18} color={isActive ? 'var(--color-text)' : 'var(--color-text-light)'} />
-                  </span>
-                  <span>{item.label}</span>
+                  <UserIcon size={14} color="var(--color-text-light)" />
+                  <span>ログイン中</span>
+                </div>
+                <div
+                  style={{
+                    fontSize: '14px',
+                    color: 'var(--color-text)',
+                    fontWeight: 500,
+                    wordBreak: 'break-word',
+                    marginBottom: '8px',
+                    paddingLeft: '22px',
+                  }}
+                >
+                  {user.email || user.displayName || 'ユーザー'}
+                </div>
+                <button
+                  onClick={handleSignOut}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    fontSize: '13px',
+                    color: 'var(--color-text)',
+                    backgroundColor: 'transparent',
+                    border: '1px solid var(--color-border-color)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    textAlign: 'center',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--color-background)';
+                    e.currentTarget.style.borderColor = 'var(--color-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.borderColor = 'var(--color-border-color)';
+                  }}
+                >
+                  <LogOutIcon size={14} color="var(--color-text)" />
+                  <span>ログアウト</span>
                 </button>
-              );
-            })}
-          </nav>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>

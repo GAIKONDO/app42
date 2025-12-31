@@ -185,10 +185,11 @@ export function useTopicManagement({
         // topicEmbeddingIdは既に定義済み
         // 埋め込みはChromaDBで管理されているため、SQLiteからはtopicsテーブルのみ削除
         try {
-          await retryDbOperation(() => callTauriCommand('doc_delete', {
-            collectionName: 'topics',
-            docId: topicEmbeddingId,
-          }));
+          // Supabase使用時はdoc().delete()を使用、SQLite使用時はTauriコマンドを使用
+          const { doc } = await import('@/lib/localFirebase');
+          await retryDbOperation(async () => {
+            await doc(null, 'topics', topicEmbeddingId).delete();
+          });
           devLog(`✅ [confirmDeleteTopic] トピック削除: ${topicEmbeddingId}`);
         } catch (error: any) {
           devWarn('⚠️ [confirmDeleteTopic] トピック削除エラー（続行します）:', error);

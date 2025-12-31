@@ -264,12 +264,16 @@ export default function RelationshipDiagram2D({
       try {
         const topicEmbeddingId = `${selectedTopic.meetingNoteId}-topic-${selectedTopic.id}`;
         
-        const relations = await getRelationsByTopicId(topicEmbeddingId);
+        // エンティティとリレーションを並列で取得（パフォーマンス最適化）
+        const [relations, allEntities] = await Promise.all([
+          getRelationsByTopicId(topicEmbeddingId),
+          selectedTopic.companyId
+            ? getEntitiesByCompanyId(selectedTopic.companyId)
+            : getEntitiesByOrganizationId(selectedTopic.organizationId),
+        ]);
+        
         setTopicRelations(relations);
-
-        const allEntities = selectedTopic.companyId
-          ? await getEntitiesByCompanyId(selectedTopic.companyId)
-          : await getEntitiesByOrganizationId(selectedTopic.organizationId);
+        
         const topicEntities = allEntities.filter(e => {
           if (!e.metadata || typeof e.metadata !== 'object') return false;
           return 'topicId' in e.metadata && e.metadata.topicId === selectedTopic.id;

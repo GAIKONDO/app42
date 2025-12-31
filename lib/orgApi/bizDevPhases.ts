@@ -206,10 +206,11 @@ export async function getBizDevPhaseById(phaseId: string): Promise<BizDevPhase |
 }
 
 /**
- * Biz-Devフェーズを保存
+ * Biz-Devフェーズを保存（SQLiteまたはSupabaseに保存）
  */
 export async function saveBizDevPhase(phase: Partial<BizDevPhase> & { title: string }): Promise<BizDevPhase> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
     const now = new Date().toISOString();
     const phaseId = phase.id || generateUniqueBizDevPhaseId();
     
@@ -222,6 +223,21 @@ export async function saveBizDevPhase(phase: Partial<BizDevPhase> & { title: str
       updatedAt: now,
     };
     
+    // Supabase使用時はDataSource経由で保存
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        // PostgreSQLでは大文字小文字を区別しないため、小文字でアクセス
+        await setDocViaDataSource('bizdevphases', phaseId, phaseData);
+        console.log('✅ [saveBizDevPhase] 保存成功（Supabase経由）:', phaseId);
+        return phaseData;
+      } catch (error: any) {
+        console.error('❌ [saveBizDevPhase] Supabase保存エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -232,7 +248,7 @@ export async function saveBizDevPhase(phase: Partial<BizDevPhase> & { title: str
           data: phaseData,
         });
         
-        console.log('✅ [saveBizDevPhase] 保存成功:', phaseId);
+        console.log('✅ [saveBizDevPhase] 保存成功（Tauriコマンド経由）:', phaseId);
         return phaseData;
       } catch (error: any) {
         console.error('❌ [saveBizDevPhase] Tauriコマンドエラー:', error);
@@ -240,6 +256,7 @@ export async function saveBizDevPhase(phase: Partial<BizDevPhase> & { title: str
       }
     }
     
+    // その他の環境（API経由）
     const { apiPost, apiPut } = await import('../apiClient');
     if (phase.id) {
       await apiPut(`/api/bizDevPhases/${phaseId}`, phaseData);
@@ -255,10 +272,28 @@ export async function saveBizDevPhase(phase: Partial<BizDevPhase> & { title: str
 }
 
 /**
- * Biz-Devフェーズを削除
+ * Biz-Devフェーズを削除（SQLiteまたはSupabaseから削除）
  */
 export async function deleteBizDevPhase(phaseId: string): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🗑️ [deleteBizDevPhase] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から削除）:`, { phaseId });
+    
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        // PostgreSQLでは大文字小文字を区別しないため、小文字でアクセス
+        await deleteDocViaDataSource('bizdevphases', phaseId);
+        console.log('✅ [deleteBizDevPhase] 削除成功（Supabase経由）:', phaseId);
+        return;
+      } catch (error: any) {
+        console.error('❌ [deleteBizDevPhase] Supabase削除エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -268,15 +303,17 @@ export async function deleteBizDevPhase(phaseId: string): Promise<void> {
           docId: phaseId,
         });
         
-        console.log('✅ [deleteBizDevPhase] 削除成功:', phaseId);
+        console.log('✅ [deleteBizDevPhase] 削除成功（Tauriコマンド経由）:', phaseId);
+        return;
       } catch (error: any) {
         console.error('❌ [deleteBizDevPhase] Tauriコマンドエラー:', error);
         throw error;
       }
-    } else {
-      const { apiDelete } = await import('../apiClient');
-      await apiDelete(`/api/bizDevPhases/${phaseId}`);
     }
+    
+    // その他の環境（API経由）
+    const { apiDelete } = await import('../apiClient');
+    await apiDelete(`/api/bizDevPhases/${phaseId}`);
   } catch (error: any) {
     console.error('❌ [deleteBizDevPhase] エラー:', error);
     throw error;
@@ -284,10 +321,40 @@ export async function deleteBizDevPhase(phaseId: string): Promise<void> {
 }
 
 /**
- * Biz-Devフェーズの順序を更新
+ * Biz-Devフェーズの順序を更新（SQLiteまたはSupabaseで更新）
  */
 export async function updateBizDevPhasePositions(phases: BizDevPhase[]): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🔄 [updateBizDevPhasePositions] 開始（${useSupabase ? 'Supabase' : 'SQLite'}で更新）:`, phases.length, '件');
+    
+    // Supabase使用時はDataSource経由で更新
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        
+        // 各Biz-Devフェーズのpositionを更新
+        for (let i = 0; i < phases.length; i++) {
+          const phase = phases[i];
+          const dataToUpdate = {
+            ...phase,
+            position: i,
+            updatedAt: new Date().toISOString(),
+          };
+          
+          // PostgreSQLでは大文字小文字を区別しないため、小文字でアクセス
+          await setDocViaDataSource('bizdevphases', phase.id, dataToUpdate);
+        }
+        
+        console.log('✅ [updateBizDevPhasePositions] 更新成功（Supabase経由）');
+        return;
+      } catch (error: any) {
+        console.error('❌ [updateBizDevPhasePositions] Supabase更新エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -306,15 +373,17 @@ export async function updateBizDevPhasePositions(phases: BizDevPhase[]): Promise
           });
         }
         
-        console.log('✅ [updateBizDevPhasePositions] 更新成功');
+        console.log('✅ [updateBizDevPhasePositions] 更新成功（Tauriコマンド経由）');
+        return;
       } catch (error: any) {
         console.error('❌ [updateBizDevPhasePositions] Tauriコマンドエラー:', error);
         throw error;
       }
-    } else {
-      const { apiPut } = await import('../apiClient');
-      await apiPut('/api/bizDevPhases/positions', { phases });
     }
+    
+    // その他の環境（API経由）
+    const { apiPut } = await import('../apiClient');
+    await apiPut('/api/bizDevPhases/positions', { phases });
   } catch (error: any) {
     console.error('❌ [updateBizDevPhasePositions] エラー:', error);
     throw error;

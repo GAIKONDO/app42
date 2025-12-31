@@ -25,10 +25,13 @@ export function OrganizationTabBar({
     { id: 'introduction' as const, label: '組織紹介' },
     { id: 'focusAreas' as const, label: '注力領域' },
     { id: 'startups' as const, label: `スタートアップ (${startupsCount})` },
-    { id: 'focusInitiatives' as const, label: `注力施策 (${focusInitiativesCount})` },
+    // 注力施策タブは非表示（機能オフ）
+    // { id: 'focusInitiatives' as const, label: `注力施策 (${focusInitiativesCount})` },
     { id: 'meetingNotes' as const, label: `議事録 (${meetingNotesCount})` },
-    { id: 'regulations' as const, label: `制度 (${regulationsCount})` },
-    { id: 'graphviz' as const, label: `Graphviz (${graphvizCount})` },
+    // 制度タブは非表示（機能オフ）
+    // { id: 'regulations' as const, label: `制度 (${regulationsCount})` },
+    // Graphvizタブは非表示（機能オフ）
+    // { id: 'graphviz' as const, label: `Graphviz (${graphvizCount})` },
   ];
 
   return (

@@ -248,6 +248,22 @@ export function useBubbleChartRendering({
         });
       }
 
+      // スタートアップノードのダブルクリックでonNodeClickを呼び出し
+      if (nodeType === 'startup') {
+        circle.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const startupData = nodeData.originalData as RelationshipNode;
+          
+          if (startupData && onNodeClick) {
+            console.log('🔍 [バブルチャート] スタートアップダブルクリック:', {
+              startupId: startupData.id,
+              startupTitle: startupData.label,
+            });
+            onNodeClick(startupData);
+          }
+        });
+      }
+
       svg.appendChild(circle);
 
       // ラベルを追加

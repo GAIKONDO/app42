@@ -156,6 +156,9 @@ function MeetingNoteDetailPageContent() {
   const [showTableOfContentsModal, setShowTableOfContentsModal] = useState(false);
   const [expandedMonthInTOC, setExpandedMonthInTOC] = useState<TabType | null>(null);
   
+  // サマリページの表示/非表示（デフォルトは非表示）
+  const [showSummary, setShowSummary] = useState(false);
+  
   // タブの順番を初期化（データ読み込み時に設定）
   useEffect(() => {
     if (meetingNote?.content) {
@@ -401,17 +404,25 @@ function MeetingNoteDetailPageContent() {
   // タブが切り替わったときに、activeSectionをcurrentSummaryIdにリセット
   // 注意: currentTabDataとcurrentSummaryIdは早期returnの後に計算されるため、
   // ここではmonthContentsとactiveTabを使用して計算する
+  // タブが変更されたときに、該当タブのサマリIDをactiveSectionに設定
+  // 注意: monthContentsを依存配列から除外して、保存時にサマリページに戻されるのを防ぐ
+  const prevActiveTabRef = useRef<TabType>(activeTab);
   useEffect(() => {
-    const currentTabData = monthContents[activeTab] as MonthContent | undefined;
-    const currentSummaryId = currentTabData?.summaryId;
-    if (currentSummaryId) {
-      const isCurrentSectionAnItem = currentTabData?.items?.some(item => item.id === activeSection);
-      // 現在のactiveSectionがアイテムIDでない場合、またはタブが切り替わった場合はリセット
-      if (!isCurrentSectionAnItem || activeSection === 'summary') {
-        setActiveSection(currentSummaryId);
+    // タブが実際に変更されたときのみ実行
+    if (prevActiveTabRef.current !== activeTab) {
+      prevActiveTabRef.current = activeTab;
+      const currentTabData = monthContents[activeTab] as MonthContent | undefined;
+      const currentSummaryId = currentTabData?.summaryId;
+      if (currentSummaryId) {
+        const isCurrentSectionAnItem = currentTabData?.items?.some(item => item.id === activeSection);
+        // 現在のactiveSectionがアイテムIDでない場合、またはタブが切り替わった場合はリセット
+        if (!isCurrentSectionAnItem || activeSection === 'summary') {
+          setActiveSection(currentSummaryId);
+        }
       }
     }
-  }, [activeTab, monthContents, activeSection, setActiveSection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeSection, setActiveSection]);
 
   // topicIdパラメータから該当するトピックを見つけて表示
   useEffect(() => {
@@ -885,6 +896,8 @@ function MeetingNoteDetailPageContent() {
           onSetActiveTab={setActiveTab}
           onSetActiveSection={setActiveSection}
           onShowTableOfContents={() => setShowTableOfContentsModal(true)}
+          showSummary={showSummary}
+          onToggleSummary={() => setShowSummary(!showSummary)}
         />
 
         {/* 目次モーダル */}
@@ -942,7 +955,8 @@ function MeetingNoteDetailPageContent() {
                 </h2>
                 
                 {/* 総括サマリ */}
-                <SummaryContentSection
+                {showSummary && (
+                  <SummaryContentSection
                   activeTab={activeTab}
                   activeSection={activeSection}
                   currentSummaryId={currentSummaryId}
@@ -964,7 +978,8 @@ function MeetingNoteDetailPageContent() {
                     setAiCustomPrompt('');
                     setIsAIGenerationModalOpen(true);
                   }}
-                />
+                  />
+                )}
                 
                 {/* 議事録アイテム */}
                 <div style={{ marginBottom: '32px' }}>
@@ -1048,7 +1063,8 @@ function MeetingNoteDetailPageContent() {
                 </h2>
                 
                 {/* 月サマリ */}
-                <MonthSummarySection
+                {showSummary && (
+                  <MonthSummarySection
                   activeTab={activeTab}
                   activeSection={activeSection}
                   currentSummaryId={currentSummaryId}
@@ -1070,7 +1086,8 @@ function MeetingNoteDetailPageContent() {
                     setAiCustomPrompt('');
                     setIsAIGenerationModalOpen(true);
                   }}
-                />
+                  />
+                )}
                 
                 {/* 議事録アイテム */}
                 <div style={{ marginBottom: '32px' }}>
@@ -1153,6 +1170,7 @@ function MeetingNoteDetailPageContent() {
             onAddItem={handleAddItem}
             onMoveItemUp={handleMoveItemUp}
             onMoveItemDown={handleMoveItemDown}
+            showSummary={showSummary}
           />
         </div>
       </div>
@@ -1186,13 +1204,30 @@ function MeetingNoteDetailPageContent() {
           setShowDeleteEntitiesModal(false);
           try {
             const entitiesToDelete = (pendingEntities && pendingEntities.length > 0) ? pendingEntities : topicEntities;
-            for (const entity of entitiesToDelete) {
-              try {
-                await deleteEntity(entity.id);
-                devLog(`✅ エンティティを削除しました: ${entity.id}`);
-              } catch (error: any) {
-                devWarn(`⚠️ エンティティ削除エラー: ${entity.id}`, error);
-              }
+            
+            // 並列削除処理（パフォーマンス最適化）
+            const pLimit = (await import('p-limit')).default;
+            const limit = pLimit(10); // 同時実行数: 10
+            
+            const results = await Promise.allSettled(
+              entitiesToDelete.map(entity =>
+                limit(async () => {
+                  try {
+                    await deleteEntity(entity.id);
+                    devLog(`✅ エンティティを削除しました: ${entity.id}`);
+                    return { success: true, entityId: entity.id };
+                  } catch (error: any) {
+                    devWarn(`⚠️ エンティティ削除エラー: ${entity.id}`, error);
+                    return { success: false, entityId: entity.id, error };
+                  }
+                })
+              )
+            );
+            
+            const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+            const errorCount = results.length - successCount;
+            if (errorCount > 0) {
+              console.warn(`⚠️ ${errorCount}件のエンティティ削除でエラーが発生しました`);
             }
             // pendingEntitiesの場合はクリア、topicEntitiesの場合は再読み込み
             if (pendingEntities && pendingEntities.length > 0) {
@@ -1228,13 +1263,29 @@ function MeetingNoteDetailPageContent() {
               ? pendingRelations 
               : topicRelations;
             
-            for (const relation of relationsToDelete) {
-              try {
-                await deleteRelation(relation.id);
-                devLog(`✅ リレーションを削除しました: ${relation.id}`);
-              } catch (error: any) {
-                devWarn(`⚠️ リレーション削除エラー: ${relation.id}`, error);
-              }
+            // 並列削除処理（パフォーマンス最適化）
+            const pLimit = (await import('p-limit')).default;
+            const limit = pLimit(10); // 同時実行数: 10
+            
+            const results = await Promise.allSettled(
+              relationsToDelete.map(relation =>
+                limit(async () => {
+                  try {
+                    await deleteRelation(relation.id);
+                    devLog(`✅ リレーションを削除しました: ${relation.id}`);
+                    return { success: true, relationId: relation.id };
+                  } catch (error: any) {
+                    devWarn(`⚠️ リレーション削除エラー: ${relation.id}`, error);
+                    return { success: false, relationId: relation.id, error };
+                  }
+                })
+              )
+            );
+            
+            const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+            const errorCount = results.length - successCount;
+            if (errorCount > 0) {
+              console.warn(`⚠️ ${errorCount}件のリレーション削除でエラーが発生しました`);
             }
             
             // pendingRelationsの場合はクリア、topicRelationsの場合は再読み込み
@@ -1287,6 +1338,7 @@ function MeetingNoteDetailPageContent() {
         monthContents={monthContents}
         organizationId={organizationId}
         meetingId={meetingId}
+        savingStatus={savingStatus}
         onClose={() => {
           setShowTopicModal(false);
           setEditingTopicItemId(null);
@@ -1440,33 +1492,57 @@ function MeetingNoteDetailPageContent() {
             // 既存のエンティティとリレーションを削除（上書き保存の場合）
             if (replaceExistingEntities && topicId) {
               try {
-                // 既存のリレーションを削除
-                const existingRelations = await getRelationsByTopicId(topicEmbeddingId);
-                for (const relation of existingRelations) {
-                  try {
-                    await deleteRelation(relation.id);
-                    devLog(`✅ 既存のリレーションを削除しました: ${relation.id}`);
-                  } catch (error: any) {
-                    devWarn(`⚠️ リレーション削除エラー（続行します）: ${relation.id}`, error);
-                  }
-                }
+                // 既存のリレーションとエンティティを並列で取得
+                const [existingRelations, allEntities] = await Promise.all([
+                  getRelationsByTopicId(topicEmbeddingId),
+                  meetingNote?.companyId
+                    ? getEntitiesByCompanyId(meetingNote.companyId)
+                    : getEntitiesByOrganizationId(organizationId),
+                ]);
                 
-                // 既存のエンティティを削除（同じトピック内のもののみ）
-                const allEntities = meetingNote?.companyId
-                  ? await getEntitiesByCompanyId(meetingNote.companyId)
-                  : await getEntitiesByOrganizationId(organizationId);
                 const entitiesInTopic = allEntities.filter(e => {
                   if (!e.metadata || typeof e.metadata !== 'object') return false;
                   return 'topicId' in e.metadata && e.metadata.topicId === topicId;
                 });
                 
-                for (const entity of entitiesInTopic) {
-                  try {
-                    await deleteEntity(entity.id);
-                    devLog(`✅ 既存のエンティティを削除しました: ${entity.id}`);
-                  } catch (error: any) {
-                    devWarn(`⚠️ エンティティ削除エラー（続行します）: ${entity.id}`, error);
-                  }
+                // 並列削除処理（パフォーマンス最適化）
+                const pLimit = (await import('p-limit')).default;
+                const limit = pLimit(10); // 同時実行数: 10
+                
+                // リレーションとエンティティを並列で削除
+                const deleteResults = await Promise.allSettled([
+                  // リレーション削除
+                  ...existingRelations.map(relation =>
+                    limit(async () => {
+                      try {
+                        await deleteRelation(relation.id);
+                        devLog(`✅ 既存のリレーションを削除しました: ${relation.id}`);
+                        return { success: true, type: 'relation', id: relation.id };
+                      } catch (error: any) {
+                        devWarn(`⚠️ リレーション削除エラー（続行します）: ${relation.id}`, error);
+                        return { success: false, type: 'relation', id: relation.id, error };
+                      }
+                    })
+                  ),
+                  // エンティティ削除
+                  ...entitiesInTopic.map(entity =>
+                    limit(async () => {
+                      try {
+                        await deleteEntity(entity.id);
+                        devLog(`✅ 既存のエンティティを削除しました: ${entity.id}`);
+                        return { success: true, type: 'entity', id: entity.id };
+                      } catch (error: any) {
+                        devWarn(`⚠️ エンティティ削除エラー（続行します）: ${entity.id}`, error);
+                        return { success: false, type: 'entity', id: entity.id, error };
+                      }
+                    })
+                  ),
+                ]);
+                
+                const successCount = deleteResults.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+                const errorCount = deleteResults.length - successCount;
+                if (errorCount > 0) {
+                  devWarn(`⚠️ ${errorCount}件の削除でエラーが発生しました（続行します）`);
                 }
               } catch (error: any) {
                 devWarn('⚠️ 既存データの削除エラー（続行します）:', error);
@@ -1722,6 +1798,58 @@ function MeetingNoteDetailPageContent() {
         showAddRelationModal={showAddRelationModal}
         editingEntity={editingEntity}
         editingRelation={editingRelation}
+        onDeleteEntities={async () => {
+          setShowDeleteEntitiesModal(true);
+        }}
+        onDeleteRelations={async () => {
+          setShowDeleteRelationsModal(true);
+        }}
+        onDeleteEntity={async (entityId: string) => {
+          try {
+            await deleteEntity(entityId);
+            devLog(`✅ エンティティを削除しました: ${entityId}`);
+            
+            // pendingEntitiesの場合はクリア、topicEntitiesの場合は再読み込み
+            if (pendingEntities && pendingEntities.some(e => e.id === entityId)) {
+              setPendingEntities(pendingEntities.filter(e => e.id !== entityId));
+            } else {
+              // トピックに関連するエンティティを再読み込み
+              if (editingTopicId) {
+                const entities = meetingNote?.companyId
+                  ? await getEntitiesByCompanyId(meetingNote.companyId)
+                  : await getEntitiesByOrganizationId(organizationId);
+                const filteredEntities = entities.filter(e => 
+                  e.metadata && typeof e.metadata === 'object' && 'topicId' in e.metadata && e.metadata.topicId === editingTopicId
+                );
+                setTopicEntities(filteredEntities);
+              }
+            }
+          } catch (error: any) {
+            console.error('❌ エンティティ削除エラー:', error);
+            throw error;
+          }
+        }}
+        onDeleteRelation={async (relationId: string) => {
+          try {
+            await deleteRelation(relationId);
+            devLog(`✅ リレーションを削除しました: ${relationId}`);
+            
+            // pendingRelationsの場合はクリア、topicRelationsの場合は再読み込み
+            if (pendingRelations && pendingRelations.some(r => r.id === relationId)) {
+              setPendingRelations(pendingRelations.filter(r => r.id !== relationId));
+            } else {
+              // トピックに関連するリレーションを再読み込み
+              if (editingTopicId) {
+                const topicEmbeddingId = `${meetingId}-topic-${editingTopicId}`;
+                const relations = await getRelationsByTopicId(topicEmbeddingId);
+                setTopicRelations(relations);
+              }
+            }
+          } catch (error: any) {
+            console.error('❌ リレーション削除エラー:', error);
+            throw error;
+          }
+        }}
       />
 
       {/* AI生成モーダル */}

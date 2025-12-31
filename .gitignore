@@ -69,3 +69,4 @@ logs/
 # Model files (large binary files)
 *.gguf
 models/
+.env.local.backup

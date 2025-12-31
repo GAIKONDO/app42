@@ -13,6 +13,8 @@ import { saveEntityEmbeddingAsync } from './entityEmbeddings';
  */
 export async function createEntity(entity: CreateEntityInput | (CreateEntityInput & { id?: string; createdAt?: string; updatedAt?: string })): Promise<Entity> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
     // 既にIDが設定されている場合はそれを使用、なければ新規生成
     const id = (entity as any).id || `entity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
@@ -24,6 +26,61 @@ export async function createEntity(entity: CreateEntityInput | (CreateEntityInpu
       updatedAt: (entity as any).updatedAt || now,
     };
 
+    // Supabase使用時はDataSource経由で作成
+    if (useSupabase) {
+      try {
+        console.log('📝 [createEntity] Supabase経由でエンティティを作成します:', id, entityData.name);
+        
+        // データベース用のデータを準備
+        const entityDataForDb: any = {
+          ...entityData,
+        };
+        
+        // organizationIdとcompanyIdを明示的にnullに設定（undefinedを避ける）
+        if (entityDataForDb.organizationId === undefined) {
+          entityDataForDb.organizationId = null;
+        }
+        if (entityDataForDb.companyId === undefined) {
+          entityDataForDb.companyId = null;
+        }
+        
+        // aliasesとmetadataをJSON文字列に変換（SupabaseではTEXT型として保存）
+        if (entityDataForDb.aliases && Array.isArray(entityDataForDb.aliases)) {
+          entityDataForDb.aliases = JSON.stringify(entityDataForDb.aliases);
+        }
+        if (entityDataForDb.metadata && typeof entityDataForDb.metadata === 'object') {
+          entityDataForDb.metadata = JSON.stringify(entityDataForDb.metadata);
+        }
+        
+        // Supabaseに保存
+        const { setDocViaDataSource } = await import('./dataSourceAdapter');
+        await setDocViaDataSource('entities', id, entityDataForDb);
+        console.log('✅ [createEntity] Supabase経由でエンティティを作成しました:', id);
+        
+        // ChromaDBに埋め込みを非同期で生成（エラーは無視）
+        if (entity.organizationId) {
+          saveEntityEmbeddingAsync(id, entity.organizationId).catch(error => {
+            console.error('❌ [createEntity] エンティティ埋め込みの生成に失敗しました（続行します）:', {
+              entityId: id,
+              entityName: entity.name,
+              organizationId: entity.organizationId,
+              error: error?.message || String(error),
+            });
+          });
+        } else if (entity.companyId) {
+          console.log(`ℹ️ [createEntity] companyIdが設定されていますが、事業会社用の埋め込み生成は未実装です: ${entity.name} (${id})`);
+        } else {
+          console.warn(`⚠️ [createEntity] organizationIdもcompanyIdも設定されていないため、埋め込み生成をスキップ: ${entity.name} (${id})`);
+        }
+        
+        return entityData;
+      } catch (supabaseError: any) {
+        console.error('❌ [createEntity] Supabase経由の作成に失敗:', supabaseError);
+        throw supabaseError;
+      }
+    }
+
+    // SQLite使用時は既存のロジック
     try {
       // Rust API経由で作成（未実装の場合はフォールバック）
       console.log('📝 [createEntity] Rust API経由でエンティティを作成します:', id, entityData.name);
@@ -148,93 +205,73 @@ export async function getEntitiesByIds(
 }
 
 /**
- * エンティティIDで取得
+ * エンティティIDで取得（Supabase対応）
  */
 export async function getEntityById(entityId: string): Promise<Entity | null> {
   try {
-    // Tauri環境では直接Tauriコマンドを使用（CORSエラーを回避）
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
-      try {
-        const result = await callTauriCommand('doc_get', {
-          collectionName: 'entities',
-          docId: entityId,
-        });
-
-        // doc_getの結果は{exists: true/false, data: ...}の形式
-        const resultData = result as any;
-        if (!resultData?.exists || !resultData?.data) {
-          // エンティティが見つからない場合は警告を出力しない（リレーション埋め込み生成時に大量の警告が発生するため）
-          return null;
-        }
-        
-        const entityData = resultData.data;
-        if (!entityData || Object.keys(entityData).length === 0) {
-          return null;
-        }
-        
-        // idフィールドを追加
-        const entityIdFromResult = entityId;
-        
-        // aliasesとmetadataをJSON文字列からオブジェクトに変換
-        const entity: Entity = {
-          ...entityData,
-          id: entityIdFromResult,
-        };
-        
-        if (entity.aliases && typeof entity.aliases === 'string') {
-          try {
-            entity.aliases = JSON.parse(entity.aliases);
-          } catch (e) {
-            console.warn('⚠️ [getEntityById] aliasesのパースエラー:', e);
-            entity.aliases = [];
-          }
-        }
-        
-        if (entity.metadata && typeof entity.metadata === 'string') {
-          try {
-            entity.metadata = JSON.parse(entity.metadata);
-          } catch (e) {
-            console.warn('⚠️ [getEntityById] metadataのパースエラー:', e);
-            entity.metadata = {};
-          }
-        }
-        
-        return entity;
-      } catch (docGetError: any) {
-        // doc_getのエラーも無視（エンティティが存在しない場合など）
-        const docGetErrorMessage = docGetError?.message || String(docGetError || '');
-        const isDocGetNoRowsError = docGetErrorMessage.includes('no rows') || 
-                                    docGetErrorMessage.includes('Query returned no rows') ||
-                                    docGetErrorMessage.includes('ドキュメント取得エラー') ||
-                                    docGetErrorMessage.includes('Tauri環境ではありません') ||
-                                    docGetErrorMessage.includes('access control checks');
-        
-        if (!isDocGetNoRowsError) {
-          console.warn('⚠️ [getEntityById] Tauriコマンド経由の取得に失敗:', entityId, docGetError);
-        }
-        return null;
-      }
-    }
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
     
-    // Tauri環境でない場合はnullを返す
-    return null;
-  } catch (error: any) {
-    // 「no rows」エラーやTauri環境でないエラーは正常な状態として扱う
-    const errorMessage = error?.message || error?.error || error?.errorString || String(error || '');
-    const isNoRowsError = errorMessage.includes('no rows') || 
-                          errorMessage.includes('Query returned no rows') ||
-                          errorMessage.includes('ドキュメント取得エラー');
-    const isTauriEnvError = errorMessage.includes('Tauri環境ではありません') ||
-                            errorMessage.includes('access control checks') ||
-                            errorMessage.includes('ipc://localhost');
+    const data = await dataSource.doc_get('entities', entityId);
     
-    if (isNoRowsError || isTauriEnvError) {
-      // エンティティが存在しない場合やTauri環境でない場合は正常な状態として扱い、エラーログを出力しない
+    if (!data) {
+      // エンティティが見つからない場合は警告を出力しない
       return null;
     }
     
-    // その他のエラーのみログに出力
-    console.error('❌ [getEntityById] エラー:', error);
+    // Supabaseから取得したデータをEntity形式に変換
+    const entity: Entity = {
+      id: data.id || entityId,
+      name: data.name || '',
+      type: data.type || 'other',
+      organizationId: data.organizationId || data.organizationid || null,
+      companyId: data.companyId || data.companyid || undefined,
+      aliases: [],
+      metadata: {},
+      createdAt: data.createdAt || data.createdat || new Date().toISOString(),
+      updatedAt: data.updatedAt || data.updatedat || new Date().toISOString(),
+    };
+    
+    // aliasesをパース
+    if (data.aliases) {
+      try {
+        if (typeof data.aliases === 'string') {
+          entity.aliases = JSON.parse(data.aliases);
+        } else if (Array.isArray(data.aliases)) {
+          entity.aliases = data.aliases;
+        }
+      } catch (e) {
+        console.warn('⚠️ [getEntityById] aliasesのパースエラー:', e);
+        entity.aliases = [];
+      }
+    }
+    
+    // metadataをパース
+    if (data.metadata) {
+      try {
+        if (typeof data.metadata === 'string') {
+          entity.metadata = JSON.parse(data.metadata);
+        } else if (typeof data.metadata === 'object') {
+          entity.metadata = data.metadata;
+        }
+      } catch (e) {
+        console.warn('⚠️ [getEntityById] metadataのパースエラー:', e);
+        entity.metadata = {};
+      }
+    }
+    
+    return entity;
+  } catch (error: any) {
+    // 「no rows」エラーは正常な状態として扱う
+    const errorMessage = error?.message || String(error || '');
+    const isNoRowsError = errorMessage.includes('no rows') || 
+                          errorMessage.includes('Query returned no rows') ||
+                          errorMessage.includes('PGRST116') ||
+                          errorMessage.includes('ドキュメント取得エラー');
+    
+    if (!isNoRowsError) {
+      console.warn('⚠️ [getEntityById] 取得に失敗:', entityId, error);
+    }
     return null;
   }
 }
@@ -247,121 +284,116 @@ export async function getEntityById(entityId: string): Promise<Entity | null> {
  */
 export async function getAllEntities(): Promise<Entity[]> {
   try {
-    console.log('📖 [getAllEntities] 開始');
+    console.log('📖 [getAllEntities] 開始（Supabaseから取得）');
     
-    try {
-      // Rust API経由で取得（未実装の場合はフォールバック）
-      return await apiGet<Entity[]>('/api/entities');
-    } catch (error) {
-      // フォールバック: Tauriコマンド経由
-      console.warn('Rust API経由の取得に失敗、Tauriコマンドにフォールバック:', error);
-      const result = await callTauriCommand('collection_get', {
-        collectionName: 'entities',
-      });
-      
-      if (!result || !Array.isArray(result)) {
-        console.warn('⚠️ [getAllEntities] 結果が配列ではありません:', result);
-        return [];
-      }
-      
-      // デバッグ: companyIdを持つアイテムを事前に確認（全件チェック）
-      let companyIdFoundCount = 0;
-      const sampleWithCompanyId: any[] = [];
-      for (const item of result) { // 全件をチェック
-        const itemData = item.data || item;
-        // companyIdが存在し、nullでも空文字列でもない場合
-        if (itemData.companyId !== null && itemData.companyId !== undefined && itemData.companyId !== '' && itemData.companyId !== 'null') {
-          companyIdFoundCount++;
-          if (sampleWithCompanyId.length < 5) {
-            sampleWithCompanyId.push({
-              id: item.id || itemData.id,
-              name: itemData.name,
-              companyId: itemData.companyId,
-              companyIdType: typeof itemData.companyId,
-              rawCompanyId: itemData.companyId,
-            });
-          }
-        }
-      }
-      if (companyIdFoundCount > 0) {
-        console.log(`🔍 [getAllEntities] 全${result.length}件中、companyIdを持つエンティティ: ${companyIdFoundCount}件`, sampleWithCompanyId);
-      } else {
-        console.log(`⚠️ [getAllEntities] 全${result.length}件中、companyIdを持つエンティティが見つかりませんでした`);
-      }
-      
-      const entities: Entity[] = result.map((item: any) => {
-        // collection_getの結果は[{id: ..., data: ...}, ...]の形式または直接データ
-        const itemData = item.data || item;
-        const itemId = item.id || itemData.id;
-        
-        // companyIdを正しく処理（null, undefined, 空文字列をnullに統一）
-        let companyId: string | null = null;
-        if (itemData.companyId !== null && itemData.companyId !== undefined && itemData.companyId !== '' && itemData.companyId !== 'null') {
-          companyId = String(itemData.companyId);
-        }
-        
-        const entity: Entity = {
-          id: itemId,
-          name: itemData.name || '',
-          type: itemData.type || 'other',
-          organizationId: itemData.organizationId || null,
-          companyId: companyId || undefined,
-          aliases: [],
-          metadata: {},
-          createdAt: itemData.createdAt || new Date().toISOString(),
-          updatedAt: itemData.updatedAt || new Date().toISOString(),
-        };
-        
-        // aliasesをパース
-        if (itemData.aliases) {
-          try {
-            if (typeof itemData.aliases === 'string') {
-              entity.aliases = JSON.parse(itemData.aliases);
-            } else if (Array.isArray(itemData.aliases)) {
-              entity.aliases = itemData.aliases;
-            }
-          } catch (e) {
-            console.warn('⚠️ [getAllEntities] aliasesのパースエラー:', e);
-          }
-        }
-        
-        // metadataをパース
-        if (itemData.metadata) {
-          try {
-            if (typeof itemData.metadata === 'string') {
-              entity.metadata = JSON.parse(itemData.metadata);
-            } else if (typeof itemData.metadata === 'object') {
-              entity.metadata = itemData.metadata;
-            }
-          } catch (e) {
-            console.warn('⚠️ [getAllEntities] metadataのパースエラー:', e);
-          }
-        }
-        
-        return entity;
-      });
-      
-      // デバッグ: companyIdを持つエンティティの数を確認
-      const entitiesWithCompanyId = entities.filter(e => e.companyId);
-      console.log('✅ [getAllEntities] 取得成功:', entities.length, '件');
-      console.log('📊 [getAllEntities] companyIdを持つエンティティ:', entitiesWithCompanyId.length, '件');
-      if (entities.length > 0) {
-        console.log('🔍 [getAllEntities] サンプルエンティティ:', {
-          id: entities[0].id,
-          name: entities[0].name,
-          companyId: entities[0].companyId,
-          organizationId: entities[0].organizationId,
-        });
-      }
-      if (entitiesWithCompanyId.length > 0) {
-        console.log('🔍 [getAllEntities] companyIdを持つエンティティのサンプル:', entitiesWithCompanyId.slice(0, 3).map(e => ({
-          id: e.id,
-          name: e.name,
-          companyId: e.companyId,
-        })));
-      }
-      return entities;
+    const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+    const result = await getCollectionViaDataSource('entities');
+    
+    // Supabaseから取得したデータは既に配列形式
+    if (!Array.isArray(result)) {
+      console.warn('⚠️ [getAllEntities] 結果が配列ではありません:', result);
+      return [];
     }
+    console.log('📖 [getAllEntities] Supabaseから取得:', result.length, '件');
+    
+    // デバッグ: companyIdを持つアイテムを事前に確認（全件チェック）
+    let companyIdFoundCount = 0;
+    const sampleWithCompanyId: any[] = [];
+    for (const item of result) {
+      // Supabaseの場合は直接オブジェクト
+      const itemData = item;
+      // companyIdが存在し、nullでも空文字列でもない場合
+      if (itemData.companyId !== null && itemData.companyId !== undefined && itemData.companyId !== '' && itemData.companyId !== 'null') {
+        companyIdFoundCount++;
+        if (sampleWithCompanyId.length < 5) {
+          sampleWithCompanyId.push({
+            id: item.id,
+            name: itemData.name,
+            companyId: itemData.companyId,
+            companyIdType: typeof itemData.companyId,
+            rawCompanyId: itemData.companyId,
+          });
+        }
+      }
+    }
+    if (companyIdFoundCount > 0) {
+      console.log(`🔍 [getAllEntities] 全${result.length}件中、companyIdを持つエンティティ: ${companyIdFoundCount}件`, sampleWithCompanyId);
+    } else {
+      console.log(`⚠️ [getAllEntities] 全${result.length}件中、companyIdを持つエンティティが見つかりませんでした`);
+    }
+    
+    const entities: Entity[] = result.map((item: any) => {
+      // Supabaseの場合は直接オブジェクト
+      const itemData = item;
+      const itemId = item.id;
+      
+      // companyIdを正しく処理（null, undefined, 空文字列をnullに統一）
+      let companyId: string | null = null;
+      if (itemData.companyId !== null && itemData.companyId !== undefined && itemData.companyId !== '' && itemData.companyId !== 'null') {
+        companyId = String(itemData.companyId);
+      }
+      
+      const entity: Entity = {
+        id: itemId,
+        name: itemData.name || '',
+        type: itemData.type || 'other',
+        organizationId: itemData.organizationId || itemData.organizationid || null,
+        companyId: companyId || undefined,
+        aliases: [],
+        metadata: {},
+        createdAt: itemData.createdAt || itemData.createdat || new Date().toISOString(),
+        updatedAt: itemData.updatedAt || itemData.updatedat || new Date().toISOString(),
+      };
+      
+      // aliasesをパース
+      if (itemData.aliases) {
+        try {
+          if (typeof itemData.aliases === 'string') {
+            entity.aliases = JSON.parse(itemData.aliases);
+          } else if (Array.isArray(itemData.aliases)) {
+            entity.aliases = itemData.aliases;
+          }
+        } catch (e) {
+          console.warn('⚠️ [getAllEntities] aliasesのパースエラー:', e);
+        }
+      }
+      
+      // metadataをパース
+      if (itemData.metadata) {
+        try {
+          if (typeof itemData.metadata === 'string') {
+            entity.metadata = JSON.parse(itemData.metadata);
+          } else if (typeof itemData.metadata === 'object') {
+            entity.metadata = itemData.metadata;
+          }
+        } catch (e) {
+          console.warn('⚠️ [getAllEntities] metadataのパースエラー:', e);
+        }
+      }
+      
+      return entity;
+    });
+    
+    // デバッグ: companyIdを持つエンティティの数を確認
+    const entitiesWithCompanyId = entities.filter(e => e.companyId);
+    console.log('✅ [getAllEntities] 取得成功:', entities.length, '件');
+    console.log('📊 [getAllEntities] companyIdを持つエンティティ:', entitiesWithCompanyId.length, '件');
+    if (entities.length > 0) {
+      console.log('🔍 [getAllEntities] サンプルエンティティ:', {
+        id: entities[0].id,
+        name: entities[0].name,
+        companyId: entities[0].companyId,
+        organizationId: entities[0].organizationId,
+      });
+    }
+    if (entitiesWithCompanyId.length > 0) {
+      console.log('🔍 [getAllEntities] companyIdを持つエンティティのサンプル:', entitiesWithCompanyId.slice(0, 3).map(e => ({
+        id: e.id,
+        name: e.name,
+        companyId: e.companyId,
+      })));
+    }
+    return entities;
   } catch (error: any) {
     console.error('❌ [getAllEntities] エラー:', error);
     return [];
@@ -370,13 +402,23 @@ export async function getAllEntities(): Promise<Entity[]> {
 
 export async function getEntitiesByOrganizationId(organizationId: string): Promise<Entity[]> {
   try {
-    const result = await callTauriCommand('query_get', {
-      collectionName: 'entities',
-      conditions: { organizationId },
+    const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+    // Supabaseではorganizationid（小文字）として保存されている
+    const result = await getCollectionViaDataSource('entities', {
+      filters: [
+        { field: 'organizationid', operator: 'eq', value: organizationId }
+      ]
     });
-
-    // query_getの結果は[{id: ..., data: ...}, ...]の形式
-    const items = (result || []) as Array<{id: string; data: any}>;
+    
+    // Supabaseから取得したデータは既に配列形式
+    if (!Array.isArray(result)) {
+      console.warn('⚠️ [getEntitiesByOrganizationId] 結果が配列ではありません:', result);
+      return [];
+    }
+    
+    // データをEntity形式に変換
+    const items = result.map((item: any) => ({ id: item.id, data: item }));
+    
     return items.map(item => {
       const entity: Entity = { ...item.data, id: item.id };
       // aliasesとmetadataをJSON文字列からオブジェクトに変換
@@ -409,13 +451,23 @@ export async function getEntitiesByOrganizationId(organizationId: string): Promi
  */
 export async function getEntitiesByCompanyId(companyId: string): Promise<Entity[]> {
   try {
-    const result = await callTauriCommand('query_get', {
-      collectionName: 'entities',
-      conditions: { companyId },
+    const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+    // Supabaseではcompanyid（小文字）として保存されている
+    const result = await getCollectionViaDataSource('entities', {
+      filters: [
+        { field: 'companyid', operator: 'eq', value: companyId }
+      ]
     });
-
-    // query_getの結果は[{id: ..., data: ...}, ...]の形式
-    const items = (result || []) as Array<{id: string; data: any}>;
+    
+    // Supabaseから取得したデータは既に配列形式
+    if (!Array.isArray(result)) {
+      console.warn('⚠️ [getEntitiesByCompanyId] 結果が配列ではありません:', result);
+      return [];
+    }
+    
+    // データをEntity形式に変換
+    const items = result.map((item: any) => ({ id: item.id, data: item }));
+    
     return items.map(item => {
       const entity: Entity = { ...item.data, id: item.id };
       // aliasesとmetadataをJSON文字列からオブジェクトに変換
@@ -452,23 +504,24 @@ export async function getEntitiesByType(
   companyId?: string
 ): Promise<Entity[]> {
   try {
-    const filters: any = { type };
+    const { queryGetViaDataSource } = await import('./dataSourceAdapter');
+    
+    const filters: any[] = [{ field: 'type', operator: 'eq', value: type }];
     if (organizationId) {
-      filters.organizationId = organizationId;
+      filters.push({ field: 'organizationid', operator: 'eq', value: organizationId });
     }
     if (companyId) {
-      filters.companyId = companyId;
+      filters.push({ field: 'companyid', operator: 'eq', value: companyId });
     }
 
-    const result = await callTauriCommand('query_get', {
-      collectionName: 'entities',
-      conditions: filters,
+    const result = await queryGetViaDataSource('entities', {
+      filters
     });
 
-    // query_getの結果は[{id: ..., data: ...}, ...]の形式
+    // query_getの結果は配列形式
     const items = (result || []) as Array<{id: string; data: any}>;
     return items.map(item => {
-      const entity: Entity = { ...item.data, id: item.id };
+      const entity: Entity = { ...(item.data || item), id: item.id || item.data?.id };
       // aliasesとmetadataをJSON文字列からオブジェクトに変換
       if (entity.aliases && typeof entity.aliases === 'string') {
         try {
@@ -681,6 +734,44 @@ export async function updateEntity(
         : JSON.stringify(existing.metadata);
     }
 
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
+    // Supabase使用時はDataSource経由で更新
+    if (useSupabase) {
+      try {
+        console.log('📝 [updateEntity] Supabase経由でエンティティを更新します:', entityId);
+        
+        // Supabaseに保存（doc_setは既存レコードがある場合は更新、ない場合は作成）
+        const { setDocViaDataSource } = await import('./dataSourceAdapter');
+        await setDocViaDataSource('entities', entityId, updatedForDb);
+        console.log('✅ [updateEntity] Supabase経由でエンティティを更新しました:', entityId);
+        
+        // ChromaDB同期（改善版: 変更検知、リトライ、エラー通知付き）
+        if (updated.organizationId) {
+          try {
+            const { syncEntityToChroma } = await import('./chromaSync');
+            await syncEntityToChroma(
+              entityId,
+              updated.organizationId,
+              updated,
+              existing,
+              updates
+            );
+          } catch (chromaError) {
+            console.warn(`⚠️ [updateEntity] ChromaDB同期エラー（処理は続行）: ${entityId}`, chromaError);
+          }
+        } else if (updated.companyId) {
+          console.log(`ℹ️ [updateEntity] companyIdが設定されていますが、事業会社用のChromaDB同期は未実装です: ${entityId}`);
+        }
+        
+        return updated;
+      } catch (supabaseError: any) {
+        console.error('❌ [updateEntity] Supabase経由の更新に失敗:', supabaseError);
+        throw supabaseError;
+      }
+    }
+    
+    // SQLite使用時は既存のロジック
     try {
       // Rust API経由で更新（未実装の場合はフォールバック）
       return await apiPut<Entity>(`/api/entities/${entityId}`, updates);
@@ -728,21 +819,38 @@ export async function updateEntity(
  */
 export async function deleteEntity(entityId: string): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
     // 削除前にエンティティ情報を取得（ChromaDB削除用）
     const existing = await getEntityById(entityId);
     const organizationId = existing?.organizationId;
     const companyId = existing?.companyId;
     
-    try {
-      // Rust API経由で削除（未実装の場合はフォールバック）
-      await apiDelete(`/api/entities/${entityId}`);
-    } catch (error) {
-      // フォールバック: Tauriコマンド経由
-      console.warn('Rust API経由の削除に失敗、Tauriコマンドにフォールバック:', error);
-      await callTauriCommand('doc_delete', {
-        collectionName: 'entities',
-        docId: entityId,
-      });
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        console.log('📝 [deleteEntity] Supabase経由でエンティティを削除します:', entityId);
+        
+        const { deleteDocViaDataSource } = await import('./dataSourceAdapter');
+        await deleteDocViaDataSource('entities', entityId);
+        console.log('✅ [deleteEntity] Supabase経由でエンティティを削除しました:', entityId);
+      } catch (supabaseError: any) {
+        console.error('❌ [deleteEntity] Supabase経由の削除に失敗:', supabaseError);
+        throw supabaseError;
+      }
+    } else {
+      // SQLite使用時は既存のロジック
+      try {
+        // Rust API経由で削除（未実装の場合はフォールバック）
+        await apiDelete(`/api/entities/${entityId}`);
+      } catch (error) {
+        // フォールバック: Tauriコマンド経由
+        console.warn('Rust API経由の削除に失敗、Tauriコマンドにフォールバック:', error);
+        await callTauriCommand('doc_delete', {
+          collectionName: 'entities',
+          docId: entityId,
+        });
+      }
     }
     
     // ChromaDBからも削除（改善版: リトライ、エラー通知付き）

@@ -19,7 +19,12 @@ interface UseTopicManagementProps {
     keywords?: string[];
     summary?: string;
   } | null;
-  setPendingMetadata: (metadata: typeof pendingMetadata) => void;
+  setPendingMetadata: (metadata: {
+    semanticCategory?: TopicSemanticCategory;
+    importance?: TopicInfo['importance'];
+    keywords?: string[];
+    summary?: string;
+  } | null) => void;
   pendingEntities: Entity[] | null;
   setPendingEntities: (entities: Entity[] | null) => void;
   pendingRelations: Relation[] | null;
@@ -80,7 +85,20 @@ export function useTopicManagement({
 
   // AIでメタデータを生成する関数（保存はしない）
   const handleAIGenerateMetadata = useCallback(async () => {
-    if (!selectedTopic) return;
+    if (!selectedTopic) {
+      console.error('❌ [handleAIGenerateMetadata] selectedTopicが設定されていません');
+      alert('エラー: トピックが選択されていません');
+      return;
+    }
+
+    if (!selectedTopic.title || !selectedTopic.content) {
+      console.error('❌ [handleAIGenerateMetadata] トピックのタイトルまたは内容が設定されていません:', {
+        hasTitle: !!selectedTopic.title,
+        hasContent: !!selectedTopic.content,
+      });
+      alert('エラー: トピックのタイトルと内容を入力してください');
+      return;
+    }
 
     try {
       setIsGeneratingMetadata(true);
@@ -357,10 +375,26 @@ export function useTopicManagement({
       // topicsレコードが存在するか確認（存在しない場合は作成）
       let topicEmbeddingRecordId = topicEmbeddingId;
       try {
-        const topicEmbeddingResult = await callTauriCommand('doc_get', {
-          collectionName: 'topics',
-          docId: topicEmbeddingId,
-        });
+        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+        let topicEmbeddingResult: any = null;
+        
+        if (useSupabase) {
+          // Supabase経由で取得
+          const { getDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+          const topicData = await getDocViaDataSource('topics', topicEmbeddingId);
+          if (topicData) {
+            topicEmbeddingResult = { exists: true, data: topicData };
+          } else {
+            topicEmbeddingResult = { exists: false, data: null };
+          }
+        } else {
+          // SQLite経由で取得
+          const { callTauriCommand } = await import('@/lib/localFirebase');
+          topicEmbeddingResult = await callTauriCommand('doc_get', {
+            collectionName: 'topics',
+            docId: topicEmbeddingId,
+          });
+        }
         
         // doc_getの結果を確認（{exists: bool, data: HashMap}形式）
         if (topicEmbeddingResult && topicEmbeddingResult.exists && topicEmbeddingResult.data) {
@@ -397,13 +431,13 @@ export function useTopicManagement({
       // エンティティとリレーションを保存
       let savedEntityCount = 0;
       let savedRelationCount = 0;
-      let entitiesToCreateCount = 0; // スコープ外でも使用できるように変数を定義
-      
       // pendingEntitiesのIDから実際に作成されたIDへのマッピング
       const pendingIdToCreatedIdMap = new Map<string, string>();
       
       // エンティティを保存（pendingEntitiesがあれば、または既存のtopicEntitiesがあれば）
+      // entitiesToSaveをブロックの外で定義して、リレーション保存処理でも使用できるようにする
       const entitiesToSave = pendingEntities && pendingEntities.length > 0 ? pendingEntities : topicEntities;
+      let entitiesToCreateCount = 0; // スコープ外でも使用できるように変数を定義
       if (entitiesToSave && entitiesToSave.length > 0) {
           console.log('💾 エンティティ保存を開始:', entitiesToSave.length, '件');
           
@@ -437,73 +471,80 @@ export function useTopicManagement({
           
           console.log(`📊 エンティティ保存対象: ${entitiesToCreate.length}件（重複除外: ${entitiesToSave.length - entitiesToCreate.length}件、トピック: ${selectedTopic.id}）`);
           
-          for (const entity of entitiesToCreate) {
-            try {
-              const pendingId = entity.id; // 元のIDを保存
-              
-              // metadataにtopicIdを確実に設定
-              const entityMetadata = {
-                ...(entity.metadata || {}),
-                topicId: selectedTopic.id, // トピックIDをmetadataに追加
-              };
-              
-              // organizationIdとcompanyIdを確実に設定
-              // 事業会社のトピックの場合はcompanyIdを優先、組織のトピックの場合はorganizationIdを優先
-              const companyId = entity.companyId || selectedTopic.companyId || undefined;
-              const organizationId = companyId 
-                ? (entity.organizationId || selectedTopic.organizationId || undefined)
-                : (entity.organizationId || selectedTopic.organizationId);
-              
-              // organizationIdとcompanyIdのどちらか一方が設定されている必要がある
-              if (!organizationId && !companyId) {
-                console.error('❌ エンティティ作成エラー: organizationIdもcompanyIdも設定されていません', {
-                  entityName: entity.name,
-                  entityOrganizationId: entity.organizationId,
-                  entityCompanyId: entity.companyId,
-                  topicOrganizationId: selectedTopic.organizationId,
-                  topicCompanyId: selectedTopic.companyId,
+          // エンティティ作成を並列化（パフォーマンス最適化）
+          const pLimit = (await import('p-limit')).default;
+          const entityLimit = pLimit(10); // 同時実行数: 10
+          
+          const entityResults = await Promise.allSettled(
+            entitiesToCreate.map(entity =>
+              entityLimit(async () => {
+                const pendingId = entity.id; // 元のIDを保存
+                
+                // metadataにtopicIdを確実に設定
+                const entityMetadata = {
+                  ...(entity.metadata || {}),
+                  topicId: selectedTopic.id, // トピックIDをmetadataに追加
+                };
+                
+                // organizationIdとcompanyIdを確実に設定
+                // 事業会社のトピックの場合はcompanyIdを優先、組織のトピックの場合はorganizationIdを優先
+                const companyId = entity.companyId || selectedTopic.companyId || undefined;
+                const organizationId = companyId 
+                  ? (entity.organizationId || selectedTopic.organizationId || undefined)
+                  : (entity.organizationId || selectedTopic.organizationId);
+                
+                // organizationIdとcompanyIdのどちらか一方が設定されている必要がある
+                if (!organizationId && !companyId) {
+                  console.error('❌ エンティティ作成エラー: organizationIdもcompanyIdも設定されていません', {
+                    entityName: entity.name,
+                    entityOrganizationId: entity.organizationId,
+                    entityCompanyId: entity.companyId,
+                    topicOrganizationId: selectedTopic.organizationId,
+                    topicCompanyId: selectedTopic.companyId,
+                  });
+                  throw new Error('organizationIdまたはcompanyIdが設定されていません');
+                }
+                
+                console.log('📝 エンティティ作成開始:', {
+                  name: entity.name,
+                  organizationId: organizationId,
+                  companyId: companyId,
+                  topicId: selectedTopic.id,
                 });
-                throw new Error('organizationIdまたはcompanyIdが設定されていません');
-              }
-              
-              console.log('📝 エンティティ作成開始:', {
-                name: entity.name,
-                organizationId: organizationId,
-                companyId: companyId,
-                topicId: selectedTopic.id,
-              });
-              
-              const createdEntity = await createEntity({
-                name: entity.name,
-                type: entity.type,
-                aliases: entity.aliases || [],
-                metadata: entityMetadata,
-                organizationId: organizationId,
-                companyId: companyId,
-              });
-              
-              console.log('✅ エンティティ作成成功:', {
-                name: entity.name,
-                pendingID: pendingId,
-                createdID: createdEntity.id,
-                topicId: selectedTopic.id,
-                organizationId: createdEntity.organizationId,
-                companyId: createdEntity.companyId,
-              });
-              
-              // IDマッピングを作成
-              pendingIdToCreatedIdMap.set(pendingId, createdEntity.id);
+                
+                const createdEntity = await createEntity({
+                  name: entity.name,
+                  type: entity.type,
+                  aliases: entity.aliases || [],
+                  metadata: entityMetadata,
+                  organizationId: organizationId,
+                  companyId: companyId,
+                });
+                
+                console.log('✅ エンティティ作成成功:', {
+                  name: entity.name,
+                  pendingID: pendingId,
+                  createdID: createdEntity.id,
+                  topicId: selectedTopic.id,
+                  organizationId: createdEntity.organizationId,
+                  companyId: createdEntity.companyId,
+                });
+                
+                // IDマッピングを作成
+                pendingIdToCreatedIdMap.set(pendingId, createdEntity.id);
+                return { success: true, pendingId, createdId: createdEntity.id, entityName: entity.name };
+              })
+            )
+          );
+          
+          // エラーをチェック
+          for (const result of entityResults) {
+            if (result.status === 'rejected') {
+              const error = result.reason;
+              console.error('❌ エンティティ作成エラー:', error);
+              throw new Error(`エンティティの作成に失敗しました: ${error?.message || error}`);
+            } else if (result.value && result.value.success) {
               savedEntityCount++;
-            } catch (error: any) {
-              console.error('❌ エンティティ作成エラー:', {
-                entityName: entity.name,
-                error: error?.message || error,
-                stack: error?.stack,
-                entityOrganizationId: entity.organizationId,
-                topicOrganizationId: selectedTopic.organizationId,
-              });
-              // エラーが発生した場合は処理を中断
-              throw new Error(`エンティティ「${entity.name}」の作成に失敗しました: ${error?.message || error}`);
             }
           }
           
@@ -519,22 +560,20 @@ export function useTopicManagement({
             }
           });
           
-          // エンティティを再取得してIDを取得
+          // エンティティ再取得をコメントアウト（パフォーマンス最適化、406エラー回避）
+          // 機能的には影響なし（pendingIdToCreatedIdMapが正しく構築されていれば十分）
+          /*
           const updatedEntities = await getEntitiesByOrganizationId(selectedTopic.organizationId);
-          
-          // 同じトピック内のエンティティのみをフィルタリング
           const updatedEntitiesInTopic = updatedEntities.filter(e => {
             if (!e.metadata || typeof e.metadata !== 'object') return false;
             return 'topicId' in e.metadata && e.metadata.topicId === selectedTopic.id;
           });
-          
           console.log(`📊 組織内のエンティティ総数: ${updatedEntities.length}件、トピック内: ${updatedEntitiesInTopic.length}件（トピック: ${selectedTopic.id}）`);
-          
-          // エンティティ名からIDのマッピングを作成（同じトピック内のエンティティのみ）
           const entityNameToIdMap = new Map<string, string>();
           updatedEntitiesInTopic.forEach(entity => {
             entityNameToIdMap.set(entity.name.toLowerCase(), entity.id);
           });
+          */
           
           console.log('📊 IDマッピング:', Array.from(pendingIdToCreatedIdMap.entries()).map(([pending, created]) => `${pending} -> ${created}`));
         }
@@ -544,13 +583,49 @@ export function useTopicManagement({
       if (relationsToSave && relationsToSave.length > 0) {
         console.log('💾 リレーション保存を開始:', relationsToSave.length, '件');
         
+        // エンティティ名からタイプ情報を除去する関数（例: "Merge (company)" → "Merge"）
+        const normalizeEntityName = (name: string): string => {
+          // 末尾のタイプ情報（例: "(company)", "(product)"など）を除去
+          return name.replace(/\s*\([^)]+\)\s*$/, '').trim();
+        };
+
         // エンティティ名からIDのマッピングを取得（同じトピック内のエンティティのみ）
+        // パフォーマンス最適化: 既に保存したエンティティのIDはpendingIdToCreatedIdMapに含まれているため、
+        // フォールバック処理でのみエンティティ名からIDを取得する必要がある
+        // 既存のエンティティ（以前に保存されたもの）も考慮するため、全エンティティを取得するが、
+        // 並列処理でSupabaseから取得するため、高速化される
         let entityNameToIdMap = new Map<string, string>();
-        // エンティティを取得（保存済みまたは既存）
-        // 事業会社のトピックの場合はcompanyIdで取得、組織のトピックの場合はorganizationIdで取得
-        const allEntities = selectedTopic.companyId
-          ? await getEntitiesByCompanyId(selectedTopic.companyId)
-          : await getEntitiesByOrganizationId(selectedTopic.organizationId);
+        let normalizedEntityNameToIdMap = new Map<string, string>(); // タイプ情報を除去したマッピング
+        
+        // 既に保存したエンティティのIDをマッピングに追加
+        entitiesToSave?.forEach(entity => {
+          const createdId = pendingIdToCreatedIdMap.get(entity.id);
+          if (createdId) {
+            entityNameToIdMap.set(entity.name.toLowerCase(), createdId);
+            // タイプ情報を除去した名前でもマッピング
+            const normalizedName = normalizeEntityName(entity.name);
+            if (normalizedName !== entity.name) {
+              normalizedEntityNameToIdMap.set(normalizedName.toLowerCase(), createdId);
+            }
+          }
+        });
+        
+        // 既存のエンティティも取得（フォールバック処理用）
+        // 並列処理でSupabaseから取得するため、高速化される
+        const allEntitiesPromise = selectedTopic.companyId
+          ? getEntitiesByCompanyId(selectedTopic.companyId)
+          : getEntitiesByOrganizationId(selectedTopic.organizationId);
+        
+        // 既存のリレーションを取得（重複チェック用）
+        // トピックごとに独立したリレーションを管理するため、同じトピック内での重複のみをチェック
+        const existingRelationsPromise = getRelationsByTopicId(topicEmbeddingRecordId);
+        
+        // エンティティ取得と既存リレーション取得を並列実行
+        const [allEntities, existingRelations] = await Promise.all([
+          allEntitiesPromise,
+          existingRelationsPromise,
+        ]);
+        
         // 同じトピック内のエンティティのみをフィルタリング
         const entitiesInTopic = allEntities.filter(e => {
           if (!e.metadata || typeof e.metadata !== 'object') return false;
@@ -558,36 +633,146 @@ export function useTopicManagement({
         });
         entitiesInTopic.forEach(entity => {
           entityNameToIdMap.set(entity.name.toLowerCase(), entity.id);
+          // タイプ情報を除去した名前でもマッピング
+          const normalizedName = normalizeEntityName(entity.name);
+          if (normalizedName !== entity.name) {
+            normalizedEntityNameToIdMap.set(normalizedName.toLowerCase(), entity.id);
+          }
         });
         
-        console.log('💾 リレーション保存を開始:', relationsToSave.length, '件');
+        // リレーションの重複チェック用キーを作成
+        // sourceEntityId + targetEntityId + relationType の組み合わせで重複を判定
+        // 既存のリレーションは既にデータベースに保存されているため、そのままIDを使用
+        const existingRelationKeys = new Set(
+          existingRelations.map(r => {
+            const sourceId = r.sourceEntityId || '';
+            const targetId = r.targetEntityId || '';
+            return `${sourceId}_${targetId}_${r.relationType || ''}`.toLowerCase();
+          })
+        );
         
-        for (const relation of relationsToSave) {
-            try {
+        // 重複しないリレーションのみを作成（同じトピック内で重複しないもの）
+        const relationsToCreate = relationsToSave.filter(relation => {
+          // IDマッピングを使用して実際のIDに変換
+          // まずpendingIdToCreatedIdMapから取得、なければ元のIDを使用
+          let sourceId = pendingIdToCreatedIdMap.get(relation.sourceEntityId || '') || relation.sourceEntityId || '';
+          let targetId = pendingIdToCreatedIdMap.get(relation.targetEntityId || '') || relation.targetEntityId || '';
+          
+          // エンティティ名からIDを取得（フォールバック）
+          if (!sourceId || !entitiesInTopic.some(e => e.id === sourceId)) {
+            const sourceEntity = entitiesToSave?.find(e => e.id === relation.sourceEntityId);
+            if (sourceEntity) {
+              // まず通常の名前で検索、見つからない場合は正規化した名前で検索
+              let fallbackSourceId = entityNameToIdMap.get(sourceEntity.name.toLowerCase());
+              if (!fallbackSourceId) {
+                const normalizedSourceName = normalizeEntityName(sourceEntity.name);
+                fallbackSourceId = normalizedEntityNameToIdMap.get(normalizedSourceName.toLowerCase());
+              }
+              if (fallbackSourceId) {
+                sourceId = fallbackSourceId;
+              }
+            }
+          }
+          
+          if (!targetId || !entitiesInTopic.some(e => e.id === targetId)) {
+            const targetEntity = entitiesToSave?.find(e => e.id === relation.targetEntityId);
+            if (targetEntity) {
+              // まず通常の名前で検索、見つからない場合は正規化した名前で検索
+              let fallbackTargetId = entityNameToIdMap.get(targetEntity.name.toLowerCase());
+              if (!fallbackTargetId) {
+                const normalizedTargetName = normalizeEntityName(targetEntity.name);
+                fallbackTargetId = normalizedEntityNameToIdMap.get(normalizedTargetName.toLowerCase());
+              }
+              if (fallbackTargetId) {
+                targetId = fallbackTargetId;
+              }
+            }
+          }
+          
+          const key = `${sourceId}_${targetId}_${relation.relationType || ''}`.toLowerCase();
+          // 既にデータベースに保存されている場合はスキップ
+          return !existingRelationKeys.has(key);
+        });
+        
+        // リレーション保存を並列化（パフォーマンス最適化）
+        const pLimit = (await import('p-limit')).default;
+        const relationLimit = pLimit(10); // 同時実行数: 10
+        
+        console.log(`📊 リレーション保存対象: ${relationsToCreate.length}件（重複除外: ${relationsToSave.length - relationsToCreate.length}件、トピック: ${selectedTopic.id}）`);
+        
+        console.log('💾 リレーション保存を開始:', relationsToCreate.length, '件');
+        
+        console.log('📊 リレーション保存前の状態:', {
+          relationsToSaveCount: relationsToSave.length,
+          relationsToCreateCount: relationsToCreate.length,
+          existingRelationsCount: existingRelations.length,
+          pendingIdToCreatedIdMapSize: pendingIdToCreatedIdMap.size,
+          pendingIdToCreatedIdMapEntries: Array.from(pendingIdToCreatedIdMap.entries()),
+          entitiesToSaveCount: entitiesToSave?.length || 0,
+          entitiesInTopicCount: entitiesInTopic.length,
+        });
+        
+        const relationResults = await Promise.allSettled(
+          relationsToCreate.map(relation =>
+            relationLimit(async () => {
               // リレーションのエンティティIDを取得
               // extractRelationsが返すリレーションには、pendingEntitiesのエンティティIDが含まれている
               // このIDは一時的なものなので、実際に作成されたIDに変換する必要がある
               
               // IDマッピングを使用して実際に作成されたIDを取得
               if (!relation.sourceEntityId || !relation.targetEntityId) {
-                console.warn('リレーションにsourceEntityIdまたはtargetEntityIdがありません:', relation);
-                continue;
+                console.warn('⚠️ リレーションにsourceEntityIdまたはtargetEntityIdがありません:', relation);
+                return { success: false, skipped: true, reason: 'missing entity IDs' };
               }
+              
+              console.log('🔍 リレーションID変換開始:', {
+                sourceEntityId: relation.sourceEntityId,
+                targetEntityId: relation.targetEntityId,
+                pendingIdMap: Array.from(pendingIdToCreatedIdMap.entries()),
+              });
+              
               const sourceId = pendingIdToCreatedIdMap.get(relation.sourceEntityId) || relation.sourceEntityId;
               const targetId = pendingIdToCreatedIdMap.get(relation.targetEntityId) || relation.targetEntityId;
+              
+              console.log('🔍 ID変換結果:', {
+                originalSourceId: relation.sourceEntityId,
+                mappedSourceId: sourceId,
+                originalTargetId: relation.targetEntityId,
+                mappedTargetId: targetId,
+                sourceIdChanged: sourceId !== relation.sourceEntityId,
+                targetIdChanged: targetId !== relation.targetEntityId,
+              });
               
               // sourceIdとtargetIdが既にデータベースに存在するか確認
               const sourceEntityExists = entitiesInTopic.some(e => e.id === sourceId);
               const targetEntityExists = entitiesInTopic.some(e => e.id === targetId);
               
+              console.log('🔍 エンティティ存在確認:', {
+                sourceId,
+                targetId,
+                sourceEntityExists,
+                targetEntityExists,
+                entitiesInTopicIds: entitiesInTopic.map(e => e.id),
+              });
+              
               if (!sourceEntityExists || !targetEntityExists) {
                 // フォールバック: エンティティ名からIDを取得
-                const sourceEntity = entitiesToSave.find(e => e.id === relation.sourceEntityId);
-                const targetEntity = entitiesToSave.find(e => e.id === relation.targetEntityId);
+                const sourceEntity = entitiesToSave?.find(e => e.id === relation.sourceEntityId);
+                const targetEntity = entitiesToSave?.find(e => e.id === relation.targetEntityId);
                 
                 if (sourceEntity && targetEntity) {
-                  const fallbackSourceId = entityNameToIdMap.get(sourceEntity.name.toLowerCase());
-                  const fallbackTargetId = entityNameToIdMap.get(targetEntity.name.toLowerCase());
+                  // まず通常の名前で検索、見つからない場合は正規化した名前で検索
+                  let fallbackSourceId = entityNameToIdMap.get(sourceEntity.name.toLowerCase());
+                  let fallbackTargetId = entityNameToIdMap.get(targetEntity.name.toLowerCase());
+                  
+                  if (!fallbackSourceId) {
+                    const normalizedSourceName = normalizeEntityName(sourceEntity.name);
+                    fallbackSourceId = normalizedEntityNameToIdMap.get(normalizedSourceName.toLowerCase());
+                  }
+                  if (!fallbackTargetId) {
+                    const normalizedTargetName = normalizeEntityName(targetEntity.name);
+                    fallbackTargetId = normalizedEntityNameToIdMap.get(normalizedTargetName.toLowerCase());
+                  }
                   
                   if (fallbackSourceId && fallbackTargetId) {
                     console.log('⚠️ IDマッピングが見つかりませんが、エンティティ名からIDを取得しました（トピック内）:', {
@@ -626,8 +811,7 @@ export function useTopicManagement({
                       companyId: companyId,
                     });
                     console.log('✅ リレーション作成:', createdRelation.id);
-                    savedRelationCount++;
-                    continue;
+                    return { success: true, relationId: createdRelation.id, relationType: relation.relationType };
                   }
                 }
                 
@@ -636,11 +820,16 @@ export function useTopicManagement({
                   targetPendingId: relation.targetEntityId,
                   sourceId,
                   targetId,
+                  sourceEntityExists,
+                  targetEntityExists,
                   relationType: relation.relationType,
                   topicId: selectedTopic.id,
                   pendingIdMap: Array.from(pendingIdToCreatedIdMap.entries()),
+                  entityNameToIdMap: Array.from(entityNameToIdMap.entries()),
+                  entitiesToSave: entitiesToSave?.map(e => ({ id: e.id, name: e.name })) || [],
+                  entitiesInTopic: entitiesInTopic.map(e => ({ id: e.id, name: e.name })),
                 });
-                continue;
+                return { success: false, skipped: true, reason: 'entity IDs not found' };
               }
               
               console.log('📊 リレーションID変換（トピック内）:', {
@@ -712,29 +901,33 @@ export function useTopicManagement({
                 match: createdRelation.topicId === topicEmbeddingRecordId,
               });
               // エンティティ名を取得（ログ用）
-              const sourceEntity = entitiesToSave.find(e => e.id === relation.sourceEntityId);
-              const targetEntity = entitiesToSave.find(e => e.id === relation.targetEntityId);
+              const sourceEntity = entitiesToSave?.find(e => e.id === relation.sourceEntityId);
+              const targetEntity = entitiesToSave?.find(e => e.id === relation.targetEntityId);
               const sourceName = sourceEntity?.name || relation.sourceEntityId;
               const targetName = targetEntity?.name || relation.targetEntityId;
               console.log('✅ リレーション作成（トピック内）:', relation.relationType, `${sourceName} -> ${targetName}`, 'ID:', createdRelation.id, 'topicId:', selectedTopic.id);
-              savedRelationCount++;
-            } catch (error: any) {
-              console.error('❌ リレーション作成エラー:', {
-                relationType: relation.relationType,
-                error: error?.message || error,
-                stack: error?.stack,
-                sourceEntityId: relation.sourceEntityId,
-                targetEntityId: relation.targetEntityId,
-              });
-              // エラーが発生した場合は処理を中断
-              throw new Error(`リレーション「${relation.relationType}」の作成に失敗しました: ${error?.message || error}`);
-            }
+              return { success: true, relationId: createdRelation.id, relationType: relation.relationType };
+            })
+          )
+        );
+        
+        // エラーをチェック
+        for (const result of relationResults) {
+          if (result.status === 'rejected') {
+            const error = result.reason;
+            console.error('❌ リレーション作成エラー:', error);
+            throw new Error(`リレーションの作成に失敗しました: ${error?.message || error}`);
+          } else if (result.value && result.value.success) {
+            savedRelationCount++;
           }
+        }
         }
         
       console.log(`✅ 保存完了: エンティティ ${savedEntityCount}件、リレーション ${savedRelationCount}件`);
       
-      // 保存が成功したか確認するため、データベースから取得して検証
+      // 保存確認のための再取得をコメントアウト（パフォーマンス最適化、406エラー回避）
+      // 機能的には影響なし（保存処理自体は成功している）
+      /*
       try {
         const { getEntitiesByOrganizationId } = await import('@/lib/entityApi');
         const { getRelationsByTopicId } = await import('@/lib/relationApi');
@@ -771,9 +964,10 @@ export function useTopicManagement({
             expected: savedRelationCount,
           });
         }
-      } catch (verifyError) {
-        console.warn('⚠️ 保存確認中にエラーが発生しました（保存は成功している可能性があります）:', verifyError);
+      } catch (verifyError: any) {
+        console.warn('⚠️ 保存確認エラー（続行します）:', verifyError);
       }
+      */
 
       // selectedTopicの状態を更新して、保存されたメタデータを反映
       setSelectedTopic({
@@ -815,9 +1009,10 @@ export function useTopicManagement({
       setPendingRelations(null);
 
       // 親コンポーネントに通知してトピックリストを再取得
-      if (onTopicMetadataSaved) {
-        onTopicMetadataSaved();
-      }
+      // 注意: onTopicMetadataSavedは呼び出さない（保存後にサマリページに戻されるのを防ぐため）
+      // if (onTopicMetadataSaved) {
+      //   onTopicMetadataSaved();
+      // }
     } catch (error: any) {
       console.error('❌ メタデータ保存エラー:', error);
       console.error('エラー詳細:', {

@@ -119,6 +119,20 @@ CREATE POLICY "全ユーザーは書き込み可能"
   USING (true)
   WITH CHECK (true);
 
+-- organizationContentsテーブル
+ALTER TABLE organizationContents ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "全ユーザーは読み取り可能"
+  ON organizationContents FOR SELECT
+  TO public
+  USING (true);
+
+CREATE POLICY "全ユーザーは書き込み可能"
+  ON organizationContents FOR ALL
+  TO public
+  USING (true)
+  WITH CHECK (true);
+
 -- ============================================
 -- 注意事項
 -- ============================================

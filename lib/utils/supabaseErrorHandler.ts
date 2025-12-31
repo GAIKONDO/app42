@@ -71,6 +71,30 @@ export function logSupabaseError(error: any, context?: string) {
   const errorInfo = parseSupabaseError(error);
   const isDev = process.env.NODE_ENV === 'development';
 
+  // regulationsテーブルが存在しないエラー（PGRST205）は抑制
+  const isRegulationsTableNotFound = errorInfo.code === 'PGRST205' && 
+    (errorInfo.message?.includes('regulations') || 
+     errorInfo.hint?.includes('regulations') ||
+     context?.includes('regulations'));
+
+  if (isRegulationsTableNotFound) {
+    // regulationsテーブルが存在しない場合は、エラーをログに出力しない
+    return errorInfo;
+  }
+
+  // "TypeError: Load failed"エラーはCSPによるブロックなので、ログを抑制
+  const isLoadFailedError = errorInfo.message?.includes('Load failed') || 
+                            errorInfo.message?.includes('TypeError: Load failed') ||
+                            errorInfo.message?.includes('access control checks');
+
+  if (isLoadFailedError) {
+    // CSPによるブロックエラーは、デバッグログのみ（本番環境では完全に抑制）
+    if (isDev) {
+      console.debug(`[Supabase Error]${context ? ` ${context}:` : ''} CSPブロック（Tauriコマンド経由でフォールバック）:`, errorInfo.message);
+    }
+    return errorInfo;
+  }
+
   if (isDev) {
     console.error(`[Supabase Error]${context ? ` ${context}:` : ''}`, {
       code: errorInfo.code,

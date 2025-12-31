@@ -1,1 +1,1 @@
-{"main-capability":{"identifier":"main-capability","description":"Main window capability with shell open permission","local":true,"windows":["*"],"permissions":["core:default","shell:allow-open"]}}
+{"main-capability":{"identifier":"main-capability","description":"Main window capability with shell open permission","remote":{"urls":["https://*.supabase.co"]},"local":true,"windows":["*"],"permissions":["core:default","shell:allow-open"]}}

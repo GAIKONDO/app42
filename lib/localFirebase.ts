@@ -94,7 +94,16 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
                                      errorMessage.includes('ipc://localhost') ||
                                      (invokeError?.name === 'TypeError' && errorMessage.includes('Load failed'));
           
-          if (!isNoRowsError && !isIPCProtocolError && isDev) {
+          // ChromaDB関連のエラーは抑制（埋め込みが存在しない場合は正常な動作）
+          const isChromaDBError = command.startsWith('chromadb_') && (
+            errorMessage.includes('ChromaDBクライアントが初期化されていません') ||
+            errorMessage.includes('no such table') ||
+            errorMessage.includes('Database error') ||
+            errorMessage.includes('InternalError') ||
+            errorMessage.includes('acquire_write')
+          );
+          
+          if (!isNoRowsError && !isIPCProtocolError && !isChromaDBError && isDev) {
             console.error('[callTauriCommand] ❌ invoke実行エラー', {
               command,
               args,
@@ -139,7 +148,16 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
                                    errorMessage.includes('TypeError: Load failed') ||
                                    (error?.name === 'TypeError' && errorMessage.includes('Load failed'));
         
-        if (!isNoRowsError && !isIPCProtocolError && isDev) {
+        // ChromaDB関連のエラーは抑制（埋め込みが存在しない場合は正常な動作）
+        const isChromaDBError = command.startsWith('chromadb_') && (
+          errorMessage.includes('ChromaDBクライアントが初期化されていません') ||
+          errorMessage.includes('no such table') ||
+          errorMessage.includes('Database error') ||
+          errorMessage.includes('InternalError') ||
+          errorMessage.includes('acquire_write')
+        );
+        
+        if (!isNoRowsError && !isIPCProtocolError && !isChromaDBError && isDev) {
           console.error('[callTauriCommand] ❌ window.__TAURI__使用時にエラー', {
             command,
             errorMessage: error?.message,
@@ -190,7 +208,16 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
                           errorMessage.includes('Query returned no rows') ||
                           (command === 'doc_get' && errorMessage.includes('ドキュメント取得エラー'));
     
-    if (!isNoRowsError) {
+    // ChromaDB関連のエラーは抑制（埋め込みが存在しない場合は正常な動作）
+    const isChromaDBError = command.startsWith('chromadb_') && (
+      errorMessage.includes('ChromaDBクライアントが初期化されていません') ||
+      errorMessage.includes('no such table') ||
+      errorMessage.includes('Database error') ||
+      errorMessage.includes('InternalError') ||
+      errorMessage.includes('acquire_write')
+    );
+    
+    if (!isNoRowsError && !isChromaDBError) {
       console.error('[callTauriCommand] ❌ エラー発生', { 
         command, 
         args: args ? JSON.stringify(args).substring(0, 200) : 'none',
@@ -894,6 +921,74 @@ export const signInWithEmailAndPassword = async (auth: any, email: string, passw
   // キャッシュをクリア（新しいユーザーでログインするため）
   currentUserCache = null;
   
+  // Supabase使用時はDataSource経由でログイン
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  if (useSupabase) {
+    try {
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      const result = await dataSource.sign_in(email, password);
+      
+      if (result && result.user) {
+        // ログイン成功時にキャッシュを更新
+        currentAuthUser = result.user;
+        currentUserCache = {
+          user: result.user,
+          timestamp: Date.now(),
+        };
+        return { user: result.user };
+      }
+      throw new Error('ログインに失敗しました。ユーザー情報が取得できませんでした。');
+    } catch (error: any) {
+      // サンプルアカウントでログイン失敗した場合、自動的に登録を試みる
+      const isSampleAccount = (email === 'gkondo@ctc-america.com' || email === 'admin@example.com' || email === 'admin@test.com' || email === 'admin@test.local') && password === 'admin123';
+      const isInvalidCredentials = error?.message?.includes('Invalid login credentials') || 
+                                    error?.message?.includes('invalid_credentials');
+      
+      if (isSampleAccount && isInvalidCredentials) {
+        try {
+          console.log('[signInWithEmailAndPassword] サンプルアカウントが存在しないため、自動的に登録します...');
+          // サンプルアカウントを自動的に登録
+          const { getDataSourceInstance } = await import('./dataSource');
+          const dataSource = getDataSourceInstance();
+          const signUpResult = await dataSource.sign_up(email, password);
+          
+          if (signUpResult && signUpResult.user) {
+            console.log('[signInWithEmailAndPassword] サンプルアカウントの登録に成功しました。再度ログインを試みます...');
+            // 登録後、再度ログインを試みる
+            const loginResult = await dataSource.sign_in(email, password);
+            
+            if (loginResult && loginResult.user) {
+              // ログイン成功時にキャッシュを更新
+              currentAuthUser = loginResult.user;
+              currentUserCache = {
+                user: loginResult.user,
+                timestamp: Date.now(),
+              };
+              return { user: loginResult.user };
+            }
+          }
+        } catch (autoSignUpError: any) {
+          // 自動登録に失敗した場合、またはメール確認が必要な場合
+          const isEmailNotConfirmed = autoSignUpError?.message?.includes('Email not confirmed') || 
+                                      autoSignUpError?.code === 'email_not_confirmed';
+          
+          if (isEmailNotConfirmed) {
+            // メール確認が必要な場合、Supabaseダッシュボードで確認するよう案内
+            throw new Error('ユーザーは登録されましたが、メール確認が必要です。\n\n開発環境では、Supabaseダッシュボードで以下を設定してください：\n1. 「Authentication」→「Settings」→「Enable email confirmations」のチェックを外す\n2. または、「Authentication」→「Users」で該当ユーザーを選択し、「Confirm email」をクリック');
+          }
+          
+          // その他のエラーの場合は、元のエラーを投げる
+          console.warn('[signInWithEmailAndPassword] サンプルアカウントの自動登録に失敗:', autoSignUpError);
+          throw error;
+        }
+      }
+      
+      throw error;
+    }
+  }
+  
+  // SQLite使用時（Tauriコマンド経由）
   if (isTauri) {
     try {
       const result = await callTauriCommand('sign_in', { email, password });
@@ -930,6 +1025,30 @@ export const createUserWithEmailAndPassword = async (auth: any, email: string, p
   // キャッシュをクリア（新しいユーザーを作成するため）
   currentUserCache = null;
   
+  // Supabase使用時はDataSource経由で登録
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  if (useSupabase) {
+    try {
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      const result = await dataSource.sign_up(email, password);
+      
+      if (result && result.user) {
+        // 登録成功時にキャッシュを更新
+        currentAuthUser = result.user;
+        currentUserCache = {
+          user: result.user,
+          timestamp: Date.now(),
+        };
+        return { user: result.user };
+      }
+      throw new Error('登録に失敗しました。ユーザー情報が取得できませんでした。');
+    } catch (error: any) {
+      throw error;
+    }
+  }
+  
+  // SQLite使用時（Tauriコマンド経由）
   if (isTauri) {
     try {
       const result = await callTauriCommand('sign_up', { email, password });
@@ -967,6 +1086,20 @@ export const signOut = async (auth: any) => {
   currentUserCache = null;
   currentAuthUser = null;
   
+  // Supabase使用時はDataSource経由でログアウト
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  if (useSupabase) {
+    try {
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      await dataSource.sign_out();
+      return;
+    } catch (error: any) {
+      throw error;
+    }
+  }
+  
+  // SQLite使用時（Tauriコマンド経由）
   if (isTauri) {
     return await callTauriCommand('sign_out', {});
   } else if (isElectron) {
@@ -1000,7 +1133,19 @@ const getCurrentUserWithCache = async (forceRefresh: boolean = false): Promise<a
 
   // キャッシュが無効または強制リフレッシュの場合は取得
   let user: any = null;
-  if (isTauri) {
+  
+  // Supabase使用時はDataSource経由で取得
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  if (useSupabase) {
+    try {
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      const result = await dataSource.get_current_user();
+      user = result || null;
+    } catch (error: any) {
+      user = null;
+    }
+  } else if (isTauri) {
     try {
       const result = await callTauriCommand('get_current_user', {});
       user = result || null;

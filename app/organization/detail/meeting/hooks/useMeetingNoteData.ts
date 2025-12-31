@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getMeetingNoteById, saveMeetingNote, getOrgTreeFromDb, getAllOrganizationsFromTree, generateUniqueId } from '@/lib/orgApi';
 import type { MeetingNote, OrgNodeData } from '@/lib/orgApi';
 import type { TabType, MonthContent, MeetingNoteData } from '../types';
@@ -131,13 +131,6 @@ export function useMeetingNoteData({
               }
             });
             setMonthContents(initialized);
-            
-            // 初期タブのサマリIDをactiveSectionに設定
-            const initialTab = activeTab;
-            const initialTabData = initialized[initialTab] as MonthContent | undefined;
-            if (initialTabData?.summaryId) {
-              onSetActiveSection(initialTabData.summaryId);
-            }
           } catch {
             // JSONでない場合は空のオブジェクトとして扱う
             const empty: MeetingNoteData = {};
@@ -158,15 +151,8 @@ export function useMeetingNoteData({
           SUMMARY_TABS.forEach(tab => {
             empty[tab.id] = { summary: '', summaryId: generateUniqueId(), items: [] };
           });
-          setMonthContents(empty);
-          
-          // 初期タブのサマリIDをactiveSectionに設定
-          const initialTab = activeTab;
-          const initialTabData = empty[initialTab] as MonthContent | undefined;
-          if (initialTabData?.summaryId) {
-            onSetActiveSection(initialTabData.summaryId);
+            setMonthContents(empty);
           }
-        }
         
         // 組織データを取得（organizationIdが指定されている場合のみ）
         let orgTree: OrgNodeData | null = null;
@@ -222,7 +208,23 @@ export function useMeetingNoteData({
     };
 
     loadData();
-  }, [organizationId, meetingId, activeTab, onSetActiveSection]);
+  }, [organizationId, meetingId, onSetActiveSection]);
+
+  // タブが変更されたときに、該当タブのサマリIDをactiveSectionに設定
+  // 注意: monthContentsを依存配列から除外して、保存時にサマリページに戻されるのを防ぐ
+  const prevActiveTabRef = useRef<TabType>(activeTab);
+  useEffect(() => {
+    // タブが実際に変更されたときのみ実行
+    if (prevActiveTabRef.current !== activeTab) {
+      prevActiveTabRef.current = activeTab;
+      if (monthContents && Object.keys(monthContents).length > 0) {
+        const currentTabData = monthContents[activeTab] as MonthContent | undefined;
+        if (currentTabData?.summaryId) {
+          onSetActiveSection(currentTabData.summaryId);
+        }
+      }
+    }
+  }, [activeTab, onSetActiveSection]);
 
   // 議事録更新イベントをリッスンして、自動的に再取得
   useEffect(() => {

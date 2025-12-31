@@ -7,8 +7,106 @@ import { generateUniqueId, saveInitiativeToJson, loadInitiativeFromJson } from '
  */
 export async function getFocusInitiatives(organizationId: string): Promise<FocusInitiative[]> {
   try {
-    console.log('📖 [getFocusInitiatives] 開始:', { organizationId });
+    const useSupabaseEnv = process.env.NEXT_PUBLIC_USE_SUPABASE;
+    const useSupabase = useSupabaseEnv === 'true';
+    console.log(`📖 [getFocusInitiatives] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）:`, { 
+      organizationId,
+      NEXT_PUBLIC_USE_SUPABASE: useSupabaseEnv,
+      useSupabase: useSupabase,
+    });
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        // パフォーマンス最適化: organizationIdでフィルタリングしてから取得
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // organizationIdでフィルタリング（クライアント側でのフィルタリングを回避）
+        // focusInitiativesテーブルでは"organizationId"（引用符付き）が使用されているため、organizationId（キャメルケース）を使用
+        // ただし、createdAt/updatedAtは引用符なしのため、createdat（小文字）を使用
+        const result = await dataSource.collection_get('focusInitiatives', {
+          filters: [
+            { field: 'organizationId', operator: 'eq', value: organizationId }
+          ],
+          orderBy: 'createdat',
+          orderDirection: 'desc'
+        });
+        
+        // Supabaseから取得したデータは既に配列形式でフィルタリング済み
+        const allInitiatives = Array.isArray(result) ? result : [];
+        console.log('📖 [getFocusInitiatives] Supabaseから取得（フィルタリング済み）:', allInitiatives.length, '件');
+        
+        const parseJsonArray = (value: any): string[] => {
+          if (Array.isArray(value)) return value;
+          if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+              return [];
+            }
+          }
+          return [];
+        };
+        
+        // 既にフィルタリングされているので、そのままマッピング
+        const filtered = allInitiatives
+          .map((item: any) => {
+            // Supabaseから取得したデータは直接オブジェクト形式
+            const data = item;
+            
+            // 日付の変換
+            let createdAt: any = null;
+            let updatedAt: any = null;
+            
+            if (data.createdAt) {
+              if (data.createdAt.seconds) {
+                createdAt = new Date(data.createdAt.seconds * 1000).toISOString();
+              } else if (typeof data.createdAt === 'string') {
+                createdAt = data.createdAt;
+              }
+            }
+            
+            if (data.updatedAt) {
+              if (data.updatedAt.seconds) {
+                updatedAt = new Date(data.updatedAt.seconds * 1000).toISOString();
+              } else if (typeof data.updatedAt === 'string') {
+                updatedAt = data.updatedAt;
+              }
+            }
+            
+            // PostgreSQLでは引用符なしの識別子は小文字に変換されるため、
+            // organizationIdとcompanyIdはorganizationidとcompanyidとして保存されています
+            return {
+              id: data.id,
+              organizationId: data.organizationid || data.organizationId || null, // 小文字とキャメルケースの両方をサポート
+              companyId: data.companyid || data.companyId || null, // 小文字とキャメルケースの両方をサポート
+              title: data.title || '',
+              description: data.description || '',
+              content: data.content || '',
+              themeIds: parseJsonArray(data.themeIds) || [],
+              topicIds: parseJsonArray(data.topicIds) || [],
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+            } as FocusInitiative;
+          });
+        
+        console.log('📖 [getFocusInitiatives] マッピング後:', filtered.length, '件');
+        
+        // 既にソートされているので、そのまま返す
+        const sorted = filtered;
+        
+        console.log('📖 [getFocusInitiatives] 最終結果（Supabaseから取得）:', sorted.length, '件');
+        return sorted;
+      } catch (error: any) {
+        console.error('❌ [getFocusInitiatives] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getFocusInitiatives] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
@@ -208,6 +306,81 @@ export async function getFocusInitiativeById(initiativeId: string): Promise<Focu
   try {
     console.log('📖 [getFocusInitiativeById] 開始:', { initiativeId });
     
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
+    // Supabase使用時は直接Supabaseから取得（パフォーマンス最適化）
+    if (useSupabase) {
+      try {
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // Supabaseから直接取得（テーブル名はnormalizeTableNameで小文字に変換される）
+        console.log('🔍 [getFocusInitiativeById] Supabaseから取得を試みます:', { initiativeId });
+        const data = await dataSource.doc_get('focusInitiatives', initiativeId);
+        
+        if (data) {
+          console.log('✅ [getFocusInitiativeById] Supabaseから取得成功:', { initiativeId, hasData: !!data });
+          
+          const parseJsonArray = (value: any): string[] => {
+            if (Array.isArray(value)) return value;
+            if (typeof value === 'string') {
+              try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch (e) {
+                return [];
+              }
+            }
+            return [];
+          };
+          
+          // PostgreSQLでは引用符なしの識別子は小文字に変換されるため、両方をチェック
+          const initiative: FocusInitiative = {
+            id: data.id || initiativeId,
+            organizationId: data.organizationid || data.organizationId || null,
+            companyId: data.companyid || data.companyId || null,
+            title: data.title || '',
+            description: data.description || '',
+            content: data.content || '',
+            assignee: data.assignee || '',
+            method: parseJsonArray(data.method),
+            methodOther: data.methodOther || '',
+            methodDetails: data.methodDetails ? (typeof data.methodDetails === 'string' ? JSON.parse(data.methodDetails) : data.methodDetails) : {},
+            means: parseJsonArray(data.means),
+            meansOther: data.meansOther || '',
+            objective: data.objective || '',
+            considerationPeriod: data.considerationPeriod || '',
+            executionPeriod: data.executionPeriod || '',
+            monetizationPeriod: data.monetizationPeriod || '',
+            relatedOrganizations: parseJsonArray(data.relatedOrganizations),
+            relatedGroupCompanies: parseJsonArray(data.relatedGroupCompanies),
+            monetizationDiagram: data.monetizationDiagram || '',
+            relationDiagram: data.relationDiagram || '',
+            causeEffectDiagramId: data.causeEffectDiagramId,
+            themeId: data.themeId,
+            themeIds: parseJsonArray(data.themeIds) || (data.themeId ? [data.themeId] : []),
+            topicIds: parseJsonArray(data.topicIds) || [],
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+          };
+          
+          return initiative;
+        } else {
+          console.warn('📖 [getFocusInitiativeById] Supabaseからデータが見つかりませんでした。フォールバックに進みます:', { initiativeId });
+          // フォールバック: JSONファイルまたはTauriコマンド（下のコードに続く）
+        }
+      } catch (supabaseError: any) {
+        console.error('❌ [getFocusInitiativeById] Supabase取得エラー:', {
+          error: supabaseError,
+          errorMessage: supabaseError?.message,
+          errorCode: supabaseError?.code,
+          initiativeId,
+        });
+        // フォールバック: JSONファイルまたはTauriコマンド
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はJSONファイルまたはTauriコマンド経由
     const jsonData = await loadInitiativeFromJson(initiativeId);
     if (jsonData) {
       console.log('✅ [getFocusInitiativeById] JSONファイルから読み込み成功:', {
@@ -360,11 +533,15 @@ export async function getFocusInitiativeById(initiativeId: string): Promise<Focu
 export async function saveFocusInitiative(initiative: Partial<FocusInitiative>): Promise<string> {
   try {
     const initiativeId = initiative.id || generateUniqueId();
-    console.log('💾 [saveFocusInitiative] 開始:', { 
+    const useSupabaseEnv = process.env.NEXT_PUBLIC_USE_SUPABASE;
+    const useSupabase = useSupabaseEnv === 'true';
+    console.log(`💾 [saveFocusInitiative] 開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, { 
       initiativeId, 
       organizationId: initiative.organizationId,
       title: initiative.title,
-      hasId: !!initiative.id 
+      hasId: !!initiative.id,
+      NEXT_PUBLIC_USE_SUPABASE: useSupabaseEnv,
+      useSupabase: useSupabase,
     });
     
     if (!initiative.organizationId && !initiative.companyId) {
@@ -373,12 +550,21 @@ export async function saveFocusInitiative(initiative: Partial<FocusInitiative>):
     
     if (initiative.organizationId) {
       try {
-        const orgDocRef = doc(null, 'organizations', initiative.organizationId);
-        const orgDoc = await getDoc(orgDocRef);
-        if (!orgDoc.exists()) {
-          throw new Error(`組織ID "${initiative.organizationId}" がorganizationsテーブルに存在しません`);
+        if (useSupabase) {
+          const { getDocViaDataSource } = await import('../dataSourceAdapter');
+          const orgData = await getDocViaDataSource('organizations', initiative.organizationId);
+          if (!orgData) {
+            throw new Error(`組織ID "${initiative.organizationId}" がorganizationsテーブルに存在しません`);
+          }
+          console.log('✅ [saveFocusInitiative] 組織IDの存在確認成功（Supabase）:', initiative.organizationId);
+        } else {
+          const orgDocRef = doc(null, 'organizations', initiative.organizationId);
+          const orgDoc = await getDoc(orgDocRef);
+          if (!orgDoc.exists()) {
+            throw new Error(`組織ID "${initiative.organizationId}" がorganizationsテーブルに存在しません`);
+          }
+          console.log('✅ [saveFocusInitiative] 組織IDの存在確認成功:', initiative.organizationId);
         }
-        console.log('✅ [saveFocusInitiative] 組織IDの存在確認成功:', initiative.organizationId);
       } catch (orgCheckError: any) {
         const errorMessage = orgCheckError?.message || String(orgCheckError || '');
         if (errorMessage.includes('存在しません')) {
@@ -408,45 +594,80 @@ export async function saveFocusInitiative(initiative: Partial<FocusInitiative>):
       }
     }
     
-    const docRef = doc(null, 'focusInitiatives', initiativeId);
-    console.log('💾 [saveFocusInitiative] docRef作成:', { 
-      collectionName: 'focusInitiatives', 
-      docId: initiativeId 
-    });
-    
     let existingData: FocusInitiative | null = null;
     let isNew = true;
     
-    try {
-      const existingDoc = await getDoc(docRef);
-      if (existingDoc.exists()) {
-        existingData = existingDoc.data() as FocusInitiative;
-        isNew = false;
-        console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在します', { 
-          id: existingDoc.id,
-          title: existingData.title
-        });
-      } else {
-        console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成）');
+    // 既存ドキュメントの確認
+    if (useSupabase) {
+      try {
+        const { getDocViaDataSource } = await import('../dataSourceAdapter');
+        existingData = await getDocViaDataSource('focusInitiatives', initiativeId);
+        if (existingData) {
+          isNew = false;
+          console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在します（Supabase）', { 
+            id: existingData.id,
+            title: existingData.title
+          });
+        } else {
+          console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成、Supabase）');
+        }
+      } catch (getDocError: any) {
+        const errorMessage = getDocError?.message || String(getDocError || '');
+        const isNoRowsError = errorMessage.includes('no rows') || 
+                             errorMessage.includes('not found') ||
+                             errorMessage.includes('存在しません');
+        
+        if (isNoRowsError) {
+          console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成） - エラーは無視します', {
+            errorMessage
+          });
+          isNew = true;
+        } else {
+          console.warn('⚠️ [saveFocusInitiative] 既存ドキュメント確認エラー（続行します）:', {
+            error: getDocError,
+            errorMessage,
+          });
+          isNew = true; // エラーが発生しても新規作成として続行
+        }
       }
-    } catch (getDocError: any) {
-      const errorMessage = getDocError?.message || getDocError?.error || String(getDocError || '');
-      const isNoRowsError = errorMessage.includes('no rows') || 
-                           errorMessage.includes('Query returned no rows') ||
-                           errorMessage.includes('ドキュメント取得エラー');
+    } else {
+      const docRef = doc(null, 'focusInitiatives', initiativeId);
+      console.log('💾 [saveFocusInitiative] docRef作成:', { 
+        collectionName: 'focusInitiatives', 
+        docId: initiativeId 
+      });
       
-      if (isNoRowsError) {
-        console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成） - エラーは無視します', {
-          errorMessage
-        });
-        isNew = true;
-      } else {
-        console.error('💾 [saveFocusInitiative] 既存ドキュメント確認エラー:', {
-          error: getDocError,
-          errorMessage,
-          errorType: typeof getDocError
-        });
-        throw getDocError;
+      try {
+        const existingDoc = await getDoc(docRef);
+        if (existingDoc.exists()) {
+          existingData = existingDoc.data() as FocusInitiative;
+          isNew = false;
+          console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在します', { 
+            id: existingDoc.id,
+            title: existingData.title
+          });
+        } else {
+          console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成）');
+        }
+      } catch (getDocError: any) {
+        const errorMessage = getDocError?.message || getDocError?.error || String(getDocError || '');
+        const isNoRowsError = errorMessage.includes('no rows') || 
+                             errorMessage.includes('Query returned no rows') ||
+                             errorMessage.includes('ドキュメント取得エラー');
+        
+        if (isNoRowsError) {
+          console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成） - エラーは無視します', {
+            errorMessage
+          });
+          isNew = true;
+        } else {
+          console.error('💾 [saveFocusInitiative] 既存ドキュメント確認エラー:', {
+            error: getDocError,
+            errorMessage,
+            errorType: typeof getDocError
+          });
+          throw getDocError;
+        }
       }
     }
     
@@ -501,48 +722,130 @@ export async function saveFocusInitiative(initiative: Partial<FocusInitiative>):
       console.log('🔄 [saveFocusInitiative] 更新:', initiativeId, { data });
     }
     
-    console.log('💾 [saveFocusInitiative] setDoc呼び出し前:', { 
+    console.log('💾 [saveFocusInitiative] 保存処理開始:', { 
       collectionName: 'focusInitiatives', 
       docId: initiativeId, 
       dataKeys: Object.keys(data),
       topicIds: data.topicIds,
       themeIds: data.themeIds,
-      data: JSON.stringify(data)
+      useSupabase: useSupabase,
     });
     
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
-      const { callTauriCommand } = await import('../localFirebase');
-      
-      const dataForDb: any = {
-        ...data,
-        themeIds: Array.isArray(data.themeIds) && data.themeIds.length > 0 ? JSON.stringify(data.themeIds) : null,
-        topicIds: Array.isArray(data.topicIds) && data.topicIds.length > 0 ? JSON.stringify(data.topicIds) : null,
-        method: Array.isArray(data.method) && data.method.length > 0 ? JSON.stringify(data.method) : null,
-        means: Array.isArray(data.means) && data.means.length > 0 ? JSON.stringify(data.means) : null,
-        relatedOrganizations: Array.isArray(data.relatedOrganizations) && data.relatedOrganizations.length > 0 ? JSON.stringify(data.relatedOrganizations) : null,
-        relatedGroupCompanies: Array.isArray(data.relatedGroupCompanies) && data.relatedGroupCompanies.length > 0 ? JSON.stringify(data.relatedGroupCompanies) : null,
-        methodDetails: data.methodDetails && Object.keys(data.methodDetails).length > 0 ? JSON.stringify(data.methodDetails) : null,
-      };
-      
-      await callTauriCommand('doc_set', {
-        collectionName: 'focusInitiatives',
-        docId: initiativeId,
-        data: dataForDb,
-      });
-      console.log('✅ [saveFocusInitiative] データベース保存成功（Tauri）:', initiativeId, {
-        title: data.title,
-        organizationId: data.organizationId,
-        companyId: data.companyId,
-        topicIds: data.topicIds,
-        themeIds: data.themeIds,
-      });
+    // Supabase使用時はDataSource経由で保存
+    if (useSupabase) {
+      try {
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // Supabase用のデータを準備
+        // 注意: create_schema.sqlでorganizationIdとcompanyIdが引用符なしで定義されているため、
+        // PostgreSQLではorganizationidとcompanyid（小文字）として保存されています
+        const supabaseData: any = {
+          id: initiativeId,
+          organizationid: data.organizationId || null, // 小文字に変換
+          companyid: data.companyId || null, // 小文字に変換
+          title: data.title || '',
+          description: data.description || null,
+          content: data.content || null,
+          assignee: data.assignee || null,
+          methodOther: data.methodOther || null,
+          meansOther: data.meansOther || null,
+          objective: data.objective || null,
+          considerationPeriod: data.considerationPeriod || null,
+          executionPeriod: data.executionPeriod || null,
+          monetizationPeriod: data.monetizationPeriod || null,
+          monetizationDiagram: data.monetizationDiagram || null,
+          relationDiagram: data.relationDiagram || null,
+          causeEffectDiagramId: data.causeEffectDiagramId || null,
+          themeId: data.themeId || null,
+          updatedAt: data.updatedAt,
+          createdAt: data.createdAt,
+        };
+        
+        // JSON配列形式のフィールドを文字列化
+        if (Array.isArray(data.method) && data.method.length > 0) {
+          supabaseData.method = JSON.stringify(data.method);
+        }
+        if (data.methodDetails && Object.keys(data.methodDetails).length > 0) {
+          supabaseData.methodDetails = JSON.stringify(data.methodDetails);
+        }
+        if (Array.isArray(data.means) && data.means.length > 0) {
+          supabaseData.means = JSON.stringify(data.means);
+        }
+        if (Array.isArray(data.themeIds) && data.themeIds.length > 0) {
+          supabaseData.themeIds = JSON.stringify(data.themeIds);
+        }
+        if (Array.isArray(data.topicIds) && data.topicIds.length > 0) {
+          supabaseData.topicIds = JSON.stringify(data.topicIds);
+        }
+        if (Array.isArray(data.relatedOrganizations) && data.relatedOrganizations.length > 0) {
+          supabaseData.relatedOrganizations = JSON.stringify(data.relatedOrganizations);
+        }
+        if (Array.isArray(data.relatedGroupCompanies) && data.relatedGroupCompanies.length > 0) {
+          supabaseData.relatedGroupCompanies = JSON.stringify(data.relatedGroupCompanies);
+        }
+        
+        // organizationIdが存在するか確認（外部キー制約のため）
+        if (supabaseData.organizationid) {
+          const parentOrg = await dataSource.doc_get('organizations', supabaseData.organizationid);
+          if (!parentOrg) {
+            throw new Error(`組織ID "${supabaseData.organizationid}" がorganizationsテーブルに存在しません`);
+          }
+        }
+        
+        // SupabaseDataSource経由で保存
+        await dataSource.doc_set('focusInitiatives', initiativeId, supabaseData);
+        console.log('✅ [saveFocusInitiative] Supabase経由で保存成功:', initiativeId, {
+          title: supabaseData.title,
+          organizationId: supabaseData.organizationid,
+          companyId: supabaseData.companyid,
+        });
+      } catch (saveError: any) {
+        console.error('❌ [saveFocusInitiative] Supabase保存エラー:', {
+          error: saveError,
+          errorMessage: saveError?.message,
+          errorCode: saveError?.code,
+          initiativeId,
+          organizationId: data.organizationId,
+        });
+        throw saveError;
+      }
     } else {
-      await setDoc(docRef, data);
-      console.log('✅ [saveFocusInitiative] データベース保存成功（Firestore）:', initiativeId, {
-        title: data.title,
-        topicIds: data.topicIds,
-        themeIds: data.themeIds,
-      });
+      // ローカルSQLite使用時はTauriコマンド経由で保存
+      if (typeof window !== 'undefined' && '__TAURI__' in window) {
+        const { callTauriCommand } = await import('../localFirebase');
+        
+        const dataForDb: any = {
+          ...data,
+          themeIds: Array.isArray(data.themeIds) && data.themeIds.length > 0 ? JSON.stringify(data.themeIds) : null,
+          topicIds: Array.isArray(data.topicIds) && data.topicIds.length > 0 ? JSON.stringify(data.topicIds) : null,
+          method: Array.isArray(data.method) && data.method.length > 0 ? JSON.stringify(data.method) : null,
+          means: Array.isArray(data.means) && data.means.length > 0 ? JSON.stringify(data.means) : null,
+          relatedOrganizations: Array.isArray(data.relatedOrganizations) && data.relatedOrganizations.length > 0 ? JSON.stringify(data.relatedOrganizations) : null,
+          relatedGroupCompanies: Array.isArray(data.relatedGroupCompanies) && data.relatedGroupCompanies.length > 0 ? JSON.stringify(data.relatedGroupCompanies) : null,
+          methodDetails: data.methodDetails && Object.keys(data.methodDetails).length > 0 ? JSON.stringify(data.methodDetails) : null,
+        };
+        
+        await callTauriCommand('doc_set', {
+          collectionName: 'focusInitiatives',
+          docId: initiativeId,
+          data: dataForDb,
+        });
+        console.log('✅ [saveFocusInitiative] データベース保存成功（Tauri）:', initiativeId, {
+          title: data.title,
+          organizationId: data.organizationId,
+          companyId: data.companyId,
+          topicIds: data.topicIds,
+          themeIds: data.themeIds,
+        });
+      } else {
+        await setDoc(docRef, data);
+        console.log('✅ [saveFocusInitiative] データベース保存成功（Firestore）:', initiativeId, {
+          title: data.title,
+          topicIds: data.topicIds,
+          themeIds: data.themeIds,
+        });
+      }
     }
     
     try {
@@ -734,18 +1037,42 @@ export async function saveFocusInitiative(initiative: Partial<FocusInitiative>):
  */
 export async function deleteFocusInitiative(initiativeId: string): Promise<void> {
   try {
-    console.log('🗑️ [deleteFocusInitiative] 開始:', initiativeId);
-    
-    const docRef = doc(null, 'focusInitiatives', initiativeId);
-    console.log('🗑️ [deleteFocusInitiative] docRef作成:', {
-      collectionName: 'focusInitiatives', 
-      docId: initiativeId 
+    const useSupabaseEnv = process.env.NEXT_PUBLIC_USE_SUPABASE;
+    const useSupabase = useSupabaseEnv === 'true';
+    console.log(`🗑️ [deleteFocusInitiative] 開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, {
+      initiativeId,
+      NEXT_PUBLIC_USE_SUPABASE: useSupabaseEnv,
+      useSupabase: useSupabase,
     });
     
-    console.log('🗑️ [deleteFocusInitiative] docRef.delete()を呼び出します...');
-    const result = await docRef.delete();
-    console.log('✅ [deleteFocusInitiative] docRef.delete()成功:', result);
-    console.log('✅ [deleteFocusInitiative] 削除成功:', initiativeId);
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        await deleteDocViaDataSource('focusInitiatives', initiativeId);
+        console.log('✅ [deleteFocusInitiative] Supabase経由で削除成功:', initiativeId);
+      } catch (deleteError: any) {
+        const errorMessage = deleteError?.message || String(deleteError || '');
+        console.error('❌ [deleteFocusInitiative] Supabase経由での削除失敗:', {
+          error: deleteError,
+          errorMessage,
+          initiativeId,
+        });
+        throw new Error(`注力施策の削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+      }
+    } else {
+      // ローカルSQLite使用時はFirestore経由で削除
+      const docRef = doc(null, 'focusInitiatives', initiativeId);
+      console.log('🗑️ [deleteFocusInitiative] docRef作成:', {
+        collectionName: 'focusInitiatives', 
+        docId: initiativeId 
+      });
+      
+      console.log('🗑️ [deleteFocusInitiative] docRef.delete()を呼び出します...');
+      const result = await docRef.delete();
+      console.log('✅ [deleteFocusInitiative] docRef.delete()成功:', result);
+      console.log('✅ [deleteFocusInitiative] Firestore経由で削除成功:', initiativeId);
+    }
   } catch (error: any) {
     console.error('❌ [deleteFocusInitiative] 削除失敗:', {
       initiativeId,

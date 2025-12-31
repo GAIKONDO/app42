@@ -111,7 +111,10 @@ export default function DashboardPage() {
     setSelectedTypeFilter(filter);
   }, []);
 
-  if (loading) {
+  // データが既に存在する場合は、loadingがtrueでも「読み込み中」を表示しない
+  // これにより、ページ遷移時に「読み込み中」が表示されない
+  const hasData = orgTree !== null || themes.length > 0 || initiatives.length > 0;
+  if (loading && !hasData) {
     return (
       <Layout>
         <div className="card" style={{ padding: '40px', textAlign: 'center' }}>

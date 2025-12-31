@@ -35,7 +35,13 @@ export async function searchRelations(
             filters?.organizationId,
             filters?.relationType
           ).catch(error => {
-            console.warn('[searchRelations] ベクトル検索エラー:', error);
+            const errorMessage = error?.message || String(error || '');
+            // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
+            if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                !errorMessage.includes('no such table') &&
+                !errorMessage.includes('Database error')) {
+              console.warn('[searchRelations] ベクトル検索エラー:', error);
+            }
             return [];
           })
         : Promise.resolve([]),
@@ -55,6 +61,62 @@ export async function searchRelations(
       vectorCount: vectorResults.length,
       bm25Count: bm25Results.length,
     });
+
+    // ベクトル検索結果が空で、BM25検索が有効な場合はBM25検索を実行
+    if (vectorResults.length === 0 && config.useVector && !config.useBM25) {
+      console.log('[searchRelations] ベクトル検索結果が空のため、BM25検索をフォールバックとして実行');
+      try {
+        const fallbackBM25Results = await searchRelationsBM25(
+          queryText,
+          limit * 2,
+          filters
+        );
+        console.log('[searchRelations] BM25フォールバック検索結果:', fallbackBM25Results.length, '件');
+        if (fallbackBM25Results.length > 0) {
+          // BM25検索結果を使用
+          const combinedResults = fallbackBM25Results.map(r => ({
+            id: r.relationId,
+            score: r.bm25Score,
+            similarity: 0,
+            bm25Score: r.bm25Score,
+          }));
+          
+          // リレーションIDを抽出（重複を除去）
+          const relationIds = Array.from(new Set(combinedResults.map(r => r.id)));
+          const relations = await getRelationsByIds(relationIds).catch(error => {
+            console.error('[searchRelations] リレーション取得エラー:', error);
+            return [];
+          });
+          
+          const relationMap = new Map(relations.map(r => [r.id, r]));
+          const results: KnowledgeGraphSearchResult[] = [];
+          
+          for (const { id: relationId, bm25Score } of combinedResults) {
+            const relation = relationMap.get(relationId);
+            if (!relation) continue;
+            
+            // フィルタリング
+            if (filters?.relationType && relation.relationType !== filters.relationType) {
+              continue;
+            }
+            
+            const normalizedBM25 = Math.min(1, bm25Score / 10);
+            results.push({
+              type: 'relation',
+              id: relationId,
+              score: normalizedBM25,
+              similarity: 0,
+              relation,
+            });
+          }
+          
+          results.sort((a, b) => b.score - a.score);
+          return results.slice(0, limit);
+        }
+      } catch (error) {
+        console.warn('[searchRelations] BM25フォールバック検索エラー:', error);
+      }
+    }
 
     // 検索結果を統合
     let combinedResults: Array<{ id: string; score: number; similarity: number; bm25Score: number }> = [];
@@ -98,11 +160,25 @@ export async function searchRelations(
       return [];
     }
 
-    // リレーションIDを抽出
-    const relationIds = combinedResults.map(r => r.id);
+    // リレーションIDを抽出（重複を除去）
+    const relationIds = Array.from(new Set(combinedResults.map(r => r.id)));
+
+    console.log('[searchRelations] 取得するリレーションID:', {
+      count: relationIds.length,
+      ids: relationIds.slice(0, 10), // 最初の10件のみ表示
+    });
 
     // バッチでリレーションを取得（N+1問題を回避）
-    const relations = await getRelationsByIds(relationIds);
+    const relations = await getRelationsByIds(relationIds).catch(error => {
+      console.error('[searchRelations] リレーション取得エラー:', error);
+      return [];
+    });
+    
+    console.log('[searchRelations] 取得したリレーション数:', {
+      requested: relationIds.length,
+      retrieved: relations.length,
+      missing: relationIds.length - relations.length,
+    });
 
     // リレーションIDでマップを作成
     const relationMap = new Map(relations.map(r => [r.id, r]));

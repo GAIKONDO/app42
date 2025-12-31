@@ -55,6 +55,62 @@ export async function searchEntities(
       bm25Count: bm25Results.length,
     });
 
+    // ベクトル検索結果が空で、BM25検索が有効な場合はBM25検索を実行
+    if (vectorResults.length === 0 && config.useVector && !config.useBM25) {
+      console.log('[searchEntities] ベクトル検索結果が空のため、BM25検索をフォールバックとして実行');
+      try {
+        const fallbackBM25Results = await searchEntitiesBM25(
+          queryText,
+          limit * 2,
+          filters
+        );
+        console.log('[searchEntities] BM25フォールバック検索結果:', fallbackBM25Results.length, '件');
+        if (fallbackBM25Results.length > 0) {
+          // BM25検索結果を使用
+          const combinedResults = fallbackBM25Results.map(r => ({
+            id: r.entityId,
+            score: r.bm25Score,
+            similarity: 0,
+            bm25Score: r.bm25Score,
+          }));
+          
+          // エンティティIDを抽出（重複を除去）
+          const entityIds = Array.from(new Set(combinedResults.map(r => r.id)));
+          const entities = await getEntitiesByIds(entityIds).catch(error => {
+            console.error('[searchEntities] エンティティ取得エラー:', error);
+            return [];
+          });
+          
+          const entityMap = new Map(entities.map(e => [e.id, e]));
+          const results: KnowledgeGraphSearchResult[] = [];
+          
+          for (const { id: entityId, bm25Score } of combinedResults) {
+            const entity = entityMap.get(entityId);
+            if (!entity) continue;
+            
+            // フィルタリング
+            if (filters?.entityType && entity.type !== filters.entityType) {
+              continue;
+            }
+            
+            const normalizedBM25 = Math.min(1, bm25Score / 10);
+            results.push({
+              type: 'entity',
+              id: entityId,
+              score: normalizedBM25,
+              similarity: 0,
+              entity,
+            });
+          }
+          
+          results.sort((a, b) => b.score - a.score);
+          return results.slice(0, limit);
+        }
+      } catch (error) {
+        console.warn('[searchEntities] BM25フォールバック検索エラー:', error);
+      }
+    }
+
     // 検索結果を統合
     let combinedResults: Array<{ id: string; score: number; similarity: number; bm25Score: number }> = [];
     
@@ -97,11 +153,25 @@ export async function searchEntities(
       return [];
     }
 
-    // エンティティIDを抽出
-    const entityIds = combinedResults.map(r => r.id);
+    // エンティティIDを抽出（重複を除去）
+    const entityIds = Array.from(new Set(combinedResults.map(r => r.id)));
+
+    console.log('[searchEntities] 取得するエンティティID:', {
+      count: entityIds.length,
+      ids: entityIds.slice(0, 10), // 最初の10件のみ表示
+    });
 
     // バッチでエンティティを取得（N+1問題を回避）
-    const entities = await getEntitiesByIds(entityIds);
+    const entities = await getEntitiesByIds(entityIds).catch(error => {
+      console.error('[searchEntities] エンティティ取得エラー:', error);
+      return [];
+    });
+    
+    console.log('[searchEntities] 取得したエンティティ数:', {
+      requested: entityIds.length,
+      retrieved: entities.length,
+      missing: entityIds.length - entities.length,
+    });
 
     // エンティティIDでマップを作成
     const entityMap = new Map(entities.map(e => [e.id, e]));

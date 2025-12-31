@@ -34,7 +34,13 @@ export async function searchTopics(
             filters?.organizationId,
             filters?.topicSemanticCategory
           ).catch(error => {
-            console.warn('[searchTopics] ベクトル検索エラー:', error);
+            const errorMessage = error?.message || String(error || '');
+            // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
+            if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                !errorMessage.includes('no such table') &&
+                !errorMessage.includes('Database error')) {
+              console.warn('[searchTopics] ベクトル検索エラー:', error);
+            }
             return [];
           })
         : Promise.resolve([]),
@@ -76,6 +82,71 @@ export async function searchTopics(
     // BM25検索結果が少ない場合の警告
     if (config.useBM25 && bm25Results.length === 0 && vectorResults.length > 0) {
       console.warn('[searchTopics] BM25検索結果が0件です。ベクトル検索結果のみを使用します。');
+    }
+
+    // ベクトル検索結果が空で、BM25検索が有効な場合はBM25検索を実行
+    if (vectorResults.length === 0 && config.useVector && !config.useBM25) {
+      console.log('[searchTopics] ベクトル検索結果が空のため、BM25検索をフォールバックとして実行');
+      try {
+        const fallbackBM25Results = await searchTopicsBM25(
+          queryText,
+          limit * 2,
+          filters
+        );
+        console.log('[searchTopics] BM25フォールバック検索結果:', fallbackBM25Results.length, '件');
+        if (fallbackBM25Results.length > 0) {
+          // BM25検索結果を使用（既存のロジックを再利用）
+          const vectorMap = new Map(vectorResults.map(r => [r.topicId, r]));
+          const combinedResults = fallbackBM25Results.map(r => {
+            const vectorInfo = vectorMap.get(r.topicId);
+            return {
+              id: r.topicId,
+              score: r.bm25Score,
+              similarity: 0,
+              bm25Score: r.bm25Score,
+              meetingNoteId: vectorInfo?.meetingNoteId,
+              regulationId: vectorInfo?.regulationId,
+              title: vectorInfo?.title,
+              contentSummary: vectorInfo?.contentSummary,
+              organizationId: vectorInfo?.organizationId,
+            };
+          });
+          
+          // トピックIDを抽出（重複を除去）
+          const topicIds = Array.from(new Set(combinedResults.map(r => r.id)));
+          const topics = await getTopicsByIds(topicIds).catch(error => {
+            console.error('[searchTopics] トピック取得エラー:', error);
+            return [];
+          });
+          
+          const topicMap = new Map(topics.map(t => [t.id, t]));
+          const results: KnowledgeGraphSearchResult[] = [];
+          
+          for (const result of combinedResults) {
+            const topic = topicMap.get(result.id);
+            if (!topic) continue;
+            
+            // フィルタリング
+            if (filters?.topicSemanticCategory && topic.semanticCategory !== filters.topicSemanticCategory) {
+              continue;
+            }
+            
+            const normalizedBM25 = Math.min(1, result.bm25Score / 10);
+            results.push({
+              type: 'topic',
+              id: result.id,
+              score: normalizedBM25,
+              similarity: 0,
+              topic,
+            });
+          }
+          
+          results.sort((a, b) => b.score - a.score);
+          return results.slice(0, limit);
+        }
+      } catch (error) {
+        console.warn('[searchTopics] BM25フォールバック検索エラー:', error);
+      }
     }
 
     // 検索結果を統合
@@ -188,40 +259,57 @@ export async function searchTopics(
 
     // トピックIDとmeetingNoteId/regulationIdのペアを抽出
     // r.idが {meetingNoteId}-topic-{topicId} 形式の場合、パースする
-    const topicIdsWithParentIds = combinedResults.map(r => {
-      let topicId = r.id;
-      let meetingNoteId = r.meetingNoteId;
-      let regulationId = r.regulationId;
-      
-      // topicIdが {parentId}-topic-{actualTopicId} 形式の場合、パースする
-      const topicIdMatch = r.id.match(/^(.+?)-topic-(.+)$/);
-      if (topicIdMatch) {
-        const parentId = topicIdMatch[1];
-        topicId = topicIdMatch[2];
+    const topicIdsWithParentIds = combinedResults
+      .filter(r => r.id) // idがundefinedの場合は除外
+      .map(r => {
+        let topicId = r.id;
+        let meetingNoteId = r.meetingNoteId;
+        let regulationId = r.regulationId;
         
-        // parentIdがmeetingNoteIdかregulationIdかを判定
-        if (!meetingNoteId && !regulationId) {
-          // Graphvizの場合は meetingNoteId
-          if (parentId.startsWith('graphviz_')) {
-            meetingNoteId = parentId;
-          } else if (parentId.startsWith('meeting_')) {
-            meetingNoteId = parentId;
-          } else {
-            // それ以外は regulationId として扱う
-            regulationId = parentId;
+        // topicIdが {parentId}-topic-{actualTopicId} 形式の場合、パースする
+        const topicIdMatch = r.id.match(/^(.+?)-topic-(.+)$/);
+        if (topicIdMatch) {
+          const parentId = topicIdMatch[1];
+          topicId = topicIdMatch[2];
+          
+          // parentIdがmeetingNoteIdかregulationIdかを判定
+          if (!meetingNoteId && !regulationId) {
+            // Graphvizの場合は meetingNoteId
+            if (parentId.startsWith('graphviz_')) {
+              meetingNoteId = parentId;
+            } else if (parentId.startsWith('meeting_')) {
+              meetingNoteId = parentId;
+            } else {
+              // それ以外は regulationId として扱う
+              regulationId = parentId;
+            }
           }
         }
-      }
-      
-      return {
-        topicId,
-        meetingNoteId,
-        regulationId,
-      };
-    });
+        
+        return {
+          topicId,
+          meetingNoteId,
+          regulationId,
+        };
+      })
+      .filter(item => item.topicId); // topicIdがundefinedの場合は除外
 
     // バッチでトピックの詳細情報を取得（N+1問題を回避）
-    const topics = await getTopicsByIds(topicIdsWithParentIds);
+    console.log('[searchTopics] 取得するトピックID:', {
+      count: topicIdsWithParentIds.length,
+      sample: topicIdsWithParentIds.slice(0, 5),
+    });
+    
+    const topics = await getTopicsByIds(topicIdsWithParentIds).catch(error => {
+      console.error('[searchTopics] トピック取得エラー:', error);
+      return [];
+    });
+    
+    console.log('[searchTopics] 取得したトピック数:', {
+      requested: topicIdsWithParentIds.length,
+      retrieved: topics.length,
+      missing: topicIdsWithParentIds.length - topics.length,
+    });
 
     // トピックIDとparentIdの複合キーでマップを作成
     const topicMap = new Map(topics.map(t => {
@@ -235,7 +323,16 @@ export async function searchTopics(
       const parentId = meetingNoteId || regulationId || '';
       return `${parentId}-topic-${topicId}`;
     });
-    const topicFiles = await getTopicFilesByTopicIds(topicIdsForFiles);
+    
+    console.log('[searchTopics] 取得するトピックファイルID:', {
+      count: topicIdsForFiles.length,
+      sample: topicIdsForFiles.slice(0, 5),
+    });
+    
+    const topicFiles = await getTopicFilesByTopicIds(topicIdsForFiles).catch(error => {
+      console.error('[searchTopics] トピックファイル取得エラー:', error);
+      return [];
+    });
     
       // トピックIDをキーにしたファイルマップを作成
       // キーは {parentId}-topic-{topicId} 形式
@@ -314,19 +411,11 @@ export async function searchTopics(
         const parentIdStr = extractedMeetingNoteId || extractedRegulationId || '不明';
         console.warn(`[searchTopics] トピックID ${actualTopicId} (${parentType}ID: ${parentIdStr}) の詳細情報が見つかりませんでした。ChromaDBの情報を使用します。`);
         
-        // titleが空の場合、データベースから再取得を試みる
+        // titleが空の場合、contentSummaryから推測するか、topicIdを使用
         let finalTitle = title;
         if (!finalTitle || finalTitle.trim() === '') {
-          try {
-            const { getTopicById } = await import('../topicApi');
-            const retryTopic = await getTopicById(actualTopicId, extractedMeetingNoteId, extractedRegulationId);
-            if (retryTopic && retryTopic.title && retryTopic.title.trim() !== '') {
-              finalTitle = retryTopic.title;
-              console.log(`[searchTopics] データベースから再取得したタイトル: ${finalTitle}`);
-            }
-          } catch (retryError) {
-            console.warn(`[searchTopics] タイトル再取得エラー:`, retryError);
-          }
+          // Supabaseから既に取得済みなので、再取得は不要
+          // contentSummaryから推測するか、topicIdを使用
         }
         
         // それでもタイトルが空の場合、contentSummaryから推測するか、topicIdを使用

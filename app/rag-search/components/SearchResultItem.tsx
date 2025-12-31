@@ -75,8 +75,14 @@ export default function SearchResultItem({
 
       // 通常の議事録トピックの場合
       try {
-        // 議事録から組織IDを取得
-        const meetingNote = await getMeetingNoteById(result.meetingNoteId);
+        // 議事録から組織IDを取得（タイムアウトを設定）
+        const meetingNotePromise = getMeetingNoteById(result.meetingNoteId);
+        const timeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), 5000);
+        });
+        
+        const meetingNote = await Promise.race([meetingNotePromise, timeoutPromise]);
+        
         if (meetingNote && meetingNote.organizationId) {
           // topicIdがある場合はURLパラメータに追加
           const params = new URLSearchParams();
@@ -85,13 +91,40 @@ export default function SearchResultItem({
           if (result.topicId) {
             params.append('topicId', result.topicId);
           }
-          router.push(`/organization/meeting?${params.toString()}`);
+          router.push(`/organization/detail/meeting?${params.toString()}`);
+        } else if (result.topic?.organizationId) {
+          // 議事録が取得できなくても、トピックから組織IDを取得できる場合は使用
+          console.warn('[handleShowInMeeting] 議事録の取得に失敗しましたが、トピックから組織IDを取得します');
+          const params = new URLSearchParams();
+          params.append('organizationId', result.topic.organizationId);
+          params.append('meetingId', result.meetingNoteId);
+          if (result.topicId) {
+            params.append('topicId', result.topicId);
+          }
+          router.push(`/organization/detail/meeting?${params.toString()}`);
         } else {
+          console.error('[handleShowInMeeting] 議事録の組織IDが取得できませんでした:', {
+            meetingNoteId: result.meetingNoteId,
+            hasMeetingNote: !!meetingNote,
+            hasTopicOrgId: !!result.topic?.organizationId,
+          });
           alert('議事録の組織IDが取得できませんでした');
         }
       } catch (error) {
-        console.error('議事録の取得エラー:', error);
-        alert('議事録の取得に失敗しました');
+        console.error('[handleShowInMeeting] 議事録の取得エラー:', error);
+        // エラーが発生しても、トピックから組織IDを取得できる場合は使用
+        if (result.topic?.organizationId) {
+          console.warn('[handleShowInMeeting] エラーが発生しましたが、トピックから組織IDを取得します');
+          const params = new URLSearchParams();
+          params.append('organizationId', result.topic.organizationId);
+          params.append('meetingId', result.meetingNoteId);
+          if (result.topicId) {
+            params.append('topicId', result.topicId);
+          }
+          router.push(`/organization/detail/meeting?${params.toString()}`);
+        } else {
+          alert('議事録の取得に失敗しました');
+        }
       }
     }
   };

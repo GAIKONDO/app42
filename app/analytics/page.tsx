@@ -13,7 +13,7 @@ type AnalyticsTab = 'relationship-diagram' | 'category-management' | 'tab4';
 export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('category-management');
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'diagram' | 'bubble'>('diagram');
+  const [viewMode, setViewMode] = useState<'diagram' | 'bubble' | 'bar'>('diagram');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'organization' | 'company' | 'person'>('all');
 
   const {
@@ -49,7 +49,10 @@ export default function AnalyticsPage() {
     refreshTopics,
   } = useAnalyticsData();
 
-  if (loading) {
+  // データが既に存在する場合は、loadingがtrueでも「読み込み中」を表示しない
+  // これにより、ページ遷移時に「読み込み中」が表示されない
+  const hasData = themes.length > 0 || categories.length > 0 || orgData !== null || initiatives.length > 0;
+  if (loading && !hasData) {
     return (
       <Layout>
         <div className="card">
@@ -103,6 +106,7 @@ export default function AnalyticsPage() {
             themes={themes}
             setThemes={setThemes}
             initiatives={initiatives}
+            startups={startups}
             orgData={orgData}
             topics={topics}
             setTopics={setTopics}

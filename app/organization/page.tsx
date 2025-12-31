@@ -330,6 +330,12 @@ export default function OrganizationPage() {
               await deleteOrg(deletedOrgId);
               devLog('✅ [Finder削除] 削除成功:', { id: deletedOrgId, name: deletedOrgName });
               
+              // Supabase使用時は少し待ってからデータを再取得（削除の反映を待つ）
+              const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+              if (useSupabase) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+              
               // 組織ツリーを再取得
               const tree = await getOrgTreeFromDb();
               
@@ -411,6 +417,12 @@ export default function OrganizationPage() {
               
               await deleteOrg(deletedOrgId);
               devLog('✅ [組織削除] 削除成功:', { id: deletedOrgId, name: deletedOrgName });
+              
+              // Supabase使用時は少し待ってからデータを再取得（削除の反映を待つ）
+              const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+              if (useSupabase) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
               
               // 組織ツリーを再取得
               const tree = await getOrgTreeFromDb();

@@ -346,35 +346,88 @@ export async function getAllTopics(organizationId: string): Promise<TopicInfo[]>
  */
 export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
   try {
-    console.log('📖 [getAllTopicsBatch] 開始: 全組織のトピックを一括取得');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getAllTopicsBatch] 開始: 全組織のトピックを一括取得（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
     
     const allMeetingNotes = await getAllMeetingNotes();
     console.log('📖 [getAllTopicsBatch] 全議事録数:', allMeetingNotes.length);
     
-    const { callTauriCommand } = await import('../localFirebase');
+    // regulationsテーブルは存在しないため、アクセスをスキップして404エラーを防ぐ
     let allRegulations: Regulation[] = [];
+    // regulationsテーブルへのアクセスはコメントアウト（テーブルが存在しないため404エラーが発生する）
+    // 必要に応じて、テーブルが作成された後に有効化してください
+    /*
     try {
-      const regulationsResult = await callTauriCommand('collection_get', {
-        collectionName: 'regulations',
-      });
-      allRegulations = Array.isArray(regulationsResult) 
-        ? regulationsResult.map((item: any) => {
-            const data = item.data || item;
-            return {
-              id: data.id || item.id,
-              organizationId: data.organizationId || '',
-              title: data.title || '',
-              description: data.description || '',
-              content: data.content || '',
-              createdAt: data.createdAt,
-              updatedAt: data.updatedAt,
-            } as Regulation;
-          })
-        : [];
-      console.log('📖 [getAllTopicsBatch] 全制度数:', allRegulations.length);
-    } catch (regulationsError) {
-      console.warn('⚠️ [getAllTopicsBatch] 制度の取得エラー（無視します）:', regulationsError);
+      if (useSupabase) {
+        // Supabase使用時はDataSource経由で取得
+        try {
+          const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+          const regulationsResult = await getCollectionViaDataSource('regulations');
+          
+          allRegulations = Array.isArray(regulationsResult)
+            ? regulationsResult.map((item: any) => {
+                // Supabaseから取得したデータは直接オブジェクト形式
+                return {
+                  id: item.id,
+                  organizationId: item.organizationId || item.organizationid || '',
+                  title: item.title || '',
+                  description: item.description || '',
+                  content: item.content || '',
+                  createdAt: item.createdAt || item.createdat,
+                  updatedAt: item.updatedAt || item.updatedat,
+                } as Regulation;
+              })
+            : [];
+          console.log('📖 [getAllTopicsBatch] 全制度数（Supabase）:', allRegulations.length);
+        } catch (supabaseError: any) {
+          // テーブルが存在しない場合のエラーを無視（PGRST205）
+          const errorMessage = supabaseError?.message || String(supabaseError || '');
+          const isTableNotFoundError = errorMessage.includes('PGRST205') || 
+                                       errorMessage.includes('Could not find the table') ||
+                                       errorMessage.includes('regulations');
+          
+          if (isTableNotFoundError) {
+            console.warn('⚠️ [getAllTopicsBatch] regulationsテーブルが存在しません（Supabase）。制度データはスキップします。');
+            allRegulations = [];
+          } else {
+            throw supabaseError;
+          }
+        }
+      } else {
+        // SQLite使用時はTauriコマンド経由
+        const { callTauriCommand } = await import('../localFirebase');
+        const regulationsResult = await callTauriCommand('collection_get', {
+          collectionName: 'regulations',
+        });
+        allRegulations = Array.isArray(regulationsResult) 
+          ? regulationsResult.map((item: any) => {
+              const data = item.data || item;
+              return {
+                id: data.id || item.id,
+                organizationId: data.organizationId || '',
+                title: data.title || '',
+                description: data.description || '',
+                content: data.content || '',
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt,
+              } as Regulation;
+            })
+          : [];
+        console.log('📖 [getAllTopicsBatch] 全制度数（SQLite）:', allRegulations.length);
+      }
+    } catch (regulationsError: any) {
+      // テーブルが存在しない場合のエラーは既に処理済み
+      const errorMessage = regulationsError?.message || String(regulationsError || '');
+      const isTableNotFoundError = errorMessage.includes('PGRST205') || 
+                                   errorMessage.includes('Could not find the table') ||
+                                   errorMessage.includes('regulations');
+      
+      if (!isTableNotFoundError) {
+        console.warn('⚠️ [getAllTopicsBatch] 制度の取得エラー（無視します）:', regulationsError);
+      }
+      allRegulations = [];
     }
+    */
     
     const allTopics: TopicInfo[] = [];
     
@@ -382,38 +435,62 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
     const topicsFromDbMap = new Map<string, { createdAt?: string; updatedAt?: string; topicDate?: string }>();
     
     try {
-      const allTopicsResult = await callTauriCommand('query_get', {
-        collectionName: 'topics',
-        conditions: {},
-      });
+      let allTopicsFromDb: Array<{ id: string; data: any }> = [];
       
-      const allTopicsFromDb = (allTopicsResult || []) as Array<{ id: string; data: any }>;
+      if (useSupabase) {
+        // Supabase使用時はDataSource経由で取得
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        const allTopicsResult = await getCollectionViaDataSource('topics');
+        
+        // Supabaseから取得したデータは直接配列形式
+        allTopicsFromDb = Array.isArray(allTopicsResult)
+          ? allTopicsResult.map((item: any) => ({
+              id: item.id,
+              data: item, // Supabaseの場合は直接オブジェクト
+            }))
+          : [];
+        console.log('📖 [getAllTopicsBatch] topicsテーブルから取得（Supabase）:', allTopicsFromDb.length, '件');
+      } else {
+        // SQLite使用時はTauriコマンド経由
+        const { callTauriCommand } = await import('../localFirebase');
+        const allTopicsResult = await callTauriCommand('query_get', {
+          collectionName: 'topics',
+          conditions: {},
+        });
+        
+        allTopicsFromDb = (allTopicsResult || []) as Array<{ id: string; data: any }>;
+        console.log('📖 [getAllTopicsBatch] topicsテーブルから取得（SQLite）:', allTopicsFromDb.length, '件');
+      }
       
       // すべてのトピックをマップに登録（createdAt/updatedAt/topicDate補完用）
       for (const item of allTopicsFromDb) {
-        const topicData = item.data;
-        const topicId = topicData.topicId;
-        const meetingNoteId = topicData.meetingNoteId;
+        // Supabaseの場合はitem.dataが直接オブジェクト、SQLiteの場合はitem.data
+        const topicData = useSupabase ? item.data : item.data;
+        const topicId = topicData.topicId || topicData.topicid;
+        const meetingNoteId = topicData.meetingNoteId || topicData.meetingnoteid;
         if (topicId && meetingNoteId) {
           const key = `${meetingNoteId}-topic-${topicId}`;
           topicsFromDbMap.set(key, {
-            createdAt: topicData.createdAt,
-            updatedAt: topicData.updatedAt,
-            topicDate: topicData.topicDate,
+            createdAt: topicData.createdAt || topicData.createdat,
+            updatedAt: topicData.updatedAt || topicData.updatedat,
+            topicDate: topicData.topicDate || topicData.topicdate,
           });
         }
       }
       
       const graphvizTopics = allTopicsFromDb.filter(item => {
-        const meetingNoteId = item.data?.meetingNoteId || '';
+        const topicData = useSupabase ? item.data : item.data;
+        const meetingNoteId = topicData?.meetingNoteId || topicData?.meetingnoteid || '';
         return meetingNoteId.startsWith('graphviz_');
       });
       
       console.log('📖 [getAllTopicsBatch] Graphvizカードのトピック数:', graphvizTopics.length, '/ 全トピック数:', allTopicsFromDb.length);
       
       for (const item of graphvizTopics) {
-        const topicData = item.data;
-        if (!topicData.topicId || !topicData.title) continue;
+        const topicData = useSupabase ? item.data : item.data;
+        const topicId = topicData.topicId || topicData.topicid;
+        const title = topicData.title;
+        if (!topicId || !title) continue;
         
         let keywords: string[] | undefined;
         if (topicData.keywords) {
@@ -428,25 +505,25 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
           }
         }
         
-        const topicIdInDb = item.id || topicData.id || `${topicData.meetingNoteId || `graphviz_${topicData.topicId}`}-topic-${topicData.topicId}`;
+        const topicIdInDb = item.id || topicData.id || `${topicData.meetingNoteId || topicData.meetingnoteid || `graphviz_${topicId}`}-topic-${topicId}`;
         
         allTopics.push({
-          id: topicData.topicId,
-          title: topicData.title,
+          id: topicId,
+          title: title,
           content: topicData.content || '',
-          meetingNoteId: topicData.meetingNoteId || `graphviz_${topicData.topicId}`,
-          meetingNoteTitle: topicData.title,
+          meetingNoteId: topicData.meetingNoteId || topicData.meetingnoteid || `graphviz_${topicId}`,
+          meetingNoteTitle: title,
           itemId: '',
-          organizationId: topicData.organizationId || '',
-          companyId: topicData.companyId || undefined,
-          topicDate: topicData.topicDate || undefined,
+          organizationId: topicData.organizationId || topicData.organizationid || '',
+          companyId: topicData.companyId || topicData.companyid || undefined,
+          topicDate: topicData.topicDate || topicData.topicdate || undefined,
           isAllPeriods: true,
-          createdAt: topicData.createdAt,
-          updatedAt: topicData.updatedAt,
-          semanticCategory: topicData.semanticCategory as TopicInfo['semanticCategory'],
+          createdAt: topicData.createdAt || topicData.createdat,
+          updatedAt: topicData.updatedAt || topicData.updatedat,
+          semanticCategory: (topicData.semanticCategory || topicData.semanticcategory) as TopicInfo['semanticCategory'],
           importance: topicData.importance as TopicInfo['importance'],
           keywords,
-          summary: topicData.description || topicData.contentSummary,
+          summary: topicData.description || topicData.contentSummary || topicData.contentsummary,
           _dbId: topicIdInDb,
         } as TopicInfo & { _dbId?: string });
       }

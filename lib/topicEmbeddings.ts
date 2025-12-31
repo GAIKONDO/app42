@@ -53,19 +53,33 @@ export async function saveTopicEmbedding(
       const yamlFileId = meetingNoteId.replace('graphviz_', '');
       
       // topicsテーブルからGraphvizのメタデータを取得
-      const { callTauriCommand } = await import('./localFirebase');
       const embeddingId = `${meetingNoteId}-topic-${topicId}`;
       let yamlType: string | undefined;
       let description: string | undefined;
       
       try {
-        const topicDoc = await callTauriCommand('doc_get', {
-          collectionName: 'topics',
-          docId: embeddingId,
-        });
-        if (topicDoc?.exists && topicDoc?.data) {
-          yamlType = topicDoc.data.yamlType;
-          description = topicDoc.data.description;
+        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+        let topicDoc: any = null;
+        
+        if (useSupabase) {
+          // Supabase経由で取得
+          const { getDocViaDataSource } = await import('./dataSourceAdapter');
+          topicDoc = await getDocViaDataSource('topics', embeddingId);
+        } else {
+          // SQLite経由で取得
+          const { callTauriCommand } = await import('./localFirebase');
+          topicDoc = await callTauriCommand('doc_get', {
+            collectionName: 'topics',
+            docId: embeddingId,
+          });
+        }
+        
+        if (topicDoc) {
+          const topicData = topicDoc.data || topicDoc;
+          if (topicData) {
+            yamlType = topicData.yamlType;
+            description = topicData.description;
+          }
         }
       } catch (error) {
         console.warn('⚠️ [saveTopicEmbedding] Graphvizトピックのメタデータ取得に失敗（続行）:', error);
@@ -116,7 +130,10 @@ export async function saveTopicEmbedding(
     }
     
     // topicDate（登録日）を設定
-    if (topicDate) {
+    // 注意: SupabaseスキーマにtopicDateカラムが存在しないため、Supabase使用時は除外
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    if (topicDate && !useSupabase) {
+      // SQLite使用時のみtopicDateを設定
       topicData.topicDate = topicDate;
     }
 
@@ -168,8 +185,12 @@ export async function saveTopicEmbedding(
             hasSemanticCategory: !!topicData.semanticCategory,
             hasImportance: !!topicData.importance,
             hasDescription: !!topicData.description,
+            hasTopicDate: !!topicData.topicDate,
           });
+          
+          // topicDateは既に事前に除外されているため、そのまま保存
           await setDoc(doc(null, 'topics', embeddingId), topicData);
+          
           console.log('✅ [saveTopicEmbedding] topicsテーブルへの保存成功:', embeddingId);
         } catch (topicSaveError: any) {
           console.error(`❌ [saveTopicEmbedding] topicsテーブルへの保存に失敗しました: ${embeddingId}`, {
@@ -178,7 +199,6 @@ export async function saveTopicEmbedding(
             errorStack: topicSaveError?.stack,
             topicDataKeys: Object.keys(topicData),
           });
-          // エラーを再スローして、呼び出し元で処理できるようにする
           throw new Error(`topicsテーブルへの保存に失敗しました: ${topicSaveError?.message || '不明なエラー'}`);
         }
         
@@ -343,10 +363,24 @@ export async function getTopicEmbedding(
     }
     const embeddingId = `${parentId}-topic-${topicId}`;
     
-    const result = await callTauriCommand('doc_get', {
-      collectionName: 'topics',
-      docId: embeddingId,
-    });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    let result: any = null;
+    
+    if (useSupabase) {
+      // Supabase経由で取得
+      const { getDocViaDataSource } = await import('./dataSourceAdapter');
+      result = await getDocViaDataSource('topics', embeddingId);
+      if (result) {
+        result = { exists: true, data: result };
+      }
+    } else {
+      // SQLite経由で取得
+      const { callTauriCommand } = await import('./localFirebase');
+      result = await callTauriCommand('doc_get', {
+        collectionName: 'topics',
+        docId: embeddingId,
+      });
+    }
     
     if (result && result.data) {
       return result.data as TopicEmbedding;
@@ -506,10 +540,23 @@ export async function batchUpdateTopicEmbeddings(
         
         if (!forceRegenerate) {
           try {
-            const topicDoc = await callTauriCommand('doc_get', {
-              collectionName: 'topics',
-              docId: topicEmbeddingId,
-            });
+            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+            let topicDoc: any = null;
+            
+            if (useSupabase) {
+              // Supabase経由で取得
+              const { getDocViaDataSource } = await import('./dataSourceAdapter');
+              const topicData = await getDocViaDataSource('topics', topicEmbeddingId);
+              if (topicData) {
+                topicDoc = { exists: true, data: topicData };
+              }
+            } else {
+              // SQLite経由で取得
+              topicDoc = await callTauriCommand('doc_get', {
+                collectionName: 'topics',
+                docId: topicEmbeddingId,
+              });
+            }
             
             if (topicDoc?.exists && topicDoc?.data) {
               const chromaSynced = topicDoc.data.chromaSynced;
@@ -524,12 +571,15 @@ export async function batchUpdateTopicEmbeddings(
                     return { status: 'skipped' as const };
                   } else {
                     try {
-                      await callTauriCommand('update_chroma_sync_status', {
-                        entityType: 'topic',
-                        entityId: topicEmbeddingId,
-                        synced: false,
-                        error: 'ChromaDBに存在しないため再生成',
-                      });
+                      // Supabase使用時はupdate_chroma_sync_statusをスキップ
+                      if (!useSupabase) {
+                        await callTauriCommand('update_chroma_sync_status', {
+                          entityType: 'topic',
+                          entityId: topicEmbeddingId,
+                          synced: false,
+                          error: 'ChromaDBに存在しないため再生成',
+                        });
+                      }
                     } catch (resetError) {
                       console.warn(`chromaSyncedフラグのリセットエラー:`, resetError);
                     }
@@ -539,8 +589,9 @@ export async function batchUpdateTopicEmbeddings(
                 }
               }
             }
-          } catch (sqliteError: any) {
-            // SQLiteからの取得に失敗した場合は続行
+          } catch (error: any) {
+            // データ取得に失敗した場合は続行
+            console.warn(`トピック取得エラー（続行）: ${topic.id}`, error?.message);
           }
         }
         

@@ -94,14 +94,6 @@ export function KnowledgeGraphTab() {
     setMissingCounts,
     isCountingMissing,
     setIsCountingMissing,
-    showCleanupConfirm,
-    setShowCleanupConfirm,
-    showRepairEntityConfirm,
-    setShowRepairEntityConfirm,
-    showRepairRelationConfirm,
-    setShowRepairRelationConfirm,
-    showRepairTopicConfirm,
-    setShowRepairTopicConfirm,
     isRegeneratingEmbeddings,
     setIsRegeneratingEmbeddings,
     regenerationProgress,
@@ -112,6 +104,7 @@ export function KnowledgeGraphTab() {
     entities,
     relations,
     topics,
+    organizations,
   });
   // バージョンチェック関連のロジックをカスタムフックに抽出
   const {
@@ -325,14 +318,6 @@ export function KnowledgeGraphTab() {
         setMissingCounts={setMissingCounts}
         isCountingMissing={isCountingMissing}
         setIsCountingMissing={setIsCountingMissing}
-        showCleanupConfirm={showCleanupConfirm}
-        setShowCleanupConfirm={setShowCleanupConfirm}
-        showRepairEntityConfirm={showRepairEntityConfirm}
-        setShowRepairEntityConfirm={setShowRepairEntityConfirm}
-        showRepairRelationConfirm={showRepairRelationConfirm}
-        setShowRepairRelationConfirm={setShowRepairRelationConfirm}
-        showRepairTopicConfirm={showRepairTopicConfirm}
-        setShowRepairTopicConfirm={setShowRepairTopicConfirm}
         isRegeneratingEmbeddings={isRegeneratingEmbeddings}
         setIsRegeneratingEmbeddings={setIsRegeneratingEmbeddings}
         isCancelledRef={isCancelledRef}

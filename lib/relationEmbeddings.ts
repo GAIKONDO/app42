@@ -271,10 +271,23 @@ export async function batchUpdateRelationEmbeddings(
         
         if (!forceRegenerate) {
           try {
-            const relationDoc = await callTauriCommand('doc_get', {
-              collectionName: 'relations',
-              docId: relationId,
-            });
+            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+            let relationDoc: any = null;
+            
+            if (useSupabase) {
+              // Supabase経由で取得
+              const { getDocViaDataSource } = await import('./dataSourceAdapter');
+              const relationData = await getDocViaDataSource('relations', relationId);
+              if (relationData) {
+                relationDoc = { exists: true, data: relationData };
+              }
+            } else {
+              // SQLite経由で取得
+              relationDoc = await callTauriCommand('doc_get', {
+                collectionName: 'relations',
+                docId: relationId,
+              });
+            }
             
             if (relationDoc?.exists && relationDoc?.data) {
               const chromaSynced = relationDoc.data.chromaSynced;
@@ -288,12 +301,15 @@ export async function batchUpdateRelationEmbeddings(
                     return { status: 'skipped' as const };
                   } else {
                     try {
-                      await callTauriCommand('update_chroma_sync_status', {
-                        entityType: 'relation',
-                        entityId: relationId,
-                        synced: false,
-                        error: 'ChromaDBに存在しないため再生成',
-                      });
+                      // Supabase使用時はupdate_chroma_sync_statusをスキップ
+                      if (!useSupabase) {
+                        await callTauriCommand('update_chroma_sync_status', {
+                          entityType: 'relation',
+                          entityId: relationId,
+                          synced: false,
+                          error: 'ChromaDBに存在しないため再生成',
+                        });
+                      }
                     } catch (resetError) {
                       console.warn(`chromaSyncedフラグのリセットエラー:`, resetError);
                     }
@@ -303,8 +319,9 @@ export async function batchUpdateRelationEmbeddings(
                 }
               }
             }
-          } catch (sqliteError: any) {
-            // SQLiteからの取得に失敗した場合は続行
+          } catch (error: any) {
+            // データ取得に失敗した場合は続行
+            console.warn(`リレーション取得エラー（続行）: ${relationId}`, error?.message);
           }
         }
         

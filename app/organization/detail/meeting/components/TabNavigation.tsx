@@ -12,6 +12,8 @@ interface TabNavigationProps {
   onSetActiveTab: (tab: TabType) => void;
   onSetActiveSection: (section: string) => void;
   onShowTableOfContents: () => void;
+  showSummary: boolean;
+  onToggleSummary: () => void;
 }
 
 export default function TabNavigation({
@@ -22,6 +24,8 @@ export default function TabNavigation({
   onSetActiveTab,
   onSetActiveSection,
   onShowTableOfContents,
+  showSummary,
+  onToggleSummary,
 }: TabNavigationProps) {
   // tabOrderに基づいてタブを並べ替え
   const orderedMonths = tabOrder.filter(tabId => MONTHS.some(m => m.id === tabId));
@@ -35,10 +39,11 @@ export default function TabNavigation({
   };
   return (
     <>
-      {/* 目次ボタン */}
+      {/* 目次ボタンとサマリボタン */}
       <div style={{ 
         display: 'flex', 
         justifyContent: 'flex-start', 
+        gap: '8px',
         marginBottom: '12px',
       }}>
         <button
@@ -67,6 +72,33 @@ export default function TabNavigation({
         >
           <TableOfContentsIcon size={16} color="white" />
           <span>目次</span>
+        </button>
+        <button
+          onClick={onToggleSummary}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 16px',
+            backgroundColor: showSummary ? '#10B981' : '#6B7280',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '500',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = showSummary ? '#059669' : '#4B5563';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = showSummary ? '#10B981' : '#6B7280';
+          }}
+          title={showSummary ? 'サマリを非表示' : 'サマリを表示'}
+        >
+          <span>📄</span>
+          <span>サマリ</span>
         </button>
       </div>
 

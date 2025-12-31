@@ -2,12 +2,74 @@ import type { EngagementLevel } from './types';
 import { generateUniqueEngagementLevelId } from './utils';
 
 /**
- * 全ねじ込み注力度を取得（SQLiteから取得）
+ * 全ねじ込み注力度を取得（SQLiteまたはSupabaseから取得）
  */
 export async function getEngagementLevels(): Promise<EngagementLevel[]> {
   try {
-    console.log('📖 [getEngagementLevels] 開始（SQLiteから取得）');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getEngagementLevels] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        const result = await getCollectionViaDataSource('engagementLevels');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const resultArray = Array.isArray(result) ? result : [];
+        
+        const engagementLevels: EngagementLevel[] = resultArray.map((item: any) => {
+          // Supabaseから取得したデータは直接オブジェクト形式
+          const itemId = item.id;
+          const data = item;
+          
+          // createdAtとupdatedAtがFirestoreのTimestamp形式の場合、ISO文字列に変換
+          let createdAt: any = null;
+          let updatedAt: any = null;
+          
+          if (data.createdAt) {
+            if (data.createdAt.seconds) {
+              createdAt = new Date(data.createdAt.seconds * 1000).toISOString();
+            } else if (typeof data.createdAt === 'string') {
+              createdAt = data.createdAt;
+            }
+          }
+          
+          if (data.updatedAt) {
+            if (data.updatedAt.seconds) {
+              updatedAt = new Date(data.updatedAt.seconds * 1000).toISOString();
+            } else if (typeof data.updatedAt === 'string') {
+              updatedAt = data.updatedAt;
+            }
+          }
+          
+          return {
+            id: itemId,
+            title: data.title || '',
+            description: data.description || '',
+            position: data.position ?? null,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+          };
+        }).filter((level: EngagementLevel) => level.id && level.title);
+        
+        // positionでソート
+        engagementLevels.sort((a, b) => {
+          const posA = a.position ?? 999999;
+          const posB = b.position ?? 999999;
+          return posA - posB;
+        });
+        
+        console.log('✅ [getEngagementLevels] 取得成功（Supabaseから取得）:', engagementLevels.length, '件');
+        return engagementLevels;
+      } catch (error: any) {
+        console.error('❌ [getEngagementLevels] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getEngagementLevels] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -143,10 +205,11 @@ export async function getEngagementLevelById(levelId: string): Promise<Engagemen
 }
 
 /**
- * ねじ込み注力度を保存
+ * ねじ込み注力度を保存（SQLiteまたはSupabaseに保存）
  */
 export async function saveEngagementLevel(level: Partial<EngagementLevel> & { title: string }): Promise<EngagementLevel> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
     const now = new Date().toISOString();
     const levelId = level.id || generateUniqueEngagementLevelId();
     
@@ -159,6 +222,20 @@ export async function saveEngagementLevel(level: Partial<EngagementLevel> & { ti
       updatedAt: now,
     };
     
+    // Supabase使用時はDataSource経由で保存
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        await setDocViaDataSource('engagementLevels', levelId, levelData);
+        console.log('✅ [saveEngagementLevel] 保存成功（Supabase経由）:', levelId);
+        return levelData;
+      } catch (error: any) {
+        console.error('❌ [saveEngagementLevel] Supabase保存エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -169,7 +246,7 @@ export async function saveEngagementLevel(level: Partial<EngagementLevel> & { ti
           data: levelData,
         });
         
-        console.log('✅ [saveEngagementLevel] 保存成功:', levelId);
+        console.log('✅ [saveEngagementLevel] 保存成功（Tauriコマンド経由）:', levelId);
         return levelData;
       } catch (error: any) {
         console.error('❌ [saveEngagementLevel] Tauriコマンドエラー:', error);
@@ -177,6 +254,7 @@ export async function saveEngagementLevel(level: Partial<EngagementLevel> & { ti
       }
     }
     
+    // その他の環境（API経由）
     const { apiPost, apiPut } = await import('../apiClient');
     if (level.id) {
       await apiPut(`/api/engagementLevels/${levelId}`, levelData);
@@ -192,10 +270,27 @@ export async function saveEngagementLevel(level: Partial<EngagementLevel> & { ti
 }
 
 /**
- * ねじ込み注力度を削除
+ * ねじ込み注力度を削除（SQLiteまたはSupabaseから削除）
  */
 export async function deleteEngagementLevel(levelId: string): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🗑️ [deleteEngagementLevel] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から削除）:`, { levelId });
+    
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        await deleteDocViaDataSource('engagementLevels', levelId);
+        console.log('✅ [deleteEngagementLevel] 削除成功（Supabase経由）:', levelId);
+        return;
+      } catch (error: any) {
+        console.error('❌ [deleteEngagementLevel] Supabase削除エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -205,15 +300,17 @@ export async function deleteEngagementLevel(levelId: string): Promise<void> {
           docId: levelId,
         });
         
-        console.log('✅ [deleteEngagementLevel] 削除成功:', levelId);
+        console.log('✅ [deleteEngagementLevel] 削除成功（Tauriコマンド経由）:', levelId);
+        return;
       } catch (error: any) {
         console.error('❌ [deleteEngagementLevel] Tauriコマンドエラー:', error);
         throw error;
       }
-    } else {
-      const { apiDelete } = await import('../apiClient');
-      await apiDelete(`/api/engagementLevels/${levelId}`);
     }
+    
+    // その他の環境（API経由）
+    const { apiDelete } = await import('../apiClient');
+    await apiDelete(`/api/engagementLevels/${levelId}`);
   } catch (error: any) {
     console.error('❌ [deleteEngagementLevel] エラー:', error);
     throw error;
@@ -221,10 +318,39 @@ export async function deleteEngagementLevel(levelId: string): Promise<void> {
 }
 
 /**
- * ねじ込み注力度の順序を更新
+ * ねじ込み注力度の順序を更新（SQLiteまたはSupabaseで更新）
  */
 export async function updateEngagementLevelPositions(levels: EngagementLevel[]): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🔄 [updateEngagementLevelPositions] 開始（${useSupabase ? 'Supabase' : 'SQLite'}で更新）:`, levels.length, '件');
+    
+    // Supabase使用時はDataSource経由で更新
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        
+        // 各ねじ込み注力度のpositionを更新
+        for (let i = 0; i < levels.length; i++) {
+          const level = levels[i];
+          const dataToUpdate = {
+            ...level,
+            position: i,
+            updatedAt: new Date().toISOString(),
+          };
+          
+          await setDocViaDataSource('engagementLevels', level.id, dataToUpdate);
+        }
+        
+        console.log('✅ [updateEngagementLevelPositions] 更新成功（Supabase経由）');
+        return;
+      } catch (error: any) {
+        console.error('❌ [updateEngagementLevelPositions] Supabase更新エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -243,15 +369,17 @@ export async function updateEngagementLevelPositions(levels: EngagementLevel[]):
           });
         }
         
-        console.log('✅ [updateEngagementLevelPositions] 更新成功');
+        console.log('✅ [updateEngagementLevelPositions] 更新成功（Tauriコマンド経由）');
+        return;
       } catch (error: any) {
         console.error('❌ [updateEngagementLevelPositions] Tauriコマンドエラー:', error);
         throw error;
       }
-    } else {
-      const { apiPut } = await import('../apiClient');
-      await apiPut('/api/engagementLevels/positions', { levels });
     }
+    
+    // その他の環境（API経由）
+    const { apiPut } = await import('../apiClient');
+    await apiPut('/api/engagementLevels/positions', { levels });
   } catch (error: any) {
     console.error('❌ [updateEngagementLevelPositions] エラー:', error);
     throw error;

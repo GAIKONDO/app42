@@ -3,7 +3,6 @@
  */
 
 import { BM25Index, BM25SearchResult } from '@/lib/bm25Search';
-import { callTauriCommand } from '@/lib/localFirebase';
 import { bm25IndexCache } from './bm25IndexCache';
 
 /**
@@ -47,7 +46,7 @@ export async function searchEntitiesBM25(
   try {
     console.log('[searchEntitiesBM25] 検索開始:', { queryText, limit, filters });
 
-    // SQLiteからエンティティデータを取得
+    // データソースからエンティティデータを取得
     const conditions: any = {};
     if (filters?.organizationId) {
       conditions.organizationId = filters.organizationId;
@@ -56,10 +55,13 @@ export async function searchEntitiesBM25(
       conditions.type = filters.entityType;
     }
 
-    const entitiesResult = await callTauriCommand('query_get', {
-      collectionName: 'entities',
-      conditions,
-    }) as Array<{ id: string; data: any }>;
+    // Supabase経由で取得
+    const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+    const queryResults = await queryGetViaDataSource('entities', conditions);
+    const entitiesResult = queryResults.map((r: any) => ({
+      id: r.id || r.data?.id,
+      data: r.data || r,
+    }));
 
     if (!entitiesResult || entitiesResult.length === 0) {
       console.log('[searchEntitiesBM25] エンティティが見つかりませんでした');
@@ -133,7 +135,7 @@ export async function searchRelationsBM25(
   try {
     console.log('[searchRelationsBM25] 検索開始:', { queryText, limit, filters });
 
-    // SQLiteからリレーションデータを取得
+    // データソースからリレーションデータを取得
     const conditions: any = {};
     if (filters?.organizationId) {
       conditions.organizationId = filters.organizationId;
@@ -142,10 +144,13 @@ export async function searchRelationsBM25(
       conditions.relationType = filters.relationType;
     }
 
-    const relationsResult = await callTauriCommand('query_get', {
-      collectionName: 'relations',
-      conditions,
-    }) as Array<{ id: string; data: any }>;
+    // Supabase経由で取得
+    const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+    const queryResults = await queryGetViaDataSource('relations', conditions);
+    const relationsResult = queryResults.map((r: any) => ({
+      id: r.id || r.data?.id,
+      data: r.data || r,
+    }));
 
     if (!relationsResult || relationsResult.length === 0) {
       console.log('[searchRelationsBM25] リレーションが見つかりませんでした');
@@ -219,7 +224,7 @@ export async function searchTopicsBM25(
   try {
     console.log('[searchTopicsBM25] 検索開始:', { queryText, limit, filters });
 
-    // SQLiteからトピックデータを取得
+    // データソースからトピックデータを取得
     const conditions: any = {};
     if (filters?.organizationId) {
       conditions.organizationId = filters.organizationId;
@@ -228,10 +233,13 @@ export async function searchTopicsBM25(
       conditions.semanticCategory = filters.topicSemanticCategory;
     }
 
-    const topicsResult = await callTauriCommand('query_get', {
-      collectionName: 'topics',
-      conditions,
-    }) as Array<{ id: string; data: any }>;
+    // Supabase経由で取得
+    const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+    const topicsData = await queryGetViaDataSource('topics', conditions);
+    const topicsResult = topicsData.map((r: any) => ({
+      id: r.id || r.data?.id,
+      data: r.data || r,
+    }));
 
     if (!topicsResult || topicsResult.length === 0) {
       console.log('[searchTopicsBM25] トピックが見つかりませんでした');

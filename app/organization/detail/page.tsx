@@ -118,7 +118,10 @@ function OrganizationDetailPageContent() {
 
   // タブパラメータが変更されたときにactiveTabを更新
   useEffect(() => {
-    if (tabParam && ['introduction', 'focusAreas', 'startups', 'focusInitiatives', 'meetingNotes', 'regulations', 'graphviz'].includes(tabParam)) {
+    // 非表示タブが指定された場合はintroductionにリダイレクト
+    if (tabParam === 'focusInitiatives' || tabParam === 'regulations' || tabParam === 'graphviz') {
+      setActiveTab('introduction');
+    } else if (tabParam && ['introduction', 'focusAreas', 'startups', 'meetingNotes'].includes(tabParam)) {
       setActiveTab(tabParam);
     } else if (!tabParam) {
       setActiveTab('introduction');
@@ -160,26 +163,29 @@ function OrganizationDetailPageContent() {
         tabRef = startupsTabRef;
         tabName = 'スタートアップ';
         break;
-      case 'focusInitiatives':
-        tabRef = focusInitiativesTabRef;
-        tabName = '注力施策';
-        break;
+      // 注力施策タブは非表示（機能オフ）
+      // case 'focusInitiatives':
+      //   tabRef = focusInitiativesTabRef;
+      //   tabName = '注力施策';
+      //   break;
       case 'meetingNotes':
         tabRef = meetingNotesTabRef;
         tabName = '議事録';
         break;
-      case 'regulations':
-        tabRef = regulationsTabRef;
-        tabName = '制度';
-        break;
+      // 制度タブは非表示（機能オフ）
+      // case 'regulations':
+      //   tabRef = regulationsTabRef;
+      //   tabName = '制度';
+      //   break;
       case 'startups':
         tabRef = startupsTabRef;
         tabName = 'スタートアップ';
         break;
-      case 'graphviz':
-        tabRef = graphvizTabRef;
-        tabName = 'Graphviz';
-        break;
+      // Graphvizタブは非表示（機能オフ）
+      // case 'graphviz':
+      //   tabRef = graphvizTabRef;
+      //   tabName = 'Graphviz';
+      //   break;
     }
 
     if (!tabRef || !tabRef.current) {
@@ -305,11 +311,11 @@ function OrganizationDetailPageContent() {
         <OrganizationTabBar
           activeTab={activeTab}
           onTabChange={handleTabChange}
-          focusInitiativesCount={focusInitiatives.length}
+          focusInitiativesCount={0} // 注力施策タブは非表示のため0を渡す
           meetingNotesCount={meetingNotes.length}
-          regulationsCount={regulations.length}
+          regulationsCount={0} // 制度タブは非表示のため0を渡す
           startupsCount={startups.length}
-          graphvizCount={graphvizCount}
+          graphvizCount={0} // Graphvizタブは非表示のため0を渡す
         />
 
         {/* タブコンテンツ */}
@@ -350,7 +356,8 @@ function OrganizationDetailPageContent() {
           />
         )}
 
-        {activeTab === 'focusInitiatives' && (
+        {/* 注力施策タブは非表示（機能オフ） */}
+        {/* {activeTab === 'focusInitiatives' && (
           <FocusInitiativesTab
             organizationId={organizationId}
             focusInitiatives={focusInitiatives}
@@ -369,7 +376,7 @@ function OrganizationDetailPageContent() {
             onSaveEdit={initiativeHandlers.handleSaveEdit}
             onDelete={initiativeHandlers.handleDeleteInitiative}
           />
-        )}
+        )} */}
 
         {/* 注力施策追加モーダル */}
         <AddInitiativeModal
@@ -419,7 +426,8 @@ function OrganizationDetailPageContent() {
           />
         )}
 
-        {activeTab === 'regulations' && (
+        {/* 制度タブは非表示（機能オフ） */}
+        {/* {activeTab === 'regulations' && (
           <RegulationsTab
             organizationId={organizationId}
             regulations={regulations}
@@ -438,16 +446,17 @@ function OrganizationDetailPageContent() {
             onSaveEdit={regulationHandlers.handleSaveEditRegulation}
             onDelete={regulationHandlers.handleDeleteRegulation}
           />
-        )}
+        )} */}
 
-        {activeTab === 'graphviz' && (
+        {/* Graphvizタブは非表示（機能オフ） */}
+        {/* {activeTab === 'graphviz' && (
           <GraphvizTab
             organizationId={organizationId}
             tabRef={graphvizTabRef}
             onDownloadImage={handleDownloadTabImage}
             onFilesChange={setGraphvizCount}
           />
-        )}
+        )} */}
 
         {/* 議事録追加モーダル */}
         <AddMeetingNoteModal

@@ -22,19 +22,24 @@ export function useOrganizationData() {
       try {
         setLoading(true);
         
-        // 情報・通信部門の重複メンバーを削除（開発時のみ）
+        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+        devLog('📖 [組織ページ] データ読み込み開始', {
+          useSupabase: useSupabase ? 'Supabase' : 'SQLite',
+        });
+        
+        const startTime = performance.now();
+        
+        // 情報・通信部門の重複メンバーを削除（開発時のみ、非ブロッキング）
         if (process.env.NODE_ENV === 'development') {
-          try {
-            await removeIctDivisionDuplicates();
-          } catch (error: any) {
+          removeIctDivisionDuplicates().catch((error: any) => {
             devWarn('情報・通信部門の重複削除でエラーが発生しました:', error.message);
-          }
+          });
         }
         
-        // データベースから組織データを取得（メンバー情報も含む）
-        devLog('📖 [組織ページ] 組織データの取得を開始');
+        // データベースから組織データを取得（Supabase最適化）
         const data = await getOrgTreeFromDb();
-        devLog('📖 [組織ページ] 組織データの取得完了:', data ? '成功' : 'データなし');
+        const orgLoadTime = performance.now() - startTime;
+        devLog(`⏱️ [組織ページ] 組織データ取得時間: ${orgLoadTime.toFixed(2)}ms`);
         
         if (data) {
           setOrgData(data);
@@ -43,7 +48,11 @@ export function useOrganizationData() {
           // ルートノード（情報・通信部門）を初期選択として設定
           if (data.id) {
             try {
+              const membersStartTime = performance.now();
               const members = await getOrgMembers(data.id);
+              const membersLoadTime = performance.now() - membersStartTime;
+              devLog(`⏱️ [組織ページ] メンバー取得時間: ${membersLoadTime.toFixed(2)}ms`);
+              
               // メンバー情報をMemberInfo形式に変換（ID付き）
               const memberInfos = mapMembersToMemberInfo(members);
               const sortedMembers = sortMembersByPosition(memberInfos, data.name);
@@ -61,6 +70,7 @@ export function useOrganizationData() {
                   return m;
                 }),
               });
+              devLog(`✅ [組織ページ] 総読み込み時間: ${(performance.now() - startTime).toFixed(2)}ms`);
             } catch (error: any) {
               devWarn('ルートノードのメンバー取得に失敗しました:', error);
               setSelectedNode(data);

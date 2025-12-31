@@ -3,7 +3,8 @@
  * Supabase Realtimeを使用してデータ変更をリアルタイムで同期
  */
 
-import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { getSupabaseClient } from './utils/supabaseClient';
 
 interface RealtimePayload {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -20,24 +21,25 @@ export class RealtimeSync {
   private channels: Map<string, RealtimeChannel> = new Map();
 
   constructor() {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
 
-    if (!useSupabase || !supabaseUrl || !supabaseAnonKey) {
+    if (!useSupabase) {
       console.warn('RealtimeSync: Supabase環境変数が設定されていません。リアルタイム同期は無効です。');
       // ダミーのSupabaseクライアントを作成（エラーを防ぐため）
+      const { createClient } = require('@supabase/supabase-js');
       this.supabase = createClient('https://dummy.supabase.co', 'dummy-key');
       return;
     }
 
-    this.supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      realtime: {
-        params: {
-          eventsPerSecond: 10,
-        },
-      },
-    });
+    // シングルトンのSupabaseクライアントを使用
+    try {
+      this.supabase = getSupabaseClient();
+    } catch (error) {
+      // 環境変数が設定されていない場合は、ダミークライアントを使用
+      console.warn('RealtimeSync: Supabaseクライアントの取得に失敗しました。ダミークライアントを使用します。', error);
+      const { createClient } = require('@supabase/supabase-js');
+      this.supabase = createClient('https://dummy.supabase.co', 'dummy-key');
+    }
   }
 
   /**
@@ -57,8 +59,6 @@ export class RealtimeSync {
     // 既存の購読を解除
     this.unsubscribe(table);
 
-    console.log(`RealtimeSync: テーブル "${table}" の購読を開始します`);
-
     const channelName = `${table}-changes`;
     const channel = this.supabase
       .channel(channelName)
@@ -70,8 +70,6 @@ export class RealtimeSync {
           table: table,
         },
         (payload: any) => {
-          console.log(`RealtimeSync: テーブル "${table}" で変更を検出`, payload);
-          
           // Supabaseのpostgres_changesペイロード形式に合わせて変換
           // payload.eventType または payload.type からイベントタイプを取得
           const eventType = payload.eventType || payload.type || 'UNKNOWN';
@@ -92,12 +90,13 @@ export class RealtimeSync {
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log(`RealtimeSync: テーブル "${table}" の購読に成功しました`);
+          // 購読成功（ログは出力しない）
         } else if (status === 'CHANNEL_ERROR') {
           console.error(`RealtimeSync: テーブル "${table}" の購読エラー`);
-        } else {
-          console.log(`RealtimeSync: テーブル "${table}" の購読ステータス: ${status}`);
+        } else if (status === 'TIMED_OUT') {
+          console.warn(`RealtimeSync: テーブル "${table}" の購読がタイムアウトしました`);
         }
+        // CLOSED状態は正常な状態なのでログを出力しない
       });
 
     this.channels.set(table, channel);
@@ -115,22 +114,18 @@ export class RealtimeSync {
   unsubscribe(table: string): void {
     const channel = this.channels.get(table);
     if (channel) {
-      console.log(`RealtimeSync: テーブル "${table}" の購読を解除します`);
       this.supabase.removeChannel(channel);
       this.channels.delete(table);
-    } else {
-      console.warn(`RealtimeSync: テーブル "${table}" の購読が見つかりません`);
     }
+    // 購読が見つからない場合は何もしない（既に解除済みの可能性があるため、これは正常な状態）
   }
 
   /**
    * 全ての購読を解除
    */
   unsubscribeAll(): void {
-    console.log('RealtimeSync: すべての購読を解除します');
     for (const [table, channel] of this.channels.entries()) {
       this.supabase.removeChannel(channel);
-      console.log(`RealtimeSync: テーブル "${table}" の購読を解除しました`);
     }
     this.channels.clear();
   }

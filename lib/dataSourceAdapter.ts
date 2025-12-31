@@ -98,3 +98,14 @@ export async function addDocViaDataSource(
   return await dataSource.collection_add(collectionName, data);
 }
 
+/**
+ * DataSourceを使用してクエリを実行
+ */
+export async function queryGetViaDataSource(
+  collectionName: string,
+  conditions?: any
+): Promise<any[]> {
+  const dataSource = getDataSourceInstance();
+  return await dataSource.query_get(collectionName, conditions);
+}
+

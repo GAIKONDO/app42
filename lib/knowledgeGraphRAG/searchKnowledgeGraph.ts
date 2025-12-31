@@ -34,38 +34,52 @@ export async function searchKnowledgeGraph(
   hybridConfig?: HybridSearchConfig,
   useRouter?: boolean // 未指定の場合は設定から取得
 ): Promise<KnowledgeGraphSearchResult[]> {
-  // 設定を取得（useRouterが未指定の場合）
-  const searchConfig = typeof window !== 'undefined' ? getSearchConfig() : {
-    enableBM25: false,
-    enableRouter: false,
-    useHybridSearchByDefault: false,
-  };
-  
-  // useRouterが未指定の場合は設定から取得
-  const finalUseRouter = useRouter !== undefined ? useRouter : searchConfig.enableRouter;
-  
-  // hybridConfigが未指定で、ハイブリッド検索がデフォルトで有効な場合は使用
-  const finalHybridConfig = hybridConfig || (searchConfig.useHybridSearchByDefault && searchConfig.enableBM25
-    ? DEFAULT_HYBRID_CONFIG
-    : undefined);
-
-  console.log('[searchKnowledgeGraph] 検索開始:', { 
-    queryText, 
+  console.log('[searchKnowledgeGraph] 関数呼び出し:', { 
+    queryText: queryText?.substring(0, 50), 
     limit, 
-    filters,
-    useRouter: finalUseRouter,
-    useHybridSearch: !!finalHybridConfig,
+    hasFilters: !!filters,
+    useCache,
+    timeoutMs,
+    hasHybridConfig: !!hybridConfig,
+    useRouter,
   });
   
-  if (!queryText || !queryText.trim()) {
-    console.warn('[searchKnowledgeGraph] クエリテキストが空です');
-    return [];
-  }
-  
-  // クエリテキストを正規化（前後の空白を削除）
-  const normalizedQuery = queryText.trim();
-
   try {
+    // 設定を取得（useRouterが未指定の場合）
+    const searchConfig = typeof window !== 'undefined' ? getSearchConfig() : {
+      enableBM25: false,
+      enableRouter: false,
+      useHybridSearchByDefault: false,
+    };
+    
+    console.log('[searchKnowledgeGraph] 検索設定:', searchConfig);
+    
+    // useRouterが未指定の場合は設定から取得
+    const finalUseRouter = useRouter !== undefined ? useRouter : searchConfig.enableRouter;
+    
+    // hybridConfigが未指定で、ハイブリッド検索がデフォルトで有効な場合は使用
+    const finalHybridConfig = hybridConfig || (searchConfig.useHybridSearchByDefault && searchConfig.enableBM25
+      ? DEFAULT_HYBRID_CONFIG
+      : undefined);
+
+    console.log('[searchKnowledgeGraph] 検索開始:', { 
+      queryText, 
+      limit, 
+      filters,
+      useRouter: finalUseRouter,
+      useHybridSearch: !!finalHybridConfig,
+      hybridConfig: finalHybridConfig,
+    });
+    
+    if (!queryText || !queryText.trim()) {
+      console.warn('[searchKnowledgeGraph] クエリテキストが空です');
+      return [];
+    }
+    
+    // クエリテキストを正規化（前後の空白を削除）
+    const normalizedQuery = queryText.trim();
+    console.log('[searchKnowledgeGraph] 正規化されたクエリ:', normalizedQuery);
+
     // organizationIdが未指定の場合、Rust側で全組織横断検索が実行される
     // そのため、organizationIdが未指定でも検索を続行する
 
@@ -170,8 +184,10 @@ export async function searchKnowledgeGraph(
     const finalResults = allResults.slice(0, limit);
     console.log('[searchKnowledgeGraph] 最終結果数:', finalResults.length);
     return finalResults;
-  } catch (error) {
+  } catch (error: any) {
     console.error('[searchKnowledgeGraph] 検索エラー:', error);
+    console.error('[searchKnowledgeGraph] エラーメッセージ:', error?.message);
+    console.error('[searchKnowledgeGraph] エラースタック:', error?.stack);
     return [];
   }
 }

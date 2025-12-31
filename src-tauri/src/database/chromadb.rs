@@ -59,15 +59,35 @@ impl ChromaDBServer {
         }
 
         // ポートが使用されているかチェック
+        let port_listening = Self::check_port_listening(port).await;
         let port_in_use = Self::check_port_in_use(port).await;
-        if port_in_use {
+        
+        if port_listening || port_in_use {
             eprintln!("⚠️ ポート{}が既に使用されています。既存のChromaDBサーバーを停止します...", port);
+            if port_listening && !port_in_use {
+                eprintln!("   ⚠️ ポート{}は開いていますが、ChromaDBサーバーは応答していません", port);
+            }
+            
             if let Err(e) = Self::kill_process_on_port(port).await {
                 eprintln!("   ⚠️ 既存プロセスの停止に失敗しました（続行します）: {}", e);
             } else {
                 eprintln!("   ✅ 既存プロセスを停止しました");
-                // プロセスが完全に終了するまで少し待機
-                sleep(Duration::from_secs(1)).await;
+            }
+            
+            // プロセスが完全に終了し、ポートが閉じるまで待機
+            eprintln!("   ⏳ ポート{}が使用可能になるまで待機中...", port);
+            for i in 0..10 {
+                let still_listening = Self::check_port_listening(port).await;
+                if !still_listening {
+                    eprintln!("   ✅ ポート{}が使用可能になりました", port);
+                    break;
+                }
+                if i == 9 {
+                    eprintln!("   ⚠️ ポート{}はまだ使用中ですが、続行します...", port);
+                } else if i % 2 == 0 {
+                    eprintln!("   ⏳ ポート待機中... ({}秒経過)", i * 500 / 1000);
+                }
+                sleep(Duration::from_millis(500)).await;
             }
         }
 
@@ -284,12 +304,29 @@ impl ChromaDBServer {
     }
 
     /// ポートが使用されているかチェック
+    /// ChromaDBサーバーが正常に応答している場合のみtrueを返す
     async fn check_port_in_use(port: u16) -> bool {
         let client = reqwest::Client::new();
         let url = format!("http://localhost:{}/api/v1/heartbeat", port);
         match client.get(&url).timeout(Duration::from_secs(1)).send().await {
-            Ok(_) => true,
-            Err(_) => false,
+            Ok(response) => {
+                // ステータスコードが200の場合は、ChromaDBサーバーが正常に動作している
+                response.status().is_success()
+            },
+            Err(_) => {
+                // 接続エラーまたはタイムアウトの場合は、ポートが使用されていない（またはサーバーが応答していない）
+                false
+            }
+        }
+    }
+    
+    /// ポートがリッスンしているかチェック（TCP接続のみ）
+    /// ChromaDBサーバーが起動しているかどうかに関わらず、ポートが開いているかどうかを確認
+    async fn check_port_listening(port: u16) -> bool {
+        use tokio::net::TcpStream;
+        match tokio::time::timeout(Duration::from_millis(500), TcpStream::connect(format!("127.0.0.1:{}", port))).await {
+            Ok(Ok(_)) => true,  // 接続成功 = ポートがリッスンしている
+            _ => false,  // 接続失敗またはタイムアウト = ポートがリッスンしていない
         }
     }
 
@@ -342,7 +379,7 @@ impl ChromaDBServer {
                     continue;
                 }
                 
-                // プロセス名を確認（ChromaDBサーバーのみを停止するため）
+                // プロセス名とコマンドライン引数を確認（ChromaDBサーバーのみを停止するため）
                 let ps_output = Command::new("ps")
                     .arg("-p")
                     .arg(pid_str)
@@ -350,11 +387,47 @@ impl ChromaDBServer {
                     .arg("comm=")
                     .output();
                 
-                let is_chromadb = if let Ok(ps_output) = ps_output {
+                let ps_args_output = Command::new("ps")
+                    .arg("-p")
+                    .arg(pid_str)
+                    .arg("-o")
+                    .arg("args=")
+                    .output();
+                
+                // プロセス名とコマンドライン引数を取得（デバッグ情報用）
+                let process_name = ps_output.as_ref().ok()
+                    .and_then(|o| if o.status.success() {
+                        String::from_utf8(o.stdout.clone()).ok()
+                    } else {
+                        None
+                    })
+                    .map(|s| s.trim().to_string());
+                
+                let process_args = ps_args_output.as_ref().ok()
+                    .and_then(|o| if o.status.success() {
+                        String::from_utf8(o.stdout.clone()).ok()
+                    } else {
+                        None
+                    })
+                    .map(|s| s.trim().to_string());
+                
+                let is_chromadb = if let Ok(ps_output) = &ps_output {
                     if ps_output.status.success() {
                         let comm = String::from_utf8_lossy(&ps_output.stdout).trim().to_string();
+                        // コマンドライン引数も確認
+                        let has_chromadb_args = if let Ok(ps_args_output) = &ps_args_output {
+                            if ps_args_output.status.success() {
+                                let args = String::from_utf8_lossy(&ps_args_output.stdout).trim().to_string();
+                                args.contains("chroma") || args.contains("chromadb") || args.contains("chromadb.cli")
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        
                         // chroma、chromadb、python（chromadb.cliを実行している場合）を確認
-                        comm.contains("chroma") || comm.contains("python")
+                        comm.contains("chroma") || comm.contains("python") || has_chromadb_args
                     } else {
                         // psコマンドが失敗した場合、プロセスが既に終了している可能性がある
                         false
@@ -364,7 +437,14 @@ impl ChromaDBServer {
                 };
                 
                 if !is_chromadb {
-                    eprintln!("   ⚠️ PID {}はChromaDBサーバーではないため、スキップします", pid);
+                    eprintln!("   ⚠️ PID {}はChromaDBサーバーではないため、スキップします（プロセス名を確認してください）", pid);
+                    // デバッグ情報を出力
+                    if let Some(ref name) = process_name {
+                        eprintln!("     プロセス名: {}", name);
+                    }
+                    if let Some(ref args) = process_args {
+                        eprintln!("     コマンドライン: {}", args);
+                    }
                     continue;
                 }
                 
@@ -558,10 +638,13 @@ pub async fn stop_chromadb_server() -> Result<(), String> {
 pub async fn init_chromadb_client(port: u16) -> Result<(), String> {
     let client_lock = CHROMADB_CLIENT.get_or_init(|| Arc::new(Mutex::new(None)));
     
-    let mut client_guard = client_lock.lock().await;
-    if client_guard.is_some() {
-        eprintln!("⚠️ ChromaDBクライアントは既に初期化されています");
-        return Ok(());
+    // 既に初期化されているか確認
+    {
+        let client_guard = client_lock.lock().await;
+        if client_guard.is_some() {
+            eprintln!("⚠️ ChromaDBクライアントは既に初期化されています");
+            return Ok(());
+        }
     }
 
     // ChromaDB 1.xでは、データベースの概念がないが、Rustクライアント（v2.3.0）が
@@ -581,7 +664,12 @@ pub async fn init_chromadb_client(port: u16) -> Result<(), String> {
         .await
         .map_err(|e| format!("ChromaDBクライアントの初期化に失敗しました: {}", e))?;
     
-    *client_guard = Some(Arc::new(client));
+    // クライアントを設定
+    {
+        let mut client_guard = client_lock.lock().await;
+        *client_guard = Some(Arc::new(client));
+    }
+    
     eprintln!("✅ ChromaDBクライアントを初期化しました");
     Ok(())
 }
@@ -625,27 +713,152 @@ async fn get_or_create_collection_with_error_handling(
                 };
                 
                 // サーバーを停止
+                eprintln!("🛑 ChromaDB Serverの停止を開始します...");
                 if let Err(e) = stop_chromadb_server().await {
                     eprintln!("⚠️ ChromaDBサーバーの停止中にエラーが発生しました: {}", e);
+                } else {
+                    eprintln!("✅ ChromaDB Serverを停止しました");
                 }
                 
-                // 少し待機
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                // サーバーとクライアントの状態を完全にクリア（stop_chromadb_serverで既にクリアされているが、念のため）
+                if let Some(server_lock) = CHROMADB_SERVER.get() {
+                    let mut server_guard = server_lock.lock().unwrap();
+                    if server_guard.is_some() {
+                        eprintln!("⚠️ サーバーの状態が残っているため、クリアします...");
+                        *server_guard = None;
+                    }
+                }
+                
+                if let Some(client_lock) = CHROMADB_CLIENT.get() {
+                    let mut client_guard = client_lock.lock().await;
+                    if client_guard.is_some() {
+                        eprintln!("⚠️ クライアントの状態が残っているため、クリアします...");
+                        *client_guard = None;
+                    }
+                }
+                
+                // 少し待機（サーバーが完全に停止するまで）
+                tokio::time::sleep(Duration::from_secs(3)).await;
                 
                 // データディレクトリをクリア（破損したデータベースを修復）
                 eprintln!("🗑️ 破損したデータベースを修復するため、データディレクトリをクリアします...");
                 if let Err(e) = clear_chromadb_data_dir().await {
                     eprintln!("⚠️ データディレクトリのクリアに失敗しました: {}", e);
                     // クリアに失敗しても続行
+                } else {
+                    eprintln!("✅ データディレクトリをクリアしました");
+                }
+                
+                // ポートが使用可能になるまで待機（最大10秒）
+                eprintln!("⏳ ポート{}が使用可能になるまで待機中...", port);
+                let mut port_available = false;
+                let mut chromadb_not_responding_count = 0;
+                
+                for i in 0..20 {
+                    // まず、ポートがリッスンしているかチェック
+                    let port_listening = ChromaDBServer::check_port_listening(port).await;
+                    if !port_listening {
+                        // ポートがリッスンしていない = 使用可能
+                        port_available = true;
+                        eprintln!("✅ ポート{}が使用可能になりました（リッスンしていません）", port);
+                        break;
+                    }
+                    
+                    // ポートがリッスンしている場合、ChromaDBサーバーが正常に応答しているかチェック
+                    let chromadb_responding = ChromaDBServer::check_port_in_use(port).await;
+                    if !chromadb_responding {
+                        // ポートは開いているが、ChromaDBサーバーが応答していない
+                        chromadb_not_responding_count += 1;
+                        eprintln!("   ポート{}は開いていますが、ChromaDBサーバーは応答していません（{}回目）", port, chromadb_not_responding_count);
+                        
+                        // 3回連続で応答しない場合、プロセスを強制的に停止する
+                        if chromadb_not_responding_count >= 3 {
+                            eprintln!("⚠️ ポート{}でChromaDBサーバーが応答しません。強制的にプロセスを停止します...", port);
+                            if let Err(e) = ChromaDBServer::kill_process_on_port(port).await {
+                                eprintln!("⚠️ ポート{}のプロセス停止に失敗しました: {}", port, e);
+                            } else {
+                                eprintln!("✅ ポート{}のプロセスを停止しました", port);
+                            }
+                            // プロセス停止後、ポートが閉じるまで待機
+                            tokio::time::sleep(Duration::from_secs(3)).await;
+                            
+                            // 再度ポートが使用可能かチェック
+                            let port_listening_after_kill = ChromaDBServer::check_port_listening(port).await;
+                            if !port_listening_after_kill {
+                                port_available = true;
+                                eprintln!("✅ ポート{}が使用可能になりました（プロセス停止後）", port);
+                                break;
+                            } else {
+                                eprintln!("⚠️ ポート{}はまだリッスンしています。追加の待機時間を設けます...", port);
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                            }
+                        }
+                    } else {
+                        // ChromaDBサーバーが正常に応答している場合、カウンターをリセット
+                        chromadb_not_responding_count = 0;
+                    }
+                    
+                    if i % 2 == 0 {
+                        eprintln!("   ポート待機中... ({}秒経過)", i * 500 / 1000);
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                
+                if !port_available {
+                    eprintln!("⚠️ ポート{}が使用可能になりませんでした。最終的にプロセスを停止します...", port);
+                    if let Err(e) = ChromaDBServer::kill_process_on_port(port).await {
+                        eprintln!("⚠️ ポート{}のプロセス停止に失敗しました: {}", port, e);
+                    }
+                    // プロセス停止後、ポートが閉じるまで待機
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    
+                    // 最終確認
+                    let port_listening = ChromaDBServer::check_port_listening(port).await;
+                    if !port_listening {
+                        eprintln!("✅ ポート{}が使用可能になりました（最終確認）", port);
+                    } else {
+                        eprintln!("⚠️ ポート{}はまだリッスンしていますが、続行します...", port);
+                    }
                 }
                 
                 // 少し待機してから再起動
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 
-                // サーバーを再起動
-                match init_chromadb_server(data_dir.clone(), port).await {
+                // サーバーを再起動（強制的に再初期化）
+                eprintln!("🚀 ChromaDB Serverを再起動します...");
+                // init_chromadb_serverは既に初期化されている場合、何もしないため、
+                // サーバーの状態をNoneに設定した後、直接ChromaDBServer::startを呼び出す
+                let server = match ChromaDBServer::start(data_dir.clone(), port).await {
+                    Ok(server) => {
+                        eprintln!("✅ ChromaDB Serverの起動に成功しました");
+                        server
+                    }
+                    Err(e) => {
+                        let data_dir_str = data_dir.display().to_string();
+                        return Err(format!(
+                            "コレクションの取得/作成に失敗しました: {}\n\
+                            ChromaDBサーバーの再起動にも失敗しました: {}\n\n\
+                            ChromaDBの内部データベースが破損している可能性があります。\n\
+                            対処法:\n\
+                            1. アプリケーションを再起動してください\n\
+                            2. それでも解決しない場合、ChromaDBのデータディレクトリをクリアしてください\n\
+                            3. データディレクトリの場所: {}",
+                            error_msg, e, data_dir_str
+                        ));
+                    }
+                };
+                
+                // サーバーを保存
+                if let Some(server_lock) = CHROMADB_SERVER.get() {
+                    let mut server_guard = server_lock.lock().unwrap();
+                    *server_guard = Some(server);
+                }
+                
+                // クライアントを再初期化
+                eprintln!("🔄 ChromaDBクライアントを再初期化します...");
+                match init_chromadb_client(port).await {
                     Ok(_) => {
-                        eprintln!("✅ ChromaDBサーバーの再起動に成功しました。再度試行します...");
+                        eprintln!("✅ ChromaDBクライアントの再初期化に成功しました");
                         
                         // クライアントを再取得
                         let client_lock = CHROMADB_CLIENT.get()
@@ -680,7 +893,7 @@ async fn get_or_create_collection_with_error_handling(
                                         ));
                                     }
                                     eprintln!("⚠️ 再試行 {}回目に失敗しました。待機してから再試行します...", retry_count);
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    tokio::time::sleep(Duration::from_secs(2)).await;
                                 }
                             }
                         }
@@ -689,7 +902,7 @@ async fn get_or_create_collection_with_error_handling(
                         let data_dir_str = data_dir.display().to_string();
                         return Err(format!(
                             "コレクションの取得/作成に失敗しました: {}\n\
-                            ChromaDBサーバーの再起動にも失敗しました: {}\n\n\
+                            ChromaDBクライアントの再初期化にも失敗しました: {}\n\n\
                             ChromaDBの内部データベースが破損している可能性があります。\n\
                             対処法:\n\
                             1. アプリケーションを再起動してください\n\
@@ -714,7 +927,16 @@ pub async fn save_entity_embedding(
     metadata: HashMap<String, Value>,
 ) -> Result<(), String> {
     // クライアントが初期化されていない場合、自動的に初期化を試みる
-    if CHROMADB_CLIENT.get().is_none() {
+    let client_initialized = {
+        if let Some(client_lock) = CHROMADB_CLIENT.get() {
+            let client_guard = client_lock.lock().await;
+            client_guard.is_some()
+        } else {
+            false
+        }
+    };
+    
+    if !client_initialized {
         eprintln!("⚠️ ChromaDBクライアントが初期化されていません。自動初期化を試みます...");
         
         // サーバーが起動しているか確認
@@ -763,7 +985,7 @@ pub async fn save_entity_embedding(
             let port = std::env::var("CHROMADB_PORT")
                 .ok()
                 .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(8000);
+                .unwrap_or(8001);
             
             // データディレクトリを取得
             let data_dir = get_default_chromadb_data_dir()?;
@@ -781,18 +1003,53 @@ pub async fn save_entity_embedding(
             }
         };
         
-        // クライアントの初期化を確認（サーバー起動時に既に初期化されている可能性がある）
-        if CHROMADB_CLIENT.get().is_none() {
-            // クライアントの初期化を試みる
-            if let Err(e) = init_chromadb_client(port).await {
-                eprintln!("❌ ChromaDBクライアントの自動初期化に失敗しました: {}", e);
-                return Err(format!("ChromaDBクライアントが初期化されていません。初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+        // クライアントの初期化を試みる
+        if let Err(e) = init_chromadb_client(port).await {
+            eprintln!("❌ ChromaDBクライアントの自動初期化に失敗しました: {}", e);
+            return Err(format!("ChromaDBクライアントが初期化されていません。初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+        }
+        eprintln!("✅ ChromaDBクライアントの自動初期化に成功しました");
+        
+        // クライアントが確実に初期化されているか確認（最大5秒待機）
+        let mut retry_count = 0;
+        loop {
+            let is_initialized = {
+                if let Some(client_lock) = CHROMADB_CLIENT.get() {
+                    let client_guard = client_lock.lock().await;
+                    client_guard.is_some()
+                } else {
+                    false
+                }
+            };
+            
+            if is_initialized {
+                break;
             }
-            eprintln!("✅ ChromaDBクライアントの自動初期化に成功しました");
+            
+            retry_count += 1;
+            if retry_count >= 10 {
+                eprintln!("⚠️ ChromaDBクライアントがまだ初期化されていません。再度初期化を試みます...");
+                if let Err(e) = init_chromadb_client(port).await {
+                    eprintln!("❌ ChromaDBクライアントの再初期化に失敗しました: {}", e);
+                    return Err(format!("ChromaDBクライアントが初期化されていません。再初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+                }
+                eprintln!("✅ ChromaDBクライアントの再初期化に成功しました");
+                break;
+            }
+            
+            eprintln!("⏳ ChromaDBクライアントの初期化を待機中... ({}回目)", retry_count);
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
     
-    let client_lock = get_chromadb_client()?;
+    // クライアントを取得（確実に初期化されているはず）
+    let client_lock = match get_chromadb_client() {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("❌ ChromaDBクライアントの取得に失敗しました: {}", e);
+            return Err(format!("ChromaDBクライアントが初期化されていません。アプリケーションを再起動してください。"));
+        }
+    };
     // organizationIdが空文字列の場合は"entities_all"を使用（ChromaDBの命名規則に準拠）
     let collection_name = if organization_id.is_empty() {
         "entities_all".to_string()
@@ -1018,18 +1275,24 @@ async fn search_entities_in_collection(
     let collection = get_or_create_collection_with_error_handling(client, collection_name).await?;
     
     // コレクションの件数を取得（デバッグ用）
-    match collection.count().await {
+    let collection_count = match collection.count().await {
         Ok(count) => {
             eprintln!("[search_entities_in_collection] コレクション '{}' の件数: {}件", collection_name, count);
             if count == 0 {
                 eprintln!("[search_entities_in_collection] ⚠️ コレクションが空です。");
+                // コレクションが空の場合は空の結果を返すが、エラーではなく正常な状態として扱う
                 return Ok(Vec::new());
             }
+            count
         },
         Err(e) => {
             eprintln!("[search_entities_in_collection] ⚠️ コレクションの件数取得に失敗しました: {}", e);
+            // 件数取得に失敗しても検索は続行（コレクションが存在しない可能性がある）
+            0
         },
-    }
+    };
+    
+    eprintln!("[search_entities_in_collection] コレクション '{}' の件数: {}件（検索を続行します）", collection_name, collection_count);
     
     // 検索オプションを構築
     let query_options = QueryOptions {
@@ -1104,10 +1367,14 @@ pub async fn find_similar_entities(
                 Ok(orgs) => {
                     let ids: Vec<String> = orgs.into_iter().map(|o| o.id).collect();
                     eprintln!("[find_similar_entities] 検索対象組織数: {}件", ids.len());
+                    for (i, org_id) in ids.iter().enumerate() {
+                        eprintln!("[find_similar_entities]   組織[{}]: {} (コレクション: entities_{})", i, org_id, org_id);
+                    }
                     ids
                 },
                 Err(e) => {
                     eprintln!("[find_similar_entities] ⚠️ 組織一覧の取得に失敗しました: {}", e);
+                    eprintln!("[find_similar_entities] ⚠️ SQLiteから組織を取得できませんでした。Supabaseを使用している場合は、組織IDを直接指定してください。");
                     return Ok(Vec::new());
                 },
             }
@@ -1125,6 +1392,7 @@ pub async fn find_similar_entities(
         } else {
             format!("entities_{}", org_id)
         };
+        eprintln!("[find_similar_entities] 検索タスクを作成: 組織ID={}, コレクション名={}", org_id, collection_name);
         let client_clone = client.clone();
         let embedding_clone = query_embedding.clone();
         
@@ -1134,18 +1402,26 @@ pub async fn find_similar_entities(
         search_tasks.push((org_id, task));
     }
     
+    eprintln!("[find_similar_entities] {}件の検索タスクを作成しました", search_tasks.len());
+    
     // すべての検索タスクの完了を待つ
     for (org_id, task) in search_tasks {
         match task.await {
             Ok(Ok(results)) => {
-                eprintln!("[find_similar_entities] 組織 '{}' から {}件の結果を取得", org_id, results.len());
+                eprintln!("[find_similar_entities] 組織 '{}' (コレクション: entities_{}) から {}件の結果を取得", 
+                    org_id, org_id, results.len());
+                if results.len() > 0 {
+                    eprintln!("[find_similar_entities] サンプル結果: {:?}", results.iter().take(3).collect::<Vec<_>>());
+                }
                 all_results.extend(results);
             },
             Ok(Err(e)) => {
-                eprintln!("[find_similar_entities] ⚠️ 組織 '{}' の検索エラー: {}", org_id, e);
+                eprintln!("[find_similar_entities] ⚠️ 組織 '{}' (コレクション: entities_{}) の検索エラー: {}", 
+                    org_id, org_id, e);
             },
             Err(e) => {
-                eprintln!("[find_similar_entities] ⚠️ 組織 '{}' の検索タスクエラー: {}", org_id, e);
+                eprintln!("[find_similar_entities] ⚠️ 組織 '{}' (コレクション: entities_{}) の検索タスクエラー: {}", 
+                    org_id, org_id, e);
             },
         }
     }
@@ -1190,7 +1466,129 @@ pub async fn save_relation_embedding(
     combined_embedding: Vec<f32>,
     metadata: HashMap<String, Value>,
 ) -> Result<(), String> {
-    let client_lock = get_chromadb_client()?;
+    // クライアントが初期化されていない場合、自動的に初期化を試みる
+    let client_initialized = {
+        if let Some(client_lock) = CHROMADB_CLIENT.get() {
+            let client_guard = client_lock.lock().await;
+            client_guard.is_some()
+        } else {
+            false
+        }
+    };
+    
+    if !client_initialized {
+        eprintln!("⚠️ ChromaDBクライアントが初期化されていません。自動初期化を試みます...");
+        
+        // サーバーが起動しているか確認
+        let server_lock = CHROMADB_SERVER.get();
+        let port = if let Some(server_lock) = server_lock {
+            // MutexGuardをスコープ内でドロップしてから.awaitを呼び出す
+            let port_opt = {
+                let server_guard = server_lock.lock().unwrap();
+                server_guard.as_ref().map(|server| server.port())
+            };
+            
+            if let Some(port) = port_opt {
+                // サーバーが起動している場合、ポート番号を取得
+                port
+            } else {
+                // サーバーが起動していない場合、自動的に起動を試みる
+                eprintln!("⚠️ ChromaDBサーバーが起動していません。自動起動を試みます...");
+                
+                // ポート番号を環境変数から取得（デフォルトは8001）
+                let port = std::env::var("CHROMADB_PORT")
+                    .ok()
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .unwrap_or(8001);
+                
+                // データディレクトリを取得
+                let data_dir = get_default_chromadb_data_dir()?;
+                
+                // サーバーを起動
+                match init_chromadb_server(data_dir, port).await {
+                    Ok(_) => {
+                        eprintln!("✅ ChromaDBサーバーの自動起動に成功しました");
+                        port
+                    }
+                    Err(e) => {
+                        eprintln!("❌ ChromaDBサーバーの自動起動に失敗しました: {}", e);
+                        return Err(format!("ChromaDBサーバーの起動に失敗しました: {}。アプリケーションを再起動してください。", e));
+                    }
+                }
+            }
+        } else {
+            // CHROMADB_SERVERが初期化されていない場合、自動的に起動を試みる
+            eprintln!("⚠️ ChromaDBサーバーが初期化されていません。自動起動を試みます...");
+            
+            // ポート番号を環境変数から取得（デフォルトは8001）
+            let port = std::env::var("CHROMADB_PORT")
+                .ok()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(8001);
+            
+            // データディレクトリを取得
+            let data_dir = get_default_chromadb_data_dir()?;
+            
+            // サーバーを起動
+            match init_chromadb_server(data_dir, port).await {
+                Ok(_) => {
+                    eprintln!("✅ ChromaDBサーバーの自動起動に成功しました");
+                    port
+                }
+                Err(e) => {
+                    eprintln!("❌ ChromaDBサーバーの自動起動に失敗しました: {}", e);
+                    return Err(format!("ChromaDBサーバーの起動に失敗しました: {}。アプリケーションを再起動してください。", e));
+                }
+            }
+        };
+        
+        // クライアントの初期化を試みる
+        if let Err(e) = init_chromadb_client(port).await {
+            eprintln!("❌ ChromaDBクライアントの自動初期化に失敗しました: {}", e);
+            return Err(format!("ChromaDBクライアントが初期化されていません。初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+        }
+        eprintln!("✅ ChromaDBクライアントの自動初期化に成功しました");
+        
+        // クライアントが確実に初期化されているか確認（最大5秒待機）
+        let mut retry_count = 0;
+        loop {
+            let is_initialized = {
+                if let Some(client_lock) = CHROMADB_CLIENT.get() {
+                    let client_guard = client_lock.lock().await;
+                    client_guard.is_some()
+                } else {
+                    false
+                }
+            };
+            
+            if is_initialized {
+                break;
+            }
+            
+            retry_count += 1;
+            if retry_count >= 10 {
+                eprintln!("⚠️ ChromaDBクライアントがまだ初期化されていません。再度初期化を試みます...");
+                if let Err(e) = init_chromadb_client(port).await {
+                    eprintln!("❌ ChromaDBクライアントの再初期化に失敗しました: {}", e);
+                    return Err(format!("ChromaDBクライアントが初期化されていません。再初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+                }
+                eprintln!("✅ ChromaDBクライアントの再初期化に成功しました");
+                break;
+            }
+            
+            eprintln!("⏳ ChromaDBクライアントの初期化を待機中... ({}回目)", retry_count);
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+    
+    // クライアントを取得（確実に初期化されているはず）
+    let client_lock = match get_chromadb_client() {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("❌ ChromaDBクライアントの取得に失敗しました: {}", e);
+            return Err(format!("ChromaDBクライアントが初期化されていません。アプリケーションを再起動してください。"));
+        }
+    };
     // organizationIdが空文字列の場合は"relations_all"を使用（ChromaDBの命名規則に準拠）
     let collection_name = if organization_id.is_empty() {
         "relations_all".to_string()
@@ -1534,7 +1932,16 @@ pub async fn save_topic_embedding(
         topic_id, meeting_note_id, regulation_id, organization_id, combined_embedding.len());
     
     // クライアントが初期化されていない場合、自動的に初期化を試みる
-    if CHROMADB_CLIENT.get().is_none() {
+    let client_initialized = {
+        if let Some(client_lock) = CHROMADB_CLIENT.get() {
+            let client_guard = client_lock.lock().await;
+            client_guard.is_some()
+        } else {
+            false
+        }
+    };
+    
+    if !client_initialized {
         eprintln!("⚠️ ChromaDBクライアントが初期化されていません。自動初期化を試みます...");
         
         // サーバーが起動しているか確認
@@ -1580,15 +1987,53 @@ pub async fn save_topic_embedding(
             }
         };
         
-        if CHROMADB_CLIENT.get().is_none() {
-            if let Err(e) = init_chromadb_client(port).await {
-                return Err(format!("ChromaDBクライアントが初期化されていません。初期化に失敗しました: {}", e));
+        // クライアントの初期化を試みる
+        if let Err(e) = init_chromadb_client(port).await {
+            eprintln!("❌ ChromaDBクライアントの自動初期化に失敗しました: {}", e);
+            return Err(format!("ChromaDBクライアントが初期化されていません。初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+        }
+        eprintln!("✅ ChromaDBクライアントの自動初期化に成功しました");
+        
+        // クライアントが確実に初期化されているか確認（最大5秒待機）
+        let mut retry_count = 0;
+        loop {
+            let is_initialized = {
+                if let Some(client_lock) = CHROMADB_CLIENT.get() {
+                    let client_guard = client_lock.lock().await;
+                    client_guard.is_some()
+                } else {
+                    false
+                }
+            };
+            
+            if is_initialized {
+                break;
             }
-            eprintln!("✅ ChromaDBクライアントの自動初期化に成功しました");
+            
+            retry_count += 1;
+            if retry_count >= 10 {
+                eprintln!("⚠️ ChromaDBクライアントがまだ初期化されていません。再度初期化を試みます...");
+                if let Err(e) = init_chromadb_client(port).await {
+                    eprintln!("❌ ChromaDBクライアントの再初期化に失敗しました: {}", e);
+                    return Err(format!("ChromaDBクライアントが初期化されていません。再初期化に失敗しました: {}。アプリケーションを再起動してください。", e));
+                }
+                eprintln!("✅ ChromaDBクライアントの再初期化に成功しました");
+                break;
+            }
+            
+            eprintln!("⏳ ChromaDBクライアントの初期化を待機中... ({}回目)", retry_count);
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
     
-    let client_lock = get_chromadb_client()?;
+    // クライアントを取得（確実に初期化されているはず）
+    let client_lock = match get_chromadb_client() {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("❌ ChromaDBクライアントの取得に失敗しました: {}", e);
+            return Err(format!("ChromaDBクライアントが初期化されていません。アプリケーションを再起動してください。"));
+        }
+    };
     let collection_name = format!("topics_{}", organization_id);
     eprintln!("[save_topic_embedding] コレクション名: {}", collection_name);
     

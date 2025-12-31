@@ -61,6 +61,58 @@ if [ ! -d "node_modules" ]; then
     echo ""
 fi
 
+# Supabase設定の確認
+print_info "Supabase設定を確認中..."
+if [ -f ".env.local" ]; then
+    # .env.localファイルが存在する場合は、既存のファイルを保護
+    # このスクリプトは.env.localファイルを上書きしません
+    
+    # バックアップを作成（存在しない場合のみ）
+    if [ ! -f ".env.local.backup" ]; then
+        cp .env.local .env.local.backup
+        print_info ".env.localファイルのバックアップを作成しました（.env.local.backup）"
+    fi
+    
+    # ファイルの内容を確認（表示はしない）
+    if grep -q "NEXT_PUBLIC_USE_SUPABASE=true" .env.local 2>/dev/null; then
+        if grep -q "NEXT_PUBLIC_SUPABASE_URL" .env.local 2>/dev/null && grep -q "NEXT_PUBLIC_SUPABASE_ANON_KEY" .env.local 2>/dev/null; then
+            print_success "Supabase設定が検出されました"
+            echo "  - .env.localファイルが存在し、Supabase設定が含まれています"
+            echo "  - 詳細な設定内容は表示しません（セキュリティのため）"
+            echo "  - 注意: このスクリプトは.env.localファイルを上書きしません"
+        else
+            print_error "Supabase設定が不完全です"
+            echo "  .env.localファイルに以下を設定してください:"
+            echo "  - NEXT_PUBLIC_USE_SUPABASE=true"
+            echo "  - NEXT_PUBLIC_SUPABASE_URL"
+            echo "  - NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            echo ""
+            echo "詳細は SETUP_ENV_LOCAL.md を参照してください"
+        fi
+    else
+        print_info "ローカルSQLiteデータベースを使用します"
+    fi
+    
+    # ファイルの変更を検知（バックアップと比較）
+    if [ -f ".env.local.backup" ]; then
+        if ! cmp -s .env.local .env.local.backup 2>/dev/null; then
+            print_info "警告: .env.localファイルが変更されました"
+            echo "  - バックアップから復元する場合は、以下を実行してください:"
+            echo "    cp .env.local.backup .env.local"
+        fi
+    fi
+else
+    print_info ".env.localファイルが見つかりません"
+    echo "  Supabaseを使用する場合は、.env.localファイルを作成してください"
+    echo "  詳細は SETUP_ENV_LOCAL.md を参照してください"
+    echo ""
+    print_info "ローカルSQLiteデータベースを使用します"
+    echo ""
+    print_info "注意: このスクリプトは.env.localファイルを自動生成しません"
+    echo "      手動で.env.localファイルを作成してください"
+fi
+echo ""
+
 # 開発サーバーを起動
 print_info "開発サーバーを起動しています..."
 print_info "ポート3020でNext.js開発サーバーが起動します"

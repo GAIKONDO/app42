@@ -47,14 +47,6 @@ interface UseEmbeddingRegenerationStateReturn {
   }>>;
   isCountingMissing: boolean;
   setIsCountingMissing: (value: boolean) => void;
-  showCleanupConfirm: boolean;
-  setShowCleanupConfirm: (value: boolean) => void;
-  showRepairEntityConfirm: boolean;
-  setShowRepairEntityConfirm: (value: boolean) => void;
-  showRepairRelationConfirm: boolean;
-  setShowRepairRelationConfirm: (value: boolean) => void;
-  showRepairTopicConfirm: boolean;
-  setShowRepairTopicConfirm: (value: boolean) => void;
   isRegeneratingEmbeddings: boolean;
   setIsRegeneratingEmbeddings: (value: boolean) => void;
   regenerationProgress: {
@@ -79,7 +71,8 @@ export function useEmbeddingRegenerationState({
   entities,
   relations,
   topics,
-}: UseEmbeddingRegenerationStateProps): UseEmbeddingRegenerationStateReturn {
+  organizations = [],
+}: UseEmbeddingRegenerationStateProps & { organizations?: Array<{ id: string; name: string; title?: string; type?: string }> }): UseEmbeddingRegenerationStateReturn {
   // 埋め込み再生成のグローバル状態管理
   const { startRegeneration, updateProgress, completeRegeneration, cancelRegeneration } = useEmbeddingRegeneration();
   
@@ -104,10 +97,6 @@ export function useEmbeddingRegenerationState({
     totalTopics: 0,
   });
   const [isCountingMissing, setIsCountingMissing] = useState(false);
-  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
-  const [showRepairEntityConfirm, setShowRepairEntityConfirm] = useState(false);
-  const [showRepairRelationConfirm, setShowRepairRelationConfirm] = useState(false);
-  const [showRepairTopicConfirm, setShowRepairTopicConfirm] = useState(false);
   const [isRegeneratingEmbeddings, setIsRegeneratingEmbeddings] = useState(false);
   const [regenerationProgress, setRegenerationProgress] = useState<{
     current: number;
@@ -156,7 +145,304 @@ export function useEmbeddingRegenerationState({
     if (regenerationType !== 'missing') {
       return; // すべて再生成モードの場合は計算不要
     }
-    
+
+    // Supabase使用時は、ChromaDBとの実際の比較を使用（正確な方法）
+    if (process.env.NEXT_PUBLIC_USE_SUPABASE === 'true') {
+      setIsCountingMissing(true);
+      try {
+        console.log(`[updateMissingCountsOrganization] 開始: selectedOrgId=${selectedOrgId}, selectedType=${selectedType}`);
+        
+        const { compareEntityEmbeddings, compareRelationEmbeddings, compareTopicEmbeddings } = await import('@/lib/embeddingSync');
+        
+        // 全組織の場合は、各組織を個別に比較して合計
+        if (selectedOrgId === 'all') {
+          console.log('[updateMissingCountsOrganization] 全組織の比較を開始...');
+          
+          // 組織一覧を取得（organizationsが空の場合は、getAllOrganizationsFromTreeを使用）
+          let orgIds: string[] = [];
+          if (organizations && organizations.length > 0) {
+            orgIds = organizations
+              .filter(org => org.id && org.id !== 'all')
+              .map(org => org.id);
+          } else {
+            // organizationsが空の場合は、getAllOrganizationsFromTreeを使用
+            try {
+              const { getOrgTreeFromDb, getAllOrganizationsFromTree } = await import('@/lib/orgApi');
+              const orgTree = await getOrgTreeFromDb();
+              if (orgTree) {
+                const allOrgs = getAllOrganizationsFromTree(orgTree);
+                orgIds = allOrgs
+                  .filter(org => org.id && org.id !== 'all')
+                  .map(org => org.id);
+              }
+            } catch (error) {
+              console.error('[updateMissingCountsOrganization] 組織一覧の取得エラー:', error);
+            }
+          }
+          
+          console.log(`[updateMissingCountsOrganization] 対象組織数: ${orgIds.length}件`);
+          
+          if (orgIds.length === 0) {
+            console.warn('[updateMissingCountsOrganization] 組織が存在しません');
+            setMissingCounts({
+              entities: 0,
+              relations: 0,
+              topics: 0,
+              total: 0,
+              totalEntities: 0,
+              totalRelations: 0,
+              totalTopics: 0,
+            });
+            setIsCountingMissing(false);
+            return;
+          }
+          
+          // 各組織について比較処理を実行（並列処理、タイムアウト付き）
+          const comparisonPromises = orgIds.map(async (orgId) => {
+            try {
+              // タイムアウトを設定（各組織の比較に最大60秒）
+              const timeoutPromise = new Promise<{ entityComparison: any; relationComparison: any; topicComparison: any }>((_, reject) => {
+                setTimeout(() => reject(new Error(`組織 ${orgId} の比較がタイムアウトしました（60秒）`)), 60000);
+              });
+              
+              const comparisonPromise = Promise.all([
+                compareEntityEmbeddings(orgId).catch(() => ({ totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 })),
+                compareRelationEmbeddings(orgId).catch(() => ({ totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 })),
+                compareTopicEmbeddings(orgId).catch(() => ({ totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 })),
+              ]).then(([entityComparison, relationComparison, topicComparison]) => ({
+                entityComparison,
+                relationComparison,
+                topicComparison,
+              }));
+              
+              return await Promise.race([comparisonPromise, timeoutPromise]);
+            } catch (error) {
+              console.error(`[updateMissingCountsOrganization] 組織 ${orgId} の比較エラー:`, error);
+              return {
+                entityComparison: { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+                relationComparison: { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+                topicComparison: { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+              };
+            }
+          });
+          
+          // 全体のタイムアウトを設定（全組織の比較に最大5分）
+          const allComparisonsPromise = Promise.all(comparisonPromises);
+          const overallTimeoutPromise = new Promise<typeof allComparisonsPromise>((_, reject) => {
+            setTimeout(() => reject(new Error('全組織の比較がタイムアウトしました（5分）')), 300000);
+          });
+          
+          const allComparisons = await Promise.race([allComparisonsPromise, overallTimeoutPromise]).catch((error) => {
+            console.error('[updateMissingCountsOrganization] 全組織の比較エラー:', error);
+            // タイムアウトした場合は空の結果を返す
+            return orgIds.map(() => ({
+              entityComparison: { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+              relationComparison: { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+              topicComparison: { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+            }));
+          });
+          
+          // 結果を合計
+          let totalEntities = 0;
+          let totalRelations = 0;
+          let totalTopics = 0;
+          let missingEntities = 0;
+          let missingRelations = 0;
+          let missingTopics = 0;
+          
+          for (const comparison of allComparisons) {
+            totalEntities += comparison.entityComparison.totalInSupabase;
+            totalRelations += comparison.relationComparison.totalInSupabase;
+            totalTopics += comparison.topicComparison.totalInSupabase;
+            missingEntities += comparison.entityComparison.missingInChromaDB.length;
+            missingRelations += comparison.relationComparison.missingInChromaDB.length;
+            missingTopics += comparison.topicComparison.missingInChromaDB.length;
+          }
+          
+          // タイプフィルタリングを適用
+          let entities = missingEntities;
+          let relations = missingRelations;
+          let topics = missingTopics;
+          let finalTotalEntities = totalEntities;
+          let finalTotalRelations = totalRelations;
+          let finalTotalTopics = totalTopics;
+          
+          if (selectedType === 'entities') {
+            relations = 0;
+            topics = 0;
+            finalTotalRelations = 0;
+            finalTotalTopics = 0;
+          } else if (selectedType === 'relations') {
+            entities = 0;
+            topics = 0;
+            finalTotalEntities = 0;
+            finalTotalTopics = 0;
+          } else if (selectedType === 'topics') {
+            entities = 0;
+            relations = 0;
+            finalTotalEntities = 0;
+            finalTotalRelations = 0;
+          }
+          
+          console.log('[updateMissingCountsOrganization] 全組織の比較結果:', {
+            entities: `${entities}件 / ${finalTotalEntities}件`,
+            relations: `${relations}件 / ${finalTotalRelations}件`,
+            topics: `${topics}件 / ${finalTotalTopics}件`,
+            total: `${entities + relations + topics}件`,
+          });
+          
+          setMissingCounts({
+            entities,
+            relations,
+            topics,
+            total: entities + relations + topics,
+            totalEntities: finalTotalEntities,
+            totalRelations: finalTotalRelations,
+            totalTopics: finalTotalTopics,
+          });
+          
+          setIsCountingMissing(false);
+          return;
+        }
+
+        console.log(`[updateMissingCountsOrganization] 比較処理を開始: organizationId=${selectedOrgId}`);
+        
+        // 特定の組織の比較（タイムアウト付き）
+        const comparisonPromise = Promise.all([
+          compareEntityEmbeddings(selectedOrgId).catch((error) => {
+            console.error('[updateMissingCountsOrganization] エンティティ比較エラー:', error);
+            console.error('[updateMissingCountsOrganization] エラースタック:', error instanceof Error ? error.stack : String(error));
+            return { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 };
+          }),
+          compareRelationEmbeddings(selectedOrgId).catch((error) => {
+            console.error('[updateMissingCountsOrganization] リレーション比較エラー:', error);
+            console.error('[updateMissingCountsOrganization] エラースタック:', error instanceof Error ? error.stack : String(error));
+            return { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 };
+          }),
+          compareTopicEmbeddings(selectedOrgId).catch((error) => {
+            console.error('[updateMissingCountsOrganization] トピック比較エラー:', error);
+            console.error('[updateMissingCountsOrganization] エラースタック:', error instanceof Error ? error.stack : String(error));
+            return { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 };
+          }),
+        ]);
+        
+        // タイムアウトを設定（最大2分）
+        const timeoutPromise = new Promise<typeof comparisonPromise>((_, reject) => {
+          setTimeout(() => reject(new Error('比較処理がタイムアウトしました（2分）')), 120000);
+        });
+        
+        const [entityComparison, relationComparison, topicComparison] = await Promise.race([
+          comparisonPromise,
+          timeoutPromise,
+        ]).catch((error) => {
+          console.error('[updateMissingCountsOrganization] 比較処理のタイムアウトまたはエラー:', error);
+          return [
+            { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+            { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+            { totalInSupabase: 0, totalInChromaDB: 0, missingInChromaDB: [], extraInChromaDB: [], synced: 0, errors: 0 },
+          ] as const;
+        });
+        
+        console.log(`[updateMissingCountsOrganization] 比較結果:`, {
+          entities: {
+            totalInSupabase: entityComparison.totalInSupabase,
+            missingInChromaDB: entityComparison.missingInChromaDB.length,
+          },
+          relations: {
+            totalInSupabase: relationComparison.totalInSupabase,
+            missingInChromaDB: relationComparison.missingInChromaDB.length,
+          },
+          topics: {
+            totalInSupabase: topicComparison.totalInSupabase,
+            missingInChromaDB: topicComparison.missingInChromaDB.length,
+          },
+        });
+
+        // タイプフィルタリングを適用
+        let entities = entityComparison.missingInChromaDB.length;
+        let relations = relationComparison.missingInChromaDB.length;
+        let topics = topicComparison.missingInChromaDB.length;
+        let totalEntities = entityComparison.totalInSupabase;
+        let totalRelations = relationComparison.totalInSupabase;
+        let totalTopics = topicComparison.totalInSupabase;
+
+        if (selectedType === 'entities') {
+          relations = 0;
+          topics = 0;
+          totalRelations = 0;
+          totalTopics = 0;
+        } else if (selectedType === 'relations') {
+          entities = 0;
+          topics = 0;
+          totalEntities = 0;
+          totalTopics = 0;
+        } else if (selectedType === 'topics') {
+          entities = 0;
+          relations = 0;
+          totalEntities = 0;
+          totalRelations = 0;
+        }
+
+        setMissingCounts({
+          entities,
+          relations,
+          topics,
+          total: entities + relations + topics,
+          totalEntities,
+          totalRelations,
+          totalTopics,
+        });
+
+        console.log('[updateMissingCountsOrganization] Supabase/ChromaDB比較結果:', {
+          entities: `${entities}件 / ${totalEntities}件`,
+          relations: `${relations}件 / ${totalRelations}件`,
+          topics: `${topics}件 / ${totalTopics}件`,
+          total: `${entities + relations + topics}件`,
+        });
+        
+        setMissingCounts({
+          entities,
+          relations,
+          topics,
+          total: entities + relations + topics,
+          totalEntities,
+          totalRelations,
+          totalTopics,
+        });
+        
+        console.log('[updateMissingCountsOrganization] missingCountsを更新しました:', {
+          entities,
+          relations,
+          topics,
+          total: entities + relations + topics,
+          totalEntities,
+          totalRelations,
+          totalTopics,
+        });
+        setIsCountingMissing(false);
+        return;
+      } catch (error) {
+        console.error('[updateMissingCountsOrganization] Supabase/ChromaDB比較エラー:', error);
+        console.error('[updateMissingCountsOrganization] エラーの詳細:', error instanceof Error ? error.stack : String(error));
+        setMissingCounts({
+          entities: 0,
+          relations: 0,
+          topics: 0,
+          total: 0,
+          totalEntities: 0,
+          totalRelations: 0,
+          totalTopics: 0,
+        });
+        setIsCountingMissing(false);
+        return;
+      } finally {
+        // 念のため、finallyでも確実にfalseに設定
+        setIsCountingMissing(false);
+        console.log('[updateMissingCountsOrganization] 処理完了');
+      }
+    }
+
+    // SQLite使用時は従来の方法（chromaSyncedフラグを使用）
     setIsCountingMissing(true);
     
     try {
@@ -190,11 +476,25 @@ export function useEmbeddingRegenerationState({
       // エンティティの未生成件数をカウント（query_getで一括取得）
       if (selectedType === 'all' || selectedType === 'entities') {
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          const allEntityDocs = await callTauriCommand('query_get', {
-            collectionName: 'entities',
-            conditions: selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {},
-          }) as Array<{ id: string; data: any }>;
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          let allEntityDocs: Array<{ id: string; data: any }> = [];
+          
+          if (useSupabase) {
+            // Supabase経由で取得
+            const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+            const results = await queryGetViaDataSource('entities', selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {});
+            allEntityDocs = results.map((r: any) => ({
+              id: r.id || r.data?.id,
+              data: r.data || r,
+            }));
+          } else {
+            // SQLite経由で取得
+            const { callTauriCommand } = await import('@/lib/localFirebase');
+            allEntityDocs = await callTauriCommand('query_get', {
+              collectionName: 'entities',
+              conditions: selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {},
+            }) as Array<{ id: string; data: any }>;
+          }
           
           totalEntityCount = allEntityDocs.length;
           console.log(`📊 [未生成件数計算] 全エンティティ数: ${totalEntityCount}件`);
@@ -239,11 +539,25 @@ export function useEmbeddingRegenerationState({
       } else {
         // エンティティが選択されていない場合でも、全体件数は取得
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          const allEntityDocs = await callTauriCommand('query_get', {
-            collectionName: 'entities',
-            conditions: selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {},
-          }) as Array<{ id: string; data: any }>;
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          let allEntityDocs: Array<{ id: string; data: any }> = [];
+          
+          if (useSupabase) {
+            // Supabase経由で取得
+            const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+            const results = await queryGetViaDataSource('entities', selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {});
+            allEntityDocs = results.map((r: any) => ({
+              id: r.id || r.data?.id,
+              data: r.data || r,
+            }));
+          } else {
+            // SQLite経由で取得
+            const { callTauriCommand } = await import('@/lib/localFirebase');
+            allEntityDocs = await callTauriCommand('query_get', {
+              collectionName: 'entities',
+              conditions: selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {},
+            }) as Array<{ id: string; data: any }>;
+          }
           totalEntityCount = allEntityDocs.length;
         } catch (error) {
           // エラーは無視
@@ -253,11 +567,25 @@ export function useEmbeddingRegenerationState({
       // リレーションの未生成件数をカウント
       if (selectedType === 'all' || selectedType === 'relations') {
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          const allRelationDocs = await callTauriCommand('query_get', {
-            collectionName: 'relations',
-            conditions: {},
-          }) as Array<{ id: string; data: any }>;
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          let allRelationDocs: Array<{ id: string; data: any }> = [];
+          
+          if (useSupabase) {
+            // Supabase経由で取得
+            const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+            const results = await queryGetViaDataSource('relations', {});
+            allRelationDocs = results.map((r: any) => ({
+              id: r.id || r.data?.id,
+              data: r.data || r,
+            }));
+          } else {
+            // SQLite経由で取得
+            const { callTauriCommand } = await import('@/lib/localFirebase');
+            allRelationDocs = await callTauriCommand('query_get', {
+              collectionName: 'relations',
+              conditions: {},
+            }) as Array<{ id: string; data: any }>;
+          }
           
           totalRelationCount = allRelationDocs.length;
           console.log(`📊 [未生成件数計算] 全リレーション数: ${totalRelationCount}件`);
@@ -308,11 +636,25 @@ export function useEmbeddingRegenerationState({
       } else {
         // リレーションが選択されていない場合でも、全体件数は取得
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          const allRelationDocs = await callTauriCommand('query_get', {
-            collectionName: 'relations',
-            conditions: {},
-          }) as Array<{ id: string; data: any }>;
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          let allRelationDocs: Array<{ id: string; data: any }> = [];
+          
+          if (useSupabase) {
+            // Supabase経由で取得
+            const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+            const results = await queryGetViaDataSource('relations', {});
+            allRelationDocs = results.map((r: any) => ({
+              id: r.id || r.data?.id,
+              data: r.data || r,
+            }));
+          } else {
+            // SQLite経由で取得
+            const { callTauriCommand } = await import('@/lib/localFirebase');
+            allRelationDocs = await callTauriCommand('query_get', {
+              collectionName: 'relations',
+              conditions: {},
+            }) as Array<{ id: string; data: any }>;
+          }
           totalRelationCount = allRelationDocs.length;
         } catch (error) {
           // エラーは無視
@@ -322,12 +664,26 @@ export function useEmbeddingRegenerationState({
       // トピックの未生成件数をカウント
       if (selectedType === 'all' || selectedType === 'topics') {
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          // すべてのトピックを取得（組織フィルタリングは後で行う）
-          const allTopicDocs = await callTauriCommand('query_get', {
-            collectionName: 'topics',
-            conditions: {},
-          }) as Array<{ id: string; data: any }>;
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          let allTopicDocs: Array<{ id: string; data: any }> = [];
+          
+          if (useSupabase) {
+            // Supabase経由で取得
+            const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+            const results = await queryGetViaDataSource('topics', {});
+            allTopicDocs = results.map((r: any) => ({
+              id: r.id || r.data?.id,
+              data: r.data || r,
+            }));
+          } else {
+            // SQLite経由で取得
+            const { callTauriCommand } = await import('@/lib/localFirebase');
+            // すべてのトピックを取得（組織フィルタリングは後で行う）
+            allTopicDocs = await callTauriCommand('query_get', {
+              collectionName: 'topics',
+              conditions: {},
+            }) as Array<{ id: string; data: any }>;
+          }
           
           // 組織フィルタリング
           let filteredTopicDocs = allTopicDocs;
@@ -405,11 +761,25 @@ export function useEmbeddingRegenerationState({
       } else {
         // トピックが選択されていない場合でも、全体件数は取得
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          const allTopicDocs = await callTauriCommand('query_get', {
-            collectionName: 'topics',
-            conditions: selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {},
-          }) as Array<{ id: string; data: any }>;
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          let allTopicDocs: Array<{ id: string; data: any }> = [];
+          
+          if (useSupabase) {
+            // Supabase経由で取得
+            const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+            const results = await queryGetViaDataSource('topics', selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {});
+            allTopicDocs = results.map((r: any) => ({
+              id: r.id || r.data?.id,
+              data: r.data || r,
+            }));
+          } else {
+            // SQLite経由で取得
+            const { callTauriCommand } = await import('@/lib/localFirebase');
+            allTopicDocs = await callTauriCommand('query_get', {
+              collectionName: 'topics',
+              conditions: selectedOrgId !== 'all' ? { organizationId: selectedOrgId } : {},
+            }) as Array<{ id: string; data: any }>;
+          }
           totalTopicCount = allTopicDocs.length;
         } catch (error) {
           // エラーは無視
@@ -465,14 +835,6 @@ export function useEmbeddingRegenerationState({
     setMissingCounts,
     isCountingMissing,
     setIsCountingMissing,
-    showCleanupConfirm,
-    setShowCleanupConfirm,
-    showRepairEntityConfirm,
-    setShowRepairEntityConfirm,
-    showRepairRelationConfirm,
-    setShowRepairRelationConfirm,
-    showRepairTopicConfirm,
-    setShowRepairTopicConfirm,
     isRegeneratingEmbeddings,
     setIsRegeneratingEmbeddings,
     regenerationProgress,

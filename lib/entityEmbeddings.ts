@@ -304,10 +304,23 @@ export async function batchUpdateEntityEmbeddings(
         
         if (!forceRegenerate) {
           try {
-            const entityDoc = await callTauriCommand('doc_get', {
-              collectionName: 'entities',
-              docId: entityId,
-            });
+            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+            let entityDoc: any = null;
+            
+            if (useSupabase) {
+              // Supabase経由で取得
+              const { getDocViaDataSource } = await import('./dataSourceAdapter');
+              const entityData = await getDocViaDataSource('entities', entityId);
+              if (entityData) {
+                entityDoc = { exists: true, data: entityData };
+              }
+            } else {
+              // SQLite経由で取得
+              entityDoc = await callTauriCommand('doc_get', {
+                collectionName: 'entities',
+                docId: entityId,
+              });
+            }
             
             if (entityDoc?.exists && entityDoc?.data) {
               const chromaSynced = entityDoc.data.chromaSynced;
@@ -321,12 +334,15 @@ export async function batchUpdateEntityEmbeddings(
                     return { status: 'skipped' as const };
                   } else {
                     try {
-                      await callTauriCommand('update_chroma_sync_status', {
-                        entityType: 'entity',
-                        entityId: entityId,
-                        synced: false,
-                        error: 'ChromaDBに有効な埋め込みが存在しないため再生成',
-                      });
+                      // Supabase使用時はupdate_chroma_sync_statusをスキップ
+                      if (!useSupabase) {
+                        await callTauriCommand('update_chroma_sync_status', {
+                          entityType: 'entity',
+                          entityId: entityId,
+                          synced: false,
+                          error: 'ChromaDBに有効な埋め込みが存在しないため再生成',
+                        });
+                      }
                     } catch (resetError) {
                       console.warn(`chromaSyncedフラグのリセットエラー:`, resetError);
                     }
@@ -336,8 +352,9 @@ export async function batchUpdateEntityEmbeddings(
                 }
               }
             }
-          } catch (sqliteError: any) {
-            // SQLiteからの取得に失敗した場合は続行
+          } catch (error: any) {
+            // データ取得に失敗した場合は続行
+            console.warn(`エンティティ取得エラー（続行）: ${entityId}`, error?.message);
           }
         }
         
@@ -373,12 +390,16 @@ export async function batchUpdateEntityEmbeddings(
         console.error(`エンティティ ${entityId} の埋め込み生成エラー:`, errorMessage);
         
         try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'entity',
-            entityId: entityId,
-            synced: false,
-            error: errorMessage,
-          });
+          // Supabase使用時はupdate_chroma_sync_statusをスキップ
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          if (!useSupabase) {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'entity',
+              entityId: entityId,
+              synced: false,
+              error: errorMessage,
+            });
+          }
         } catch (syncStatusError) {
           console.warn(`エラーメッセージの保存に失敗しました: ${entityId}`, syncStatusError);
         }

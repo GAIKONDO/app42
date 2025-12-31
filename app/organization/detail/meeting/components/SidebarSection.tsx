@@ -17,6 +17,7 @@ interface SidebarSectionProps {
   onAddItem: (tab: MonthTab, e: React.MouseEvent) => void;
   onMoveItemUp: (tab: TabType, itemId: string) => void;
   onMoveItemDown: (tab: TabType, itemId: string) => void;
+  showSummary: boolean;
 }
 
 export default function SidebarSection({
@@ -32,6 +33,7 @@ export default function SidebarSection({
   onAddItem,
   onMoveItemUp,
   onMoveItemDown,
+  showSummary,
 }: SidebarSectionProps) {
   const [isReorderMode, setIsReorderMode] = useState(false);
 
@@ -120,47 +122,49 @@ export default function SidebarSection({
             </div>
           </div>
           <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
-            <li>
-                <a
-                  href={`#${currentSummaryId || 'summary'}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (currentSummaryId) {
-                      onSetActiveSection(currentSummaryId);
-                    }
-                  }}
-                  style={{
-                    display: 'block',
-                    padding: '12px 16px 12px 32px',
-                    textDecoration: 'none',
-                    color: activeSection === currentSummaryId ? '#FFFFFF' : '#475569',
-                    borderRadius: '8px',
-                    transition: 'all 0.2s ease',
-                    cursor: 'pointer',
-                    fontWeight: activeSection === currentSummaryId ? '600' : '500',
-                    marginBottom: '6px',
-                    backgroundColor: activeSection === currentSummaryId ? '#0066CC' : 'transparent',
-                    fontSize: '14px',
-                    letterSpacing: '0.2px',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (activeSection !== currentSummaryId) {
-                      e.currentTarget.style.backgroundColor = '#EFF6FF';
-                      e.currentTarget.style.color = '#0066CC';
-                      e.currentTarget.style.transform = 'translateX(4px)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (activeSection !== currentSummaryId) {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = '#475569';
-                      e.currentTarget.style.transform = 'translateX(0)';
-                    }
-                  }}
-                >
-                  サマリ
-                </a>
-            </li>
+            {showSummary && (
+              <li>
+                  <a
+                    href={`#${currentSummaryId || 'summary'}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentSummaryId) {
+                        onSetActiveSection(currentSummaryId);
+                      }
+                    }}
+                    style={{
+                      display: 'block',
+                      padding: '12px 16px 12px 32px',
+                      textDecoration: 'none',
+                      color: activeSection === currentSummaryId ? '#FFFFFF' : '#475569',
+                      borderRadius: '8px',
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer',
+                      fontWeight: activeSection === currentSummaryId ? '600' : '500',
+                      marginBottom: '6px',
+                      backgroundColor: activeSection === currentSummaryId ? '#0066CC' : 'transparent',
+                      fontSize: '14px',
+                      letterSpacing: '0.2px',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (activeSection !== currentSummaryId) {
+                        e.currentTarget.style.backgroundColor = '#EFF6FF';
+                        e.currentTarget.style.color = '#0066CC';
+                        e.currentTarget.style.transform = 'translateX(4px)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (activeSection !== currentSummaryId) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#475569';
+                        e.currentTarget.style.transform = 'translateX(0)';
+                      }
+                    }}
+                  >
+                    サマリ
+                  </a>
+              </li>
+            )}
             {currentTabData.items?.map((item, index) => (
               <li key={item.id}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

@@ -216,8 +216,15 @@ export async function getTopicEmbeddingFromChroma(
     };
 
     return embedding;
-  } catch (error) {
-    console.error('ChromaDBからのトピック埋め込み取得エラー:', error);
+  } catch (error: any) {
+    // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合はエラーをログに出力しない
+    const errorMessage = error?.message || String(error || '');
+    if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+        !errorMessage.includes('no such table') &&
+        !errorMessage.includes('Database error')) {
+      // 予期しないエラーのみログに出力
+      console.error('ChromaDBからのトピック埋め込み取得エラー:', error);
+    }
     return null;
   }
 }
@@ -245,11 +252,99 @@ export async function findSimilarTopicsChroma(
       throw new Error(`埋め込みベクトルの次元数が一致しません。期待値: 1536, 実際: ${queryEmbedding.length}`);
     }
 
+    // organizationIdが未指定の場合、Supabaseから組織IDのリストを取得
+    let finalOrganizationId: string | undefined = organizationId;
+    if (!finalOrganizationId) {
+      try {
+        // シンプルにorganizationsテーブルから組織IDのリストを取得
+        const { getDataSourceInstance } = await import('./dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // タイムアウトを設定（3秒）
+        const orgsPromise = dataSource.collection_get('organizations');
+        const timeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), 3000);
+        });
+        
+        const orgs = await Promise.race([orgsPromise, timeoutPromise]);
+        
+        console.log('[findSimilarTopicsChroma] 組織データ取得結果:', {
+          hasOrgs: !!orgs,
+          isArray: Array.isArray(orgs),
+          length: Array.isArray(orgs) ? orgs.length : 0,
+        });
+        
+        if (orgs && Array.isArray(orgs) && orgs.length > 0) {
+          // 組織IDのリストを抽出
+          const orgIds = orgs.map((org: any) => org.id).filter((id: string) => id);
+          
+          console.log('[findSimilarTopicsChroma] 抽出した組織ID:', {
+            count: orgIds.length,
+            sample: orgIds.slice(0, 5),
+          });
+          
+          if (orgIds.length > 0) {
+            // 複数の組織がある場合、各組織に対して個別に検索を実行
+            console.log(`[findSimilarTopicsChroma] 全組織横断検索: ${orgIds.length}件の組織を検索します`);
+          
+          const allResults: Array<{ topicId: string; meetingNoteId?: string; regulationId?: string; similarity: number; title?: string; contentSummary?: string; organizationId?: string }> = [];
+            const searchPromises = orgIds.map(async (orgId: string) => {
+              try {
+                const orgResults = await callTauriCommand('chromadb_find_similar_topics', {
+                  queryEmbedding,
+                  limit,
+                  organizationId: orgId,
+                }) as Array<{
+                topic_id: string;
+                meeting_note_id?: string | null;
+                regulation_id?: string | null;
+                similarity: number;
+                title: string;
+                content_summary: string;
+                organization_id?: string | null;
+              }>;
+              
+              return orgResults.map((result) => ({
+                topicId: result.topic_id,
+                meetingNoteId: result.meeting_note_id || undefined,
+                regulationId: result.regulation_id || undefined,
+                similarity: result.similarity,
+                title: result.title,
+                contentSummary: result.content_summary,
+                organizationId: result.organization_id || undefined,
+              }));
+              } catch (error) {
+                console.warn(`[findSimilarTopicsChroma] 組織 ${orgId} の検索エラー:`, error);
+                return [];
+              }
+            });
+            
+            const resultsArray = await Promise.all(searchPromises);
+            for (const results of resultsArray) {
+              allResults.push(...results);
+            }
+            
+            // 類似度でソートして上位limit件を返す
+            allResults.sort((a, b) => b.similarity - a.similarity);
+            const finalResults = allResults.slice(0, limit);
+            
+            console.log(`[findSimilarTopicsChroma] 全組織横断検索結果: ${finalResults.length}件`);
+            return finalResults;
+          }
+        }
+        
+        console.warn('[findSimilarTopicsChroma] 組織が見つかりませんでした。organizationIdを未指定のまま検索を続行します。');
+      } catch (error) {
+        // エラーをログに出力しない（Supabaseエラーが大量に出力されるのを防ぐ）
+        console.debug('[findSimilarTopicsChroma] 組織IDの取得に失敗しました。organizationIdを未指定のまま検索を続行します:', error);
+      }
+    }
+
     // Rust側のTauriコマンドを呼び出し
     const results = await callTauriCommand('chromadb_find_similar_topics', {
       queryEmbedding,
       limit,
-      organizationId: organizationId || undefined,
+      organizationId: finalOrganizationId || undefined,
     }) as Array<{
       topic_id: string;
       meeting_note_id?: string | null;
@@ -259,6 +354,25 @@ export async function findSimilarTopicsChroma(
       content_summary: string;
       organization_id?: string | null;
     }>;
+
+    console.log('[findSimilarTopicsChroma] ChromaDB検索結果:', {
+      resultType: Array.isArray(results) ? 'array' : typeof results,
+      resultLength: Array.isArray(results) ? results.length : 0,
+      organizationId: organizationId || 'all',
+      semanticCategory: semanticCategory || 'all',
+      limit,
+      sample: Array.isArray(results) && results.length > 0 ? results.slice(0, 3) : [],
+    });
+
+    // 結果が空の場合の警告
+    if (Array.isArray(results) && results.length === 0) {
+      console.warn('[findSimilarTopicsChroma] ⚠️ ChromaDBからの検索結果が空です。埋め込みが保存されていない可能性があります。');
+      if (organizationId) {
+        console.warn('[findSimilarTopicsChroma] 組織ID:', organizationId, 'の埋め込みを確認してください。');
+      } else {
+        console.warn('[findSimilarTopicsChroma] 全組織横断検索を実行しましたが、どの組織にも埋め込みが見つかりませんでした。');
+      }
+    }
 
     // 結果を変換
     let similarities = results.map((result) => {
@@ -289,6 +403,11 @@ export async function findSimilarTopicsChroma(
     if (semanticCategory) {
       console.warn('semanticCategoryでのフィルタリングはRust側で未対応のため、全ての結果を返します');
     }
+
+    console.log('[findSimilarTopicsChroma] 変換後の結果:', {
+      count: similarities.length,
+      sample: similarities.slice(0, 3),
+    });
 
     return similarities.slice(0, limit);
   } catch (error) {

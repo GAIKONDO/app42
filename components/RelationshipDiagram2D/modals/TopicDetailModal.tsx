@@ -192,6 +192,15 @@ export default function TopicDetailModal({
   // 元のコードは2820行目から4334行目までです
   
   return (
+    <>
+      {/* 保存中のオーバーレイ */}
+      {isSavingMetadata && (
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      )}
     <div
       style={{
         position: 'fixed',
@@ -226,31 +235,64 @@ export default function TopicDetailModal({
       >
         {/* TODO: 元のコードをここに移植します */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#1a1a1a', margin: 0 }}>
-            {selectedTopic.title}
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#1a1a1a', margin: 0 }}>
+              {selectedTopic.title}
+            </h2>
+            {isSavingMetadata && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                backgroundColor: '#FEF3C7',
+                color: '#92400E',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: 500,
+              }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: '12px',
+                  height: '12px',
+                  border: '2px solid #92400E',
+                  borderTopColor: 'transparent',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                }} />
+                <span>保存中...</span>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => {
+              if (isSavingMetadata) return; // 保存中は閉じられないようにする
               onClose();
               setPendingMetadata(null);
               setPendingEntities(null);
               setPendingRelations(null);
             }}
+            disabled={isSavingMetadata}
             style={{
               background: 'transparent',
               border: 'none',
               fontSize: '28px',
-              cursor: 'pointer',
-              color: '#6B7280',
+              cursor: isSavingMetadata ? 'not-allowed' : 'pointer',
+              color: isSavingMetadata ? '#D1D5DB' : '#6B7280',
               padding: '4px 8px',
               lineHeight: 1,
               transition: 'color 0.2s',
+              opacity: isSavingMetadata ? 0.5 : 1,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#1a1a1a';
+              if (!isSavingMetadata) {
+                e.currentTarget.style.color = '#1a1a1a';
+              }
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = '#6B7280';
+              if (!isSavingMetadata) {
+                e.currentTarget.style.color = '#6B7280';
+              }
             }}
           >
             ×
@@ -470,9 +512,10 @@ export default function TopicDetailModal({
                           });
                         }
                         
-                        if (onTopicMetadataSaved) {
-                          onTopicMetadataSaved();
-                        }
+                        // 注意: onTopicMetadataSavedは呼び出さない（保存後にサマリページに戻されるのを防ぐため）
+                        // if (onTopicMetadataSaved) {
+                        //   onTopicMetadataSaved();
+                        // }
                         
                         setIsEditingTopicDate(false);
                         alert('日時を保存しました');
@@ -696,8 +739,21 @@ export default function TopicDetailModal({
                   </select>
                 </label>
                 <button
-                  onClick={handleAIGenerateMetadata}
-                  disabled={isGeneratingMetadata}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('🔘 AIで一括メタデータ生成ボタンがクリックされました:', {
+                      selectedTopic: selectedTopic ? { id: selectedTopic.id, title: selectedTopic.title } : null,
+                      isGeneratingMetadata,
+                    });
+                    try {
+                      await handleAIGenerateMetadata();
+                    } catch (error: any) {
+                      console.error('❌ AIメタデータ生成ボタンクリック時のエラー:', error);
+                      alert(`エラーが発生しました: ${error?.message || String(error || '不明なエラー')}`);
+                    }
+                  }}
+                  disabled={isGeneratingMetadata || !selectedTopic}
                   style={{
                     padding: '6px 12px',
                     backgroundColor: isGeneratingMetadata ? '#9CA3AF' : '#3B82F6',
@@ -1872,6 +1928,7 @@ export default function TopicDetailModal({
         />
       )}
     </div>
+    </>
   );
 }
 

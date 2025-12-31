@@ -264,29 +264,45 @@ export async function getCategoryById(categoryId: string): Promise<Category | nu
 }
 
 /**
- * カテゴリーを保存（SQLiteに保存）
+ * カテゴリーを保存（SQLiteまたはSupabaseに保存）
  */
 export async function saveCategory(category: Partial<Category>): Promise<string> {
   try {
     const categoryId = category.id || generateUniqueCategoryId();
-    console.log('💾 [saveCategory] 開始（SQLiteに保存）:', { 
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`💾 [saveCategory] 開始（${useSupabase ? 'Supabase' : 'SQLite'}に保存）:`, { 
       categoryId, 
       title: category.title,
       hasId: !!category.id 
     });
     
+    const now = new Date().toISOString();
+    const categoryData: any = {
+      id: categoryId,
+      title: category.title || '',
+      description: category.description || '',
+      parentCategoryId: category.parentCategoryId || null,
+      position: category.position ?? null,
+      createdAt: category.createdAt || now,
+      updatedAt: now,
+    };
+    
+    // Supabase使用時はDataSource経由で保存
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        await setDocViaDataSource('categories', categoryId, categoryData);
+        console.log('✅ [saveCategory] カテゴリーを保存しました（Supabase経由）:', categoryId);
+        return categoryId;
+      } catch (error: any) {
+        console.error('❌ [saveCategory] Supabase保存エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
-      
-      const categoryData: any = {
-        id: categoryId,
-        title: category.title || '',
-        description: category.description || '',
-        parentCategoryId: category.parentCategoryId || null,
-        position: category.position ?? null,
-        createdAt: category.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
       
       await callTauriCommand('doc_set', {
         collectionName: 'categories',
@@ -298,9 +314,10 @@ export async function saveCategory(category: Partial<Category>): Promise<string>
       return categoryId;
     }
     
+    // その他の環境（API経由）
     const { apiPost, apiPut } = await import('../apiClient');
     
-    const categoryData: any = {
+    const apiCategoryData: any = {
       title: category.title || '',
       description: category.description || '',
       parentCategoryId: category.parentCategoryId || null,
@@ -311,10 +328,10 @@ export async function saveCategory(category: Partial<Category>): Promise<string>
     
     if (category.id) {
       console.log('📝 [saveCategory] 既存カテゴリーを更新:', categoryId);
-      savedCategory = await apiPut<Category>(`/api/categories/${categoryId}`, categoryData);
+      savedCategory = await apiPut<Category>(`/api/categories/${categoryId}`, apiCategoryData);
     } else {
       console.log('📝 [saveCategory] 新規カテゴリーを作成');
-      savedCategory = await apiPost<Category>('/api/categories', categoryData);
+      savedCategory = await apiPost<Category>('/api/categories', apiCategoryData);
     }
     
     console.log('✅ [saveCategory] カテゴリーを保存しました:', savedCategory.id);
@@ -326,12 +343,27 @@ export async function saveCategory(category: Partial<Category>): Promise<string>
 }
 
 /**
- * カテゴリーを削除（SQLiteから削除）
+ * カテゴリーを削除（SQLiteまたはSupabaseから削除）
  */
 export async function deleteCategory(categoryId: string): Promise<void> {
   try {
-    console.log('🗑️ [deleteCategory] 開始（SQLiteから削除）:', { categoryId });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🗑️ [deleteCategory] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から削除）:`, { categoryId });
     
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        await deleteDocViaDataSource('categories', categoryId);
+        console.log('✅ [deleteCategory] カテゴリーを削除しました（Supabase経由）:', categoryId);
+        return;
+      } catch (error: any) {
+        console.error('❌ [deleteCategory] Supabase削除エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -344,6 +376,7 @@ export async function deleteCategory(categoryId: string): Promise<void> {
       return;
     }
     
+    // その他の環境（API経由）
     const { apiDelete } = await import('../apiClient');
     
     await apiDelete(`/api/categories/${categoryId}`);

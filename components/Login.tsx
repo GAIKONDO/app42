@@ -8,7 +8,7 @@ const ADMIN_UID = 'PktGlRBWVZc9E0Y3OLSQ4TeRg0P2';
 
 export default function Login() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@example.com');
+  const [email, setEmail] = useState('gkondo@ctc-america.com');
   const [password, setPassword] = useState('admin123');
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState('');
@@ -47,7 +47,7 @@ export default function Login() {
         await signOut(null);
         
         // フォームをリセット（デフォルト値に戻す）
-        setEmail('admin@example.com');
+        setEmail('gkondo@ctc-america.com');
         setPassword('admin123');
         setIsSignUp(false);
         
@@ -74,8 +74,25 @@ export default function Login() {
             return;
           }
           // ログインエラーの処理
-          if (err.message?.includes('ログインエラー') || err.message?.includes('Query returned no rows')) {
-            setError('メールアドレスまたはパスワードが正しくありません。\n\nデフォルトユーザーでログインする場合:\n- メールアドレス: admin@example.com\n- パスワード: admin123\n\n新規登録が必要な場合は「新規登録はこちら」をクリックしてください。');
+          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          if (err.message?.includes('ログインエラー') || 
+              err.message?.includes('Query returned no rows') ||
+              err.message?.includes('Invalid login credentials') ||
+              err.message?.includes('invalid_credentials')) {
+            if (useSupabase) {
+              setError('メールアドレスまたはパスワードが正しくありません。\n\nSupabaseを使用している場合、ユーザーが登録されていない可能性があります。\n「新規登録はこちら」をクリックして、まずユーザーを登録してください。');
+            } else {
+              setError('メールアドレスまたはパスワードが正しくありません。\n\nデフォルトユーザーでログインする場合:\n- メールアドレス: admin@example.com\n- パスワード: admin123\n\n新規登録が必要な場合は「新規登録はこちら」をクリックしてください。');
+            }
+            setLoading(false);
+            return;
+          }
+          
+          // メール確認が必要な場合のエラー処理
+          if (err.message?.includes('Email not confirmed') || 
+              err.message?.includes('email_not_confirmed') ||
+              err.message?.includes('メール確認が必要')) {
+            setError(err.message || 'メール確認が必要です。登録時に送信されたメールを確認してください。\n\n開発環境では、Supabaseダッシュボードで「Authentication」→「Settings」→「Enable email confirmations」のチェックを外すか、ユーザーを手動で確認してください。');
             setLoading(false);
             return;
           }
@@ -155,7 +172,7 @@ export default function Login() {
                 setPassword('');
               } else {
                 // ログインモードに戻る場合は、デフォルト値を設定
-                setEmail('admin@example.com');
+                setEmail('gkondo@ctc-america.com');
                 setPassword('admin123');
               }
             }}
@@ -174,7 +191,7 @@ export default function Login() {
                 📋 サンプルアカウント
               </div>
               <div style={{ lineHeight: '1.6' }}>
-                <div><strong>メールアドレス:</strong> admin@example.com</div>
+                <div><strong>メールアドレス:</strong> gkondo@ctc-america.com</div>
                 <div><strong>パスワード:</strong> admin123</div>
               </div>
             </div>

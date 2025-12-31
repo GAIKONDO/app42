@@ -71,17 +71,87 @@ export function useFinderManagement(
 
   const handleEditSave = useCallback(async (orgId: string, newName: string) => {
     try {
+      devLog('🔄 [handleEditSave] 組織名を更新開始:', { orgId, newName });
+      
       await updateOrg(orgId, newName);
-      const tree = await getOrgTreeFromDb();
-      if (tree) {
-        setOrgData(tree);
-        const updatedPath = rebuildSelectedPath(finderSelectedPath, tree);
-        setFinderSelectedPath(updatedPath);
+      devLog('✅ [handleEditSave] 組織名の更新が完了しました');
+      
+      // Supabase使用時は、更新が反映されるまで少し待つ
+      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+      if (useSupabase) {
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
+      
+      // 組織ツリーを再取得（Supabase使用時は複数回試行）
+      let tree: OrgNodeData | null = null;
+      const maxAttempts = useSupabase ? 5 : 3;
+      let attempts = 0;
+      
+      while (attempts < maxAttempts && !tree) {
+        try {
+          tree = await getOrgTreeFromDb();
+          if (tree) {
+            // 更新された組織がツリーに含まれているか確認
+            const findUpdatedOrg = (node: OrgNodeData, targetId: string): OrgNodeData | null => {
+              if (node.id === targetId) return node;
+              if (node.children) {
+                for (const child of node.children) {
+                  const found = findUpdatedOrg(child, targetId);
+                  if (found) return found;
+                }
+              }
+              return null;
+            };
+            
+            const updatedOrg = findUpdatedOrg(tree, orgId);
+            if (updatedOrg && updatedOrg.name === newName) {
+              devLog('✅ [handleEditSave] 更新された組織をツリーで確認:', { orgId, newName });
+              break;
+            } else if (updatedOrg) {
+              devLog('⏳ [handleEditSave] 組織は見つかりましたが、名前がまだ更新されていません:', {
+                orgId,
+                expectedName: newName,
+                actualName: updatedOrg.name,
+                attempt: attempts + 1,
+              });
+              if (attempts < maxAttempts - 1) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+                tree = null;
+              }
+            }
+          }
+        } catch (getTreeError: any) {
+          console.warn(`⚠️ [handleEditSave] 組織ツリーの取得に失敗 (試行 ${attempts + 1}/${maxAttempts}):`, getTreeError);
+          if (attempts < maxAttempts - 1) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+        attempts++;
+      }
+      
+      if (!tree) {
+        // ツリーの取得に失敗した場合でも、編集モードを終了
+        console.warn('⚠️ [handleEditSave] 組織ツリーの取得に失敗しましたが、編集モードを終了します。');
+        setEditingOrgId(null);
+        setEditingOrgName('');
+        await tauriAlert('組織名は更新されましたが、表示の更新に時間がかかっています。ページをリロードしてください。');
+        return;
+      }
+      
+      setOrgData(tree);
+      const updatedPath = rebuildSelectedPath(finderSelectedPath, tree);
+      setFinderSelectedPath(updatedPath);
       setEditingOrgId(null);
       setEditingOrgName('');
+      
+      devLog('✅ [handleEditSave] 組織名の更新処理が完了しました');
     } catch (error: any) {
-      await tauriAlert(`組織名の更新に失敗しました: ${error.message || error}`);
+      console.error('❌ [handleEditSave] 組織名の更新に失敗しました:', error);
+      const errorMessage = error?.response?.data?.error || error?.message || String(error);
+      await tauriAlert(`組織名の更新に失敗しました: ${errorMessage}`);
+      // エラーが発生しても編集モードを終了（ユーザーが再度編集できるように）
+      setEditingOrgId(null);
+      setEditingOrgName('');
     }
   }, [finderSelectedPath, rebuildSelectedPath, setOrgData, setFinderSelectedPath, setEditingOrgId, setEditingOrgName]);
 
@@ -137,44 +207,65 @@ export function useFinderManagement(
       });
       
       // データベースの更新を待つために、複数回再取得を試みる
+      // Supabase使用時は、リアルタイム更新が反映されるまで時間がかかる可能性があるため、待機時間を長めにする
+      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+      const waitTime = useSupabase ? 500 : 300; // Supabase使用時は500ms、SQLite使用時は300ms
+      const maxAttempts = useSupabase ? 10 : 5; // Supabase使用時は最大10回、SQLite使用時は最大5回
+      
       let tree: OrgNodeData | null = null;
       let attempts = 0;
-      const maxAttempts = 5;
       
       while (attempts < maxAttempts && !tree) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-        tree = await getOrgTreeFromDb();
+        await new Promise(resolve => setTimeout(resolve, waitTime));
         
-        if (tree) {
-          const findNewOrg = (node: OrgNodeData, targetId: string): OrgNodeData | null => {
-            if (node.id === targetId) return node;
-            if (node.children) {
-              for (const child of node.children) {
-                const found = findNewOrg(child, targetId);
-                if (found) return found;
-              }
-            }
-            return null;
-          };
+        try {
+          tree = await getOrgTreeFromDb();
           
-          const foundOrg = findNewOrg(tree, result.id);
-          if (foundOrg) {
-            console.log('✅ [onCreateOrg] 作成された組織をツリーで確認:', result.id);
-            break;
-          } else {
-            console.log(`⏳ [onCreateOrg] 組織がまだツリーに反映されていません (試行 ${attempts + 1}/${maxAttempts})`);
-            tree = null;
+          if (tree) {
+            const findNewOrg = (node: OrgNodeData, targetId: string): OrgNodeData | null => {
+              if (node.id === targetId) return node;
+              if (node.children) {
+                for (const child of node.children) {
+                  const found = findNewOrg(child, targetId);
+                  if (found) return found;
+                }
+              }
+              return null;
+            };
+            
+            const foundOrg = findNewOrg(tree, result.id);
+            if (foundOrg) {
+              console.log(`✅ [onCreateOrg] 作成された組織をツリーで確認 (試行 ${attempts + 1}/${maxAttempts}):`, result.id);
+              break;
+            } else {
+              console.log(`⏳ [onCreateOrg] 組織がまだツリーに反映されていません (試行 ${attempts + 1}/${maxAttempts})`);
+              tree = null;
+            }
           }
+        } catch (getTreeError: any) {
+          console.warn(`⚠️ [onCreateOrg] 組織ツリーの取得に失敗 (試行 ${attempts + 1}/${maxAttempts}):`, getTreeError);
+          // エラーが発生しても再試行を続ける
         }
+        
         attempts++;
       }
       
+      // 最後にもう一度取得を試みる
       if (!tree) {
-        tree = await getOrgTreeFromDb();
+        try {
+          tree = await getOrgTreeFromDb();
+        } catch (finalError: any) {
+          console.error('❌ [onCreateOrg] 最終的な組織ツリーの取得に失敗:', finalError);
+        }
       }
       
       if (!tree) {
-        throw new Error('組織ツリーの取得に失敗しました。');
+        // ツリーの取得に失敗した場合でも、作成された組織の情報を使って処理を続行
+        console.warn('⚠️ [onCreateOrg] 組織ツリーの取得に失敗しましたが、作成された組織の情報を使用して処理を続行します。');
+        // エラーを投げずに、作成された組織の情報を使って処理を続行
+        // ただし、ツリーが取得できない場合は、ユーザーに警告を表示
+        await tauriAlert('組織は作成されましたが、表示の更新に時間がかかっています。ページをリロードしてください。');
+        return;
       }
       
       console.log('✅ [onCreateOrg] 組織ツリーを更新:', tree);

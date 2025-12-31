@@ -58,17 +58,18 @@ export function useEntityRelationManagement({
         setIsLoadingEntities(true);
         setIsLoadingRelations(true);
 
-        // エンティティを読み込み
-        const entities = await getEntitiesByOrganizationId(organizationId);
-        // トピックに関連するエンティティをフィルタリング
         const topicEmbeddingId = `${meetingId}-topic-${editingTopicId}`;
+        
+        // エンティティとリレーションを並列で取得（パフォーマンス最適化）
+        const [entities, relations] = await Promise.all([
+          getEntitiesByOrganizationId(organizationId),
+          getRelationsByTopicId(topicEmbeddingId),
+        ]);
+        
+        // トピックに関連するエンティティをフィルタリング
         const topicEntities = entities.filter(e => 
           e.metadata && typeof e.metadata === 'object' && 'topicId' in e.metadata && e.metadata.topicId === editingTopicId
         );
-        setTopicEntities(topicEntities);
-
-        // リレーションを読み込み（topicEmbeddingIdを使用）
-        const relations = await getRelationsByTopicId(topicEmbeddingId);
         setTopicRelations(relations);
         
         // リレーションに関連するエンティティも取得
@@ -78,22 +79,23 @@ export function useEntityRelationManagement({
           if (r.targetEntityId) relationEntityIds.add(r.targetEntityId);
         });
         
-        // エンティティを取得して追加
-        const relationEntities: Entity[] = [];
-        for (const entityId of relationEntityIds) {
-          try {
-            const entity = await getEntityById(entityId);
-            if (entity && !topicEntities.find(e => e.id === entityId)) {
-              relationEntities.push(entity);
-            }
-          } catch (error) {
-            devWarn(`⚠️ エンティティ取得エラー (${entityId}):`, error);
-          }
-        }
+        // エンティティを並列で取得（パフォーマンス最適化）
+        const { getEntitiesByIds } = await import('@/lib/entityApi');
+        const entityIdsArray = Array.from(relationEntityIds);
+        const relationEntities = entityIdsArray.length > 0
+          ? await getEntitiesByIds(entityIdsArray, 10) // 並列数制限: 10
+          : [];
+        
+        // トピック内のエンティティに含まれていないもののみ追加
+        const newRelationEntities = relationEntities.filter(
+          entity => !topicEntities.find(e => e.id === entity.id)
+        );
         
         // エンティティリストに追加
-        if (relationEntities.length > 0) {
-          setTopicEntities([...topicEntities, ...relationEntities]);
+        if (newRelationEntities.length > 0) {
+          setTopicEntities([...topicEntities, ...newRelationEntities]);
+        } else {
+          setTopicEntities(topicEntities);
         }
       } catch (error: any) {
         console.error('❌ ナレッジグラフ読み込みエラー:', error);

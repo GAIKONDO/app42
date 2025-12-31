@@ -163,26 +163,49 @@ export async function getVcs(): Promise<VC[]> {
 }
 
 /**
- * VCを保存（SQLiteに保存）
+ * VCを保存（SQLiteまたはSupabaseに保存）
  */
 export async function saveVc(vc: Partial<VC>): Promise<VC> {
   try {
-    console.log('💾 [saveVc] 開始:', { vcId: vc.id, title: vc.title });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`💾 [saveVc] 開始（${useSupabase ? 'Supabase' : 'SQLite'}に保存）:`, { vcId: vc.id, title: vc.title });
     
+    const vcId = vc.id || generateUniqueVcId();
+    const now = new Date().toISOString();
+    
+    const dataToSave: any = {
+      id: vcId,
+      title: vc.title || '',
+      description: vc.description || '',
+      position: vc.position ?? null,
+      createdAt: vc.createdAt || now,
+      updatedAt: now,
+    };
+    
+    // Supabase使用時はDataSource経由で保存
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        await setDocViaDataSource('vcs', vcId, dataToSave);
+        console.log('✅ [saveVc] 保存成功（Supabase経由）:', vcId);
+        
+        return {
+          id: vcId,
+          title: dataToSave.title,
+          description: dataToSave.description,
+          position: dataToSave.position,
+          createdAt: dataToSave.createdAt,
+          updatedAt: dataToSave.updatedAt,
+        };
+      } catch (error: any) {
+        console.error('❌ [saveVc] Supabase保存エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
-      
-      const vcId = vc.id || generateUniqueVcId();
-      const now = new Date().toISOString();
-      
-      const dataToSave: any = {
-        id: vcId,
-        title: vc.title || '',
-        description: vc.description || '',
-        position: vc.position ?? null,
-        createdAt: vc.createdAt || now,
-        updatedAt: now,
-      };
       
       await callTauriCommand('doc_set', {
         collectionName: 'vcs',
@@ -190,7 +213,7 @@ export async function saveVc(vc: Partial<VC>): Promise<VC> {
         data: dataToSave,
       });
       
-      console.log('✅ [saveVc] 保存成功:', vcId);
+      console.log('✅ [saveVc] 保存成功（Tauriコマンド経由）:', vcId);
       
       return {
         id: vcId,
@@ -202,6 +225,7 @@ export async function saveVc(vc: Partial<VC>): Promise<VC> {
       };
     }
     
+    // その他の環境（API経由）
     const { apiPost, apiPut } = await import('../apiClient');
     
     if (vc.id) {
@@ -218,12 +242,27 @@ export async function saveVc(vc: Partial<VC>): Promise<VC> {
 }
 
 /**
- * VCを削除（SQLiteから削除）
+ * VCを削除（SQLiteまたはSupabaseから削除）
  */
 export async function deleteVc(vcId: string): Promise<void> {
   try {
-    console.log('🗑️ [deleteVc] 開始:', { vcId });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🗑️ [deleteVc] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から削除）:`, { vcId });
     
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        await deleteDocViaDataSource('vcs', vcId);
+        console.log('✅ [deleteVc] 削除成功（Supabase経由）:', vcId);
+        return;
+      } catch (error: any) {
+        console.error('❌ [deleteVc] Supabase削除エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -232,10 +271,11 @@ export async function deleteVc(vcId: string): Promise<void> {
         docId: vcId,
       });
       
-      console.log('✅ [deleteVc] 削除成功:', vcId);
+      console.log('✅ [deleteVc] 削除成功（Tauriコマンド経由）:', vcId);
       return;
     }
     
+    // その他の環境（API経由）
     const { apiDelete } = await import('../apiClient');
     await apiDelete(`/api/vcs/${vcId}`);
   } catch (error: any) {
@@ -245,12 +285,42 @@ export async function deleteVc(vcId: string): Promise<void> {
 }
 
 /**
- * VCの順序を更新（SQLiteで更新）
+ * VCの順序を更新（SQLiteまたはSupabaseで更新）
  */
 export async function updateVcPositions(updates: { vcId: string; position: number }[]): Promise<void> {
   try {
-    console.log('🔄 [updateVcPositions] 開始:', updates.length, '件');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🔄 [updateVcPositions] 開始（${useSupabase ? 'Supabase' : 'SQLite'}で更新）:`, updates.length, '件');
     
+    // Supabase使用時はDataSource経由で更新
+    if (useSupabase) {
+      try {
+        const { getDocViaDataSource, setDocViaDataSource } = await import('../dataSourceAdapter');
+        
+        // 各VCのpositionを更新
+        for (const update of updates) {
+          const existingVc = await getDocViaDataSource('vcs', update.vcId);
+          
+          if (existingVc) {
+            const dataToUpdate = {
+              ...existingVc,
+              position: update.position,
+              updatedAt: new Date().toISOString(),
+            };
+            
+            await setDocViaDataSource('vcs', update.vcId, dataToUpdate);
+          }
+        }
+        
+        console.log('✅ [updateVcPositions] 更新成功（Supabase経由）');
+        return;
+      } catch (error: any) {
+        console.error('❌ [updateVcPositions] Supabase更新エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -276,10 +346,11 @@ export async function updateVcPositions(updates: { vcId: string; position: numbe
         }
       }
       
-      console.log('✅ [updateVcPositions] 更新成功');
+      console.log('✅ [updateVcPositions] 更新成功（Tauriコマンド経由）');
       return;
     }
     
+    // その他の環境（API経由）
     const { apiPost } = await import('../apiClient');
     await apiPost('/api/vcs/update-positions', { updates });
   } catch (error: any) {

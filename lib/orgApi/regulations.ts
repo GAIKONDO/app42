@@ -197,12 +197,63 @@ export async function getRegulationById(regulationId: string): Promise<Regulatio
       return null;
     }
     
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
+    // Supabase使用時はDataSource経由で取得（SQLiteにフォールバックしない）
+    if (useSupabase) {
+      try {
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        const data = await dataSource.doc_get('regulations', regulationId.trim());
+        
+        if (!data) {
+          console.warn('📖 [getRegulationById] データが見つかりませんでした（Supabase）');
+          return null;
+        }
+        
+        const regulation: Regulation = {
+          id: data.id || regulationId,
+          organizationId: data.organizationId || data.organizationid || '',
+          title: data.title || '',
+          description: data.description || '',
+          content: data.content || '',
+          createdAt: data.createdAt || data.createdat,
+          updatedAt: data.updatedAt || data.updatedat,
+        };
+        
+        console.log('📖 [getRegulationById] 変換後（Supabase）:', {
+          id: regulation.id,
+          title: regulation.title,
+          organizationId: regulation.organizationId,
+        });
+        
+        return regulation;
+      } catch (supabaseError: any) {
+        // Supabase取得エラーを処理（SQLiteにフォールバックしない）
+        const errorMessage = supabaseError?.message || String(supabaseError || '');
+        const isNoRowsError = errorMessage.includes('no rows') || 
+                              errorMessage.includes('Query returned no rows') ||
+                              errorMessage.includes('PGRST116') ||
+                              errorMessage.includes('ドキュメント取得エラー') ||
+                              errorMessage.includes('PGRST205') ||
+                              errorMessage.includes('Could not find the table');
+        
+        if (!isNoRowsError) {
+          console.warn('⚠️ [getRegulationById] Supabase経由の取得に失敗:', regulationId, supabaseError);
+        }
+        // Supabase使用時はSQLiteにフォールバックせず、nullを返す
+        return null;
+      }
+    }
+    
+    // SQLite使用時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
       const result = await callTauriCommand('doc_get', {
         collectionName: 'regulations',
-        docId: regulationId,
+        docId: regulationId.trim(),
       });
       
       console.log('📖 [getRegulationById] doc_get結果:', {

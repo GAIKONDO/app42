@@ -620,10 +620,28 @@ export async function getTopicImagePaths(
     }
     
     try {
-      const filesResult = await callTauriCommand('query_get', {
-        collectionName: 'topicFiles',
-        conditions: { topicId: actualTopicId },
-      });
+      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+      let filesResult: any[] = [];
+      
+      if (useSupabase) {
+        // Supabase経由で取得
+        const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+        const files = await getCollectionViaDataSource('topicFiles', {
+          filters: [{ field: 'topicid', operator: 'eq', value: actualTopicId }]
+        });
+        filesResult = files.map((file: any) => ({
+          id: file.id,
+          data: file
+        }));
+      } else {
+        // SQLite経由で取得
+        const { callTauriCommand } = await import('./localFirebase');
+        filesResult = await callTauriCommand('query_get', {
+          collectionName: 'topicFiles',
+          conditions: { topicId: actualTopicId },
+        }) as any[];
+      }
+      
       console.log('topicFilesテーブルからの取得結果:', filesResult); // デバッグ用
       if (filesResult && Array.isArray(filesResult) && filesResult.length > 0) {
         return filesResult.map((item: any) => {
@@ -667,18 +685,50 @@ export async function getTopicImagePaths(
           
           // ファイルパスまたはファイル名でtopicFilesテーブルを検索してIDを取得
           try {
-            // まず、topicIdとfilePathで検索
-            let fileResult = await callTauriCommand('query_get', {
-              collectionName: 'topicFiles',
-              conditions: { topicId, filePath },
-            });
+            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+            let fileResult: any[] = [];
             
-            // 見つからない場合、topicIdとfileNameで検索
-            if (!fileResult || !Array.isArray(fileResult) || fileResult.length === 0) {
+            if (useSupabase) {
+              // Supabase経由で取得
+              const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+              // まず、topicIdとfilePathで検索
+              let files = await getCollectionViaDataSource('topicFiles', {
+                filters: [
+                  { field: 'topicid', operator: 'eq', value: topicId },
+                  { field: 'filepath', operator: 'eq', value: filePath }
+                ]
+              });
+              
+              // 見つからない場合、topicIdとfileNameで検索
+              if (!files || files.length === 0) {
+                files = await getCollectionViaDataSource('topicFiles', {
+                  filters: [
+                    { field: 'topicid', operator: 'eq', value: topicId },
+                    { field: 'filename', operator: 'eq', value: fileName }
+                  ]
+                });
+              }
+              
+              fileResult = files.map((file: any) => ({
+                id: file.id,
+                data: file
+              }));
+            } else {
+              // SQLite経由で取得
+              const { callTauriCommand } = await import('./localFirebase');
+              // まず、topicIdとfilePathで検索
               fileResult = await callTauriCommand('query_get', {
                 collectionName: 'topicFiles',
-                conditions: { topicId, fileName },
-              });
+                conditions: { topicId, filePath },
+              }) as any[];
+              
+              // 見つからない場合、topicIdとfileNameで検索
+              if (!fileResult || !Array.isArray(fileResult) || fileResult.length === 0) {
+                fileResult = await callTauriCommand('query_get', {
+                  collectionName: 'topicFiles',
+                  conditions: { topicId, fileName },
+                }) as any[];
+              }
             }
             
             if (fileResult && Array.isArray(fileResult) && fileResult.length > 0) {
@@ -733,11 +783,27 @@ export async function getChildTopicFiles(
   parentTopicId: string
 ): Promise<Array<{ path: string; description?: string; detailedDescription?: string; id?: string; fileName?: string; mimeType?: string; fileSize?: number }>> {
   try {
-    // topicFilesテーブルから親トピックIDで検索
-    const filesResult = await callTauriCommand('query_get', {
-      collectionName: 'topicFiles',
-      conditions: { parentTopicId },
-    });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    let filesResult: any[] = [];
+    
+    if (useSupabase) {
+      // Supabase経由で取得
+      const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+      const files = await getCollectionViaDataSource('topicFiles', {
+        filters: [{ field: 'parenttopicid', operator: 'eq', value: parentTopicId }]
+      });
+      filesResult = files.map((file: any) => ({
+        id: file.id,
+        data: file
+      }));
+    } else {
+      // SQLite経由で取得
+      const { callTauriCommand } = await import('./localFirebase');
+      filesResult = await callTauriCommand('query_get', {
+        collectionName: 'topicFiles',
+        conditions: { parentTopicId },
+      }) as any[];
+    }
     
     if (filesResult && Array.isArray(filesResult) && filesResult.length > 0) {
       return filesResult.map((item: any) => {
@@ -928,22 +994,44 @@ export async function deleteTopicImage(
     // まず、topicFilesテーブルからファイルを検索して削除
     const actualTopicId = `${meetingNoteId}-topic-${topicId}`;
     try {
-      // ファイルパスでtopicFilesテーブルを検索
-      const filesResult = await callTauriCommand('query_get', {
-        collectionName: 'topicFiles',
-        conditions: { topicId: actualTopicId, filePath: imagePath },
-      });
+      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+      let filesResult: any[] = [];
       
-      if (filesResult && Array.isArray(filesResult) && filesResult.length > 0) {
+      if (useSupabase) {
+        // Supabase経由で取得
+        const { getCollectionViaDataSource, deleteDocViaDataSource } = await import('./dataSourceAdapter');
+        // ファイルパスでtopicFilesテーブルを検索
+        let files = await getCollectionViaDataSource('topicFiles', {
+          filters: [
+            { field: 'topicid', operator: 'eq', value: actualTopicId },
+            { field: 'filepath', operator: 'eq', value: imagePath }
+          ]
+        });
+        
+        if (!files || files.length === 0) {
+          // ファイル名でも検索を試みる
+          const fileName = imagePath.split('/').pop();
+          if (fileName) {
+            files = await getCollectionViaDataSource('topicFiles', {
+              filters: [
+                { field: 'topicid', operator: 'eq', value: actualTopicId },
+                { field: 'filename', operator: 'eq', value: fileName }
+              ]
+            });
+          }
+        }
+        
+        filesResult = files.map((file: any) => ({
+          id: file.id,
+          data: file
+        }));
+        
         // 見つかったファイルを削除
         for (const item of filesResult) {
           const fileId = item.id || (item.data && item.data.id);
           if (fileId) {
             try {
-              await callTauriCommand('doc_delete', {
-                collectionName: 'topicFiles',
-                docId: fileId,
-              });
+              await deleteDocViaDataSource('topicFiles', fileId);
               console.log('✅ [deleteTopicImage] topicFilesテーブルから削除しました: fileId=', fileId);
             } catch (e) {
               console.warn('⚠️ [deleteTopicImage] topicFilesテーブルからの削除に失敗しました:', e);
@@ -951,26 +1039,52 @@ export async function deleteTopicImage(
           }
         }
       } else {
-        // ファイル名でも検索を試みる
-        const fileName = imagePath.split('/').pop();
-        if (fileName) {
-          const filesResultByName = await callTauriCommand('query_get', {
-            collectionName: 'topicFiles',
-            conditions: { topicId: actualTopicId, fileName: fileName },
-          });
-          
-          if (filesResultByName && Array.isArray(filesResultByName) && filesResultByName.length > 0) {
-            for (const item of filesResultByName) {
-              const fileId = item.id || (item.data && item.data.id);
-              if (fileId) {
-                try {
-                  await callTauriCommand('doc_delete', {
-                    collectionName: 'topicFiles',
-                    docId: fileId,
-                  });
-                  console.log('✅ [deleteTopicImage] topicFilesテーブルから削除しました（ファイル名検索）: fileId=', fileId);
-                } catch (e) {
-                  console.warn('⚠️ [deleteTopicImage] topicFilesテーブルからの削除に失敗しました:', e);
+        // SQLite経由で取得
+        const { callTauriCommand } = await import('./localFirebase');
+        // ファイルパスでtopicFilesテーブルを検索
+        filesResult = await callTauriCommand('query_get', {
+          collectionName: 'topicFiles',
+          conditions: { topicId: actualTopicId, filePath: imagePath },
+        }) as any[];
+        
+        if (filesResult && Array.isArray(filesResult) && filesResult.length > 0) {
+          // 見つかったファイルを削除
+          for (const item of filesResult) {
+            const fileId = item.id || (item.data && item.data.id);
+            if (fileId) {
+              try {
+                await callTauriCommand('doc_delete', {
+                  collectionName: 'topicFiles',
+                  docId: fileId,
+                });
+                console.log('✅ [deleteTopicImage] topicFilesテーブルから削除しました: fileId=', fileId);
+              } catch (e) {
+                console.warn('⚠️ [deleteTopicImage] topicFilesテーブルからの削除に失敗しました:', e);
+              }
+            }
+          }
+        } else {
+          // ファイル名でも検索を試みる
+          const fileName = imagePath.split('/').pop();
+          if (fileName) {
+            const filesResultByName = await callTauriCommand('query_get', {
+              collectionName: 'topicFiles',
+              conditions: { topicId: actualTopicId, fileName: fileName },
+            }) as any[];
+            
+            if (filesResultByName && Array.isArray(filesResultByName) && filesResultByName.length > 0) {
+              for (const item of filesResultByName) {
+                const fileId = item.id || (item.data && item.data.id);
+                if (fileId) {
+                  try {
+                    await callTauriCommand('doc_delete', {
+                      collectionName: 'topicFiles',
+                      docId: fileId,
+                    });
+                    console.log('✅ [deleteTopicImage] topicFilesテーブルから削除しました（ファイル名検索）: fileId=', fileId);
+                  } catch (e) {
+                    console.warn('⚠️ [deleteTopicImage] topicFilesテーブルからの削除に失敗しました:', e);
+                  }
                 }
               }
             }

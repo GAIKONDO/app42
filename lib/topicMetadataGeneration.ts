@@ -1105,8 +1105,27 @@ ${entityList}
       return [];
     }
 
-    // エンティティ名からIDをマッピング
-    const entityMap = new Map(entities.map(e => [e.name, e.id]));
+    // エンティティ名からタイプ情報を除去する関数（例: "Merge (company)" → "Merge"）
+    const normalizeEntityName = (name: string): string => {
+      // 末尾のタイプ情報（例: "(company)", "(product)"など）を除去
+      return name.replace(/\s*\([^)]+\)\s*$/, '').trim();
+    };
+
+    // エンティティ名からIDをマッピング（大文字小文字を無視、タイプ情報も除去）
+    const entityMap = new Map<string, string>();
+    const entityNameToIdMap = new Map<string, string>(); // 大文字小文字を無視したマッピング
+    const normalizedEntityNameToIdMap = new Map<string, string>(); // タイプ情報を除去したマッピング
+    
+    entities.forEach(e => {
+      entityMap.set(e.name, e.id);
+      entityNameToIdMap.set(e.name.toLowerCase(), e.id);
+      // タイプ情報を除去した名前でもマッピング
+      const normalizedName = normalizeEntityName(e.name);
+      if (normalizedName !== e.name) {
+        normalizedEntityNameToIdMap.set(normalizedName.toLowerCase(), e.id);
+      }
+    });
+    
     console.log(`📊 エンティティマップ: ${entityMap.size}件`, Array.from(entityMap.keys()));
 
     // Relation型に変換（IDとタイムスタンプは後で付与）
@@ -1120,14 +1139,44 @@ ${entityList}
         return true;
       })
       .map((r: any) => {
-        const sourceId = entityMap.get(r.sourceEntityName);
-        const targetId = entityMap.get(r.targetEntityName);
+        // エンティティ名を正規化（タイプ情報を除去）
+        const normalizedSourceName = normalizeEntityName(r.sourceEntityName);
+        const normalizedTargetName = normalizeEntityName(r.targetEntityName);
+        
+        // まず正確な名前で検索、見つからない場合は正規化した名前で検索、最後に大文字小文字を無視して検索
+        let sourceId = entityMap.get(r.sourceEntityName);
+        let targetId = entityMap.get(r.targetEntityName);
+        
+        if (!sourceId) {
+          sourceId = entityMap.get(normalizedSourceName);
+        }
+        if (!targetId) {
+          targetId = entityMap.get(normalizedTargetName);
+        }
+        
+        if (!sourceId) {
+          sourceId = entityNameToIdMap.get(r.sourceEntityName?.toLowerCase() || '');
+        }
+        if (!targetId) {
+          targetId = entityNameToIdMap.get(r.targetEntityName?.toLowerCase() || '');
+        }
+        
+        if (!sourceId) {
+          sourceId = normalizedEntityNameToIdMap.get(normalizedSourceName.toLowerCase());
+        }
+        if (!targetId) {
+          targetId = normalizedEntityNameToIdMap.get(normalizedTargetName.toLowerCase());
+        }
 
         if (!sourceId || !targetId) {
           console.warn('⚠️ エンティティIDが見つかりません:', {
             sourceEntityName: r.sourceEntityName,
+            normalizedSourceName: normalizedSourceName,
             targetEntityName: r.targetEntityName,
+            normalizedTargetName: normalizedTargetName,
             availableEntities: Array.from(entityMap.keys()),
+            availableEntitiesLowercase: Array.from(entityNameToIdMap.keys()),
+            normalizedEntities: Array.from(normalizedEntityNameToIdMap.keys()),
           });
           return null;
         }

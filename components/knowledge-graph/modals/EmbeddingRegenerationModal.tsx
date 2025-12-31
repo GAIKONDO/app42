@@ -6,10 +6,9 @@ import type { TopicInfo } from '@/lib/orgApi';
 import { batchUpdateEntityEmbeddings } from '@/lib/entityEmbeddings';
 import { batchUpdateRelationEmbeddings } from '@/lib/relationEmbeddings';
 import { batchUpdateTopicEmbeddings } from '@/lib/topicEmbeddings';
+import { syncAllEmbeddings } from '@/lib/embeddingSync';
 import { callTauriCommand } from '@/lib/localFirebase';
 import RegenerationSettings from './components/RegenerationSettings';
-import DataIntegritySection from './components/DataIntegritySection';
-import ConfirmDialogs from './components/ConfirmDialogs';
 import RegenerationProgress from './components/RegenerationProgress';
 import { devLog, devWarn, devDebug } from './utils/devLog';
 
@@ -52,14 +51,6 @@ interface EmbeddingRegenerationModalProps {
   }>>;
   isCountingMissing: boolean;
   setIsCountingMissing: (value: boolean) => void;
-  showCleanupConfirm: boolean;
-  setShowCleanupConfirm: (value: boolean) => void;
-  showRepairEntityConfirm: boolean;
-  setShowRepairEntityConfirm: (value: boolean) => void;
-  showRepairRelationConfirm: boolean;
-  setShowRepairRelationConfirm: (value: boolean) => void;
-  showRepairTopicConfirm: boolean;
-  setShowRepairTopicConfirm: (value: boolean) => void;
   isRegeneratingEmbeddings: boolean;
   setIsRegeneratingEmbeddings: (value: boolean) => void;
   isCancelledRef: React.MutableRefObject<boolean>;
@@ -84,14 +75,6 @@ export default function EmbeddingRegenerationModal({
   setMissingCounts,
   isCountingMissing,
   setIsCountingMissing,
-  showCleanupConfirm,
-  setShowCleanupConfirm,
-  showRepairEntityConfirm,
-  setShowRepairEntityConfirm,
-  showRepairRelationConfirm,
-  setShowRepairRelationConfirm,
-  showRepairTopicConfirm,
-  setShowRepairTopicConfirm,
   isRegeneratingEmbeddings,
   setIsRegeneratingEmbeddings,
   isCancelledRef,
@@ -200,27 +183,7 @@ export default function EmbeddingRegenerationModal({
               updateMissingCountsOrganization={updateMissingCountsOrganization}
             />
             
-            <DataIntegritySection
-              setShowCleanupConfirm={setShowCleanupConfirm}
-              setShowRepairEntityConfirm={setShowRepairEntityConfirm}
-              setShowRepairRelationConfirm={setShowRepairRelationConfirm}
-              setShowRepairTopicConfirm={setShowRepairTopicConfirm}
-            />
-            
-            <ConfirmDialogs
-              showCleanupConfirm={showCleanupConfirm}
-              setShowCleanupConfirm={setShowCleanupConfirm}
-              showRepairEntityConfirm={showRepairEntityConfirm}
-              setShowRepairEntityConfirm={setShowRepairEntityConfirm}
-              showRepairRelationConfirm={showRepairRelationConfirm}
-              setShowRepairRelationConfirm={setShowRepairRelationConfirm}
-              showRepairTopicConfirm={showRepairTopicConfirm}
-              setShowRepairTopicConfirm={setShowRepairTopicConfirm}
-              regenerationType={regenerationType}
-              updateMissingCountsOrganization={updateMissingCountsOrganization}
-            />
-            
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
               <button
                 onClick={onClose}
                 style={{
@@ -296,10 +259,24 @@ export default function EmbeddingRegenerationModal({
                     if (topics.length === 0) {
                       try {
                         devLog(`📊 [埋め込み再生成] topicsプロップが空のため、query_getで直接取得します`);
-                        const allTopicDocs = await callTauriCommand('query_get', {
-                          collectionName: 'topics',
-                          conditions: selectedId !== 'all' ? { organizationId: selectedId } : {},
-                        }) as Array<{ id: string; data: any }>;
+                        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+                        let allTopicDocs: Array<{ id: string; data: any }> = [];
+                        
+                        if (useSupabase) {
+                          // Supabase経由で取得
+                          const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+                          const results = await queryGetViaDataSource('topics', selectedId !== 'all' ? { organizationId: selectedId } : {});
+                          allTopicDocs = results.map((r: any) => ({
+                            id: r.id || r.data?.id,
+                            data: r.data || r,
+                          }));
+                        } else {
+                          // SQLite経由で取得
+                          allTopicDocs = await callTauriCommand('query_get', {
+                            collectionName: 'topics',
+                            conditions: selectedId !== 'all' ? { organizationId: selectedId } : {},
+                          }) as Array<{ id: string; data: any }>;
+                        }
                         
                         // TopicInfo形式に変換
                         for (const doc of allTopicDocs) {
@@ -346,186 +323,220 @@ export default function EmbeddingRegenerationModal({
                       devLog(`📊 [埋め込み再生成] トピック内訳: Graphviz=${graphvizCount}件, 通常=${normalCount}件`);
                     }
 
-                    // 未生成のみの場合は、SQLiteのchromaSyncedフラグでフィルタリング
+                    // 未生成のみの場合は、ChromaDBに実際に埋め込みが存在するかどうかを確認
                     if (!forceRegenerate && regenerationType === 'missing') {
                       devLog(`🔍 [埋め込み再生成] 未生成のみモード: フィルタリング開始`);
                       devLog(`📊 [埋め込み再生成] フィルタリング前: エンティティ=${targetEntities.length}, リレーション=${targetRelations.length}, トピック=${targetTopics.length}`);
-                      const { callTauriCommand } = await import('@/lib/localFirebase');
                       
-                      // エンティティのフィルタリング（query_getで一括取得）
-                      if (selectedType === 'all' || selectedType === 'entities') {
-                        try {
-                          // すべてのエンティティを取得してから、chromaSyncedが0またはnullのものをフィルタリング
-                          const allEntityDocs = await callTauriCommand('query_get', {
-                            collectionName: 'entities',
-                            conditions: {},
-                          }) as Array<{ id: string; data: any }>;
-                          
-                          // chromaSyncedが0またはnullのエンティティをフィルタリング
-                          const missingEntityDocs = allEntityDocs.filter(doc => {
-                            const entityData = doc.data || doc;
-                            const chromaSyncedValue = entityData.chromaSynced;
-                            return chromaSyncedValue === 0 || chromaSyncedValue === null || chromaSyncedValue === undefined;
-                          });
-                          
-                          // query_getの結果は[{id: string, data: any}]の形式
-                          const missingEntityIds = new Set(missingEntityDocs.map(doc => doc.id || doc.data?.id));
-                          // targetEntitiesは既にcompanyIdを持つものを含むため、そのままフィルタリング
-                          const missingEntities = targetEntities.filter(entity => missingEntityIds.has(entity.id));
-                          
-                          // ループ内のログを簡略化（パフォーマンス最適化）
-                          devLog(`📊 [埋め込み再生成] エンティティフィルタリング後: ${missingEntities.length}件`);
-                          targetEntities = missingEntities;
-                        } catch (error) {
-                          devWarn(`⚠️ [埋め込み再生成] エンティティの一括取得エラー（個別チェックにフォールバック）:`, error);
-                          // フォールバック: 個別チェック
-                          const missingEntities: Entity[] = [];
-                          for (const entity of targetEntities) {
-                            try {
-                              const entityDoc = await callTauriCommand('doc_get', {
-                                collectionName: 'entities',
-                                docId: entity.id,
-                              }) as any;
+                      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+                      
+                      // Supabase使用時は、ChromaDBに実際に埋め込みが存在するかどうかを確認（モーダルの件数計算と同じ方法）
+                      if (useSupabase) {
+                        // エンティティのフィルタリング（ChromaDBに実際に埋め込みが存在するか確認）
+                        if (selectedType === 'all' || selectedType === 'entities') {
+                          try {
+                            const { getEntityEmbeddingFromChroma } = await import('@/lib/entityEmbeddingsChroma');
+                            const missingEntities: Entity[] = [];
+                            
+                            for (const entity of targetEntities) {
+                              if (!entity.organizationId) continue;
                               
-                              let chromaSynced = false;
-                              if (entityDoc?.exists && entityDoc?.data) {
-                                chromaSynced = entityDoc.data.chromaSynced === 1 || entityDoc.data.chromaSynced === true;
-                              }
-                              
-                              if (!chromaSynced) {
+                              try {
+                                const embedding = await getEntityEmbeddingFromChroma(entity.id, entity.organizationId);
+                                // 埋め込みが存在しない、または空の場合は未生成とみなす
+                                if (!embedding || !embedding.combinedEmbedding || !Array.isArray(embedding.combinedEmbedding) || embedding.combinedEmbedding.length === 0) {
+                                  missingEntities.push(entity);
+                                }
+                              } catch (error: any) {
+                                // エラーは埋め込みが存在しないとみなす
+                                const errorMessage = error?.message || String(error || '');
+                                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                                    !errorMessage.includes('no such table') &&
+                                    !errorMessage.includes('Database error')) {
+                                  // 予期しないエラーのみログに出力
+                                  devDebug(`エンティティ ${entity.id} のChromaDB確認エラー:`, error);
+                                }
                                 missingEntities.push(entity);
                               }
-                            } catch (err) {
-                              devDebug(`エンティティ ${entity.id} のフラグ確認エラー:`, err);
-                              missingEntities.push(entity);
                             }
+                            
+                            devLog(`📊 [埋め込み再生成] エンティティフィルタリング後: ${missingEntities.length}件`);
+                            targetEntities = missingEntities;
+                          } catch (error) {
+                            devWarn(`⚠️ [埋め込み再生成] エンティティのChromaDB確認エラー:`, error);
+                            // エラーが発生した場合は、すべてを未生成とみなす（安全側に倒す）
+                            // targetEntitiesはそのまま使用
                           }
-                          targetEntities = missingEntities;
                         }
-                      }
-                      
-                      // リレーションのフィルタリング（query_getで一括取得）
-                      if (selectedType === 'all' || selectedType === 'relations') {
-                        try {
-                          // すべてのリレーションを取得してから、chromaSyncedが0またはnullのものをフィルタリング
-                          const allRelationDocs = await callTauriCommand('query_get', {
-                            collectionName: 'relations',
-                            conditions: {},
-                          }) as Array<{ id: string; data: any }>;
-                          
-                          // chromaSyncedが0またはnullのリレーションをフィルタリング
-                          const missingRelationDocs = allRelationDocs.filter(doc => {
-                            const relationData = doc.data || doc;
-                            const chromaSyncedValue = relationData.chromaSynced;
-                            return chromaSyncedValue === 0 || chromaSyncedValue === null || chromaSyncedValue === undefined;
-                          });
-                          
-                          // query_getの結果は[{id: string, data: any}]の形式
-                          const missingRelationIds = new Set(missingRelationDocs.map(doc => doc.id || doc.data?.id));
-                          // targetRelationsは既にcompanyIdを持つものを含むため、そのままフィルタリング
-                          const missingRelations = targetRelations.filter(relation => missingRelationIds.has(relation.id));
-                          
-                          // ループ内のログを簡略化（パフォーマンス最適化）
-                          devLog(`📊 [埋め込み再生成] リレーションフィルタリング後: ${missingRelations.length}件`);
-                          targetRelations = missingRelations;
-                        } catch (error) {
-                          devWarn(`⚠️ [埋め込み再生成] リレーションの一括取得エラー（個別チェックにフォールバック）:`, error);
-                          // フォールバック: 個別チェック
-                          const missingRelations: Relation[] = [];
-                          for (const relation of targetRelations) {
-                            try {
-                              const relationDoc = await callTauriCommand('doc_get', {
-                                collectionName: 'relations',
-                                docId: relation.id,
-                              }) as any;
-                              
-                              let chromaSynced = false;
-                              if (relationDoc?.exists && relationDoc?.data) {
-                                chromaSynced = relationDoc.data.chromaSynced === 1 || relationDoc.data.chromaSynced === true;
+                        
+                        // リレーションのフィルタリング（ChromaDBに実際に埋め込みが存在するか確認）
+                        if (selectedType === 'all' || selectedType === 'relations') {
+                          try {
+                            const { getRelationEmbeddingFromChroma } = await import('@/lib/relationEmbeddingsChroma');
+                            const missingRelations: Relation[] = [];
+                            
+                            for (const relation of targetRelations) {
+                              // organizationIdを取得
+                              let organizationId = relation.organizationId;
+                              if (!organizationId) {
+                                const relatedEntity = entities.find(e => e.id === relation.sourceEntityId || e.id === relation.targetEntityId);
+                                organizationId = relatedEntity?.organizationId;
                               }
                               
-                              if (!chromaSynced) {
+                              if (!organizationId) continue;
+                              
+                              try {
+                                const embedding = await getRelationEmbeddingFromChroma(relation.id, organizationId);
+                                // 埋め込みが存在しない、または空の場合は未生成とみなす
+                                if (!embedding || !embedding.combinedEmbedding || !Array.isArray(embedding.combinedEmbedding) || embedding.combinedEmbedding.length === 0) {
+                                  missingRelations.push(relation);
+                                }
+                              } catch (error: any) {
+                                // エラーは埋め込みが存在しないとみなす
+                                const errorMessage = error?.message || String(error || '');
+                                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                                    !errorMessage.includes('no such table') &&
+                                    !errorMessage.includes('Database error')) {
+                                  // 予期しないエラーのみログに出力
+                                  devDebug(`リレーション ${relation.id} のChromaDB確認エラー:`, error);
+                                }
                                 missingRelations.push(relation);
                               }
-                            } catch (err) {
-                              devDebug(`リレーション ${relation.id} のフラグ確認エラー:`, err);
-                              missingRelations.push(relation);
                             }
+                            
+                            devLog(`📊 [埋め込み再生成] リレーションフィルタリング後: ${missingRelations.length}件`);
+                            targetRelations = missingRelations;
+                          } catch (error) {
+                            devWarn(`⚠️ [埋め込み再生成] リレーションのChromaDB確認エラー:`, error);
+                            // エラーが発生した場合は、すべてを未生成とみなす（安全側に倒す）
+                            // targetRelationsはそのまま使用
                           }
-                          targetRelations = missingRelations;
                         }
-                      }
-                      
-                      // トピックのフィルタリング（query_getで一括取得）
-                      if (selectedType === 'all' || selectedType === 'topics') {
-                        try {
-                          // すべてのトピックを取得してから、chromaSyncedが0またはnullのものをフィルタリング
-                          const allTopicDocs = await callTauriCommand('query_get', {
-                            collectionName: 'topics',
-                            conditions: selectedId !== 'all' ? { organizationId: selectedId } : {},
-                          }) as Array<{ id: string; data: any }>;
-                          
-                          // chromaSyncedが0またはnullのトピックをフィルタリング
-                          const missingTopicDocs = allTopicDocs.filter(doc => {
-                            const topicData = doc.data || doc;
-                            const chromaSyncedValue = topicData.chromaSynced;
-                            return chromaSyncedValue === 0 || chromaSyncedValue === null || chromaSyncedValue === undefined;
-                          });
-                          
-                          // SQLiteのtopicsテーブルのIDは`${meetingNoteId}-topic-${topicId}`形式
-                          // TopicInfoのIDは`topicId`のみなので、missingTopicDocsのIDからtopicIdを抽出して比較
-                          const missingTopicIdSet = new Set<string>();
-                          for (const doc of missingTopicDocs) {
-                            const topicId = doc.id || doc.data?.id;
-                            if (topicId) {
-                              // ID形式が`${meetingNoteId}-topic-${topicId}`の場合、topicIdを抽出
-                              const idMatch = topicId.match(/^(.+)-topic-(.+)$/);
-                              if (idMatch) {
-                                const extractedTopicId = idMatch[2];
-                                missingTopicIdSet.add(extractedTopicId);
-                                missingTopicIdSet.add(topicId); // 完全なIDも追加（念のため）
-                              } else {
-                                // 既にtopicIdのみの形式の場合
-                                missingTopicIdSet.add(topicId);
-                              }
-                            }
-                          }
-                          
-                          // targetTopicsのIDと比較
-                          const missingTopics = targetTopics.filter(topic => missingTopicIdSet.has(topic.id));
-                          
-                          // ループ内のログを簡略化（パフォーマンス最適化）
-                          devLog(`📊 [埋め込み再生成] トピックフィルタリング後: ${missingTopics.length}件`);
-                          targetTopics = missingTopics;
-                        } catch (error) {
-                          devWarn(`⚠️ [埋め込み再生成] トピックの一括取得エラー（個別チェックにフォールバック）:`, error);
-                          // フォールバック: 個別チェック
-                          const missingTopics: TopicInfo[] = [];
-                          for (const topic of targetTopics) {
-                            if (!topic.meetingNoteId || !topic.organizationId) continue;
-                            try {
-                              // SQLiteのtopicsテーブルのIDは`${meetingNoteId}-topic-${topicId}`形式
-                              const topicEmbeddingId = `${topic.meetingNoteId}-topic-${topic.id}`;
-                              const topicDoc = await callTauriCommand('doc_get', {
-                                collectionName: 'topics',
-                                docId: topicEmbeddingId,
-                              }) as any;
+                        
+                        // トピックのフィルタリング（ChromaDBに実際に埋め込みが存在するか確認）
+                        if (selectedType === 'all' || selectedType === 'topics') {
+                          try {
+                            const { getTopicEmbeddingFromChroma } = await import('@/lib/topicEmbeddingsChroma');
+                            const missingTopics: TopicInfo[] = [];
+                            
+                            for (const topic of targetTopics) {
+                              if (!topic.organizationId) continue;
                               
-                              let chromaSynced = false;
-                              if (topicDoc?.exists && topicDoc?.data) {
-                                const chromaSyncedValue = topicDoc.data.chromaSynced;
-                                chromaSynced = chromaSyncedValue === 1 || chromaSyncedValue === true || chromaSyncedValue === '1';
-                              }
-                              
-                              if (!chromaSynced) {
+                              try {
+                                const embedding = await getTopicEmbeddingFromChroma(topic.id, topic.organizationId);
+                                // 埋め込みが存在しない、または空の場合は未生成とみなす
+                                if (!embedding || !embedding.combinedEmbedding || !Array.isArray(embedding.combinedEmbedding) || embedding.combinedEmbedding.length === 0) {
+                                  missingTopics.push(topic);
+                                }
+                              } catch (error: any) {
+                                // エラーは埋め込みが存在しないとみなす
+                                const errorMessage = error?.message || String(error || '');
+                                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                                    !errorMessage.includes('no such table') &&
+                                    !errorMessage.includes('Database error')) {
+                                  // 予期しないエラーのみログに出力
+                                  devDebug(`トピック ${topic.id} のChromaDB確認エラー:`, error);
+                                }
                                 missingTopics.push(topic);
                               }
-                            } catch (err) {
-                              devDebug(`トピック ${topic.id} のフラグ確認エラー:`, err);
-                              missingTopics.push(topic);
                             }
+                            
+                            devLog(`📊 [埋め込み再生成] トピックフィルタリング後: ${missingTopics.length}件`);
+                            targetTopics = missingTopics;
+                          } catch (error) {
+                            devWarn(`⚠️ [埋め込み再生成] トピックのChromaDB確認エラー:`, error);
+                            // エラーが発生した場合は、すべてを未生成とみなす（安全側に倒す）
+                            // targetTopicsはそのまま使用
                           }
-                          targetTopics = missingTopics;
+                        }
+                      } else {
+                        // SQLite使用時は従来の方法（chromaSyncedフラグを使用）
+                        const { callTauriCommand } = await import('@/lib/localFirebase');
+                        
+                        // エンティティのフィルタリング（SQLiteのchromaSyncedフラグを使用）
+                        if (selectedType === 'all' || selectedType === 'entities') {
+                          try {
+                            const allEntityDocs = await callTauriCommand('query_get', {
+                              collectionName: 'entities',
+                              conditions: {},
+                            }) as Array<{ id: string; data: any }>;
+                            
+                            const missingEntityDocs = allEntityDocs.filter(doc => {
+                              const entityData = doc.data || doc;
+                              const chromaSyncedValue = entityData.chromaSynced;
+                              return chromaSyncedValue === 0 || chromaSyncedValue === null || chromaSyncedValue === undefined;
+                            });
+                            
+                            const missingEntityIds = new Set(missingEntityDocs.map(doc => doc.id || doc.data?.id));
+                            const missingEntities = targetEntities.filter(entity => missingEntityIds.has(entity.id));
+                            
+                            devLog(`📊 [埋め込み再生成] エンティティフィルタリング後: ${missingEntities.length}件`);
+                            targetEntities = missingEntities;
+                          } catch (error) {
+                            devWarn(`⚠️ [埋め込み再生成] エンティティの一括取得エラー:`, error);
+                          }
+                        }
+                        
+                        // リレーションのフィルタリング（SQLiteのchromaSyncedフラグを使用）
+                        if (selectedType === 'all' || selectedType === 'relations') {
+                          try {
+                            const allRelationDocs = await callTauriCommand('query_get', {
+                              collectionName: 'relations',
+                              conditions: {},
+                            }) as Array<{ id: string; data: any }>;
+                            
+                            const missingRelationDocs = allRelationDocs.filter(doc => {
+                              const relationData = doc.data || doc;
+                              const chromaSyncedValue = relationData.chromaSynced;
+                              return chromaSyncedValue === 0 || chromaSyncedValue === null || chromaSyncedValue === undefined;
+                            });
+                            
+                            const missingRelationIds = new Set(missingRelationDocs.map(doc => doc.id || doc.data?.id));
+                            const missingRelations = targetRelations.filter(relation => missingRelationIds.has(relation.id));
+                            
+                            devLog(`📊 [埋め込み再生成] リレーションフィルタリング後: ${missingRelations.length}件`);
+                            targetRelations = missingRelations;
+                          } catch (error) {
+                            devWarn(`⚠️ [埋め込み再生成] リレーションの一括取得エラー:`, error);
+                          }
+                        }
+                        
+                        // トピックのフィルタリング（SQLiteのchromaSyncedフラグを使用）
+                        if (selectedType === 'all' || selectedType === 'topics') {
+                          try {
+                            const allTopicDocs = await callTauriCommand('query_get', {
+                              collectionName: 'topics',
+                              conditions: selectedId !== 'all' ? { organizationId: selectedId } : {},
+                            }) as Array<{ id: string; data: any }>;
+                            
+                            const missingTopicDocs = allTopicDocs.filter(doc => {
+                              const topicData = doc.data || doc;
+                              const chromaSyncedValue = topicData.chromaSynced;
+                              return chromaSyncedValue === 0 || chromaSyncedValue === null || chromaSyncedValue === undefined;
+                            });
+                            
+                            const missingTopicIdSet = new Set<string>();
+                            for (const doc of missingTopicDocs) {
+                              const topicId = doc.id || doc.data?.id;
+                              if (topicId) {
+                                const idMatch = topicId.match(/^(.+)-topic-(.+)$/);
+                                if (idMatch) {
+                                  const extractedTopicId = idMatch[2];
+                                  missingTopicIdSet.add(extractedTopicId);
+                                  missingTopicIdSet.add(topicId);
+                                } else {
+                                  missingTopicIdSet.add(topicId);
+                                }
+                              }
+                            }
+                            
+                            const missingTopics = targetTopics.filter(topic => missingTopicIdSet.has(topic.id));
+                            
+                            devLog(`📊 [埋め込み再生成] トピックフィルタリング後: ${missingTopics.length}件`);
+                            targetTopics = missingTopics;
+                          } catch (error) {
+                            devWarn(`⚠️ [埋め込み再生成] トピックの一括取得エラー:`, error);
+                          }
                         }
                       }
                       

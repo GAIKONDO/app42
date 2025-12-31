@@ -414,6 +414,55 @@ export async function getMeetingNoteById(noteId: string): Promise<MeetingNote | 
       return null;
     }
     
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
+    // Supabase使用時は直接Supabaseから取得（パフォーマンス最適化）
+    if (useSupabase) {
+      try {
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // タイムアウトを設定（3秒）
+        const supabasePromise = dataSource.doc_get('meetingNotes', noteId.trim());
+        const timeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), 3000);
+        });
+        
+        const data = await Promise.race([supabasePromise, timeoutPromise]);
+        
+        if (data) {
+          console.log('📖 [getMeetingNoteById] Supabaseから取得したデータ:', data);
+          const note: MeetingNote = {
+            id: data.id || noteId,
+            organizationId: data.organizationId || data.organizationid || '',
+            companyId: data.companyId || data.companyid || undefined,
+            title: data.title || '',
+            description: data.description || '',
+            content: data.content || '',
+            createdAt: data.createdAt || data.createdat,
+            updatedAt: data.updatedAt || data.updatedat,
+          };
+          
+          console.log('📖 [getMeetingNoteById] 変換後:', {
+            id: note.id,
+            title: note.title,
+            description: note.description,
+            contentLength: note.content?.length || 0,
+            companyId: note.companyId,
+          });
+          return note;
+        }
+        
+        // データが見つからない、またはタイムアウトの場合はフォールバック
+        console.debug('📖 [getMeetingNoteById] Supabaseから取得できませんでした。Tauriコマンドにフォールバックします');
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error || '');
+        // エラーログを抑制（Load failedなどのネットワークエラーは正常なフォールバック）
+        console.debug('📖 [getMeetingNoteById] Supabase取得エラー（フォールバック）:', errorMessage);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
@@ -467,10 +516,11 @@ export async function getMeetingNoteById(noteId: string): Promise<MeetingNote | 
 /**
  * 議事録を削除
  * 関連するtopics、relationsも削除する
- * バッチ削除を使用して1つのトランザクションで実行（データベースロックを最小化）
+ * Supabase使用時はCASCADE制約により自動削除、SQLite使用時はバッチ削除を使用
  */
 export async function deleteMeetingNote(noteId: string): Promise<void> {
-  console.log('🗑️ [deleteMeetingNote] 開始（バッチ削除）:', noteId);
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  console.log(`🗑️ [deleteMeetingNote] 開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, noteId);
   
   const { callTauriCommand } = await import('../localFirebase');
   
@@ -495,59 +545,83 @@ export async function deleteMeetingNote(noteId: string): Promise<void> {
     console.warn('⚠️ [deleteMeetingNote] 議事録情報の取得エラー（ChromaDB削除用、続行します）:', error);
   }
   
-  try {
-    console.log('🗑️ [deleteMeetingNote] バッチ削除コマンドを呼び出します:', noteId);
-    await retryDbOperation(async () => {
-      const result = await callTauriCommand('delete_meeting_note_with_relations', {
-        noteId: noteId,
+  // Supabase使用時はDataSource経由で削除（CASCADE制約により関連データも自動削除）
+  if (useSupabase) {
+    try {
+      const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+      console.log('🗑️ [deleteMeetingNote] Supabase経由で削除します:', noteId);
+      await deleteDocViaDataSource('meetingNotes', noteId);
+      console.log(`✅ [deleteMeetingNote] 削除成功（Supabase）: ${noteId}`);
+    } catch (error: any) {
+      const errorMessage = error?.message || 
+                          error?.error || 
+                          (typeof error === 'string' ? error : String(error || ''));
+      console.error('❌ [deleteMeetingNote] Supabase削除失敗:', {
+        error,
+        errorMessage,
+        errorType: typeof error,
+        errorKeys: error ? Object.keys(error) : [],
+        noteId,
       });
-      console.log('✅ [deleteMeetingNote] バッチ削除成功:', noteId, result);
-      return result;
-    }, 5, 300);
-    
-    console.log(`✅ [deleteMeetingNote] 削除成功: ${noteId}`);
-  } catch (error: any) {
-    const errorMessage = error?.message || 
-                        error?.error || 
-                        error?.errorString || 
-                        (typeof error === 'string' ? error : String(error || ''));
-    
-    console.error('❌ [deleteMeetingNote] バッチ削除失敗:', {
-      error,
-      errorMessage,
-      errorType: typeof error,
-      errorKeys: error ? Object.keys(error) : [],
-      noteId,
-    });
-    
-    if (errorMessage.includes('database is locked') || errorMessage.includes('locked')) {
-      console.log('🔄 [deleteMeetingNote] データベースロック検出、1秒待機後に再試行...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      try {
-        await retryDbOperation(async () => {
-          const result = await callTauriCommand('delete_meeting_note_with_relations', {
-            noteId: noteId,
-          });
-          console.log('✅ [deleteMeetingNote] バッチ削除成功（再試行）:', noteId, result);
-          return result;
-        }, 5, 300);
-        console.log('✅ [deleteMeetingNote] 削除成功（再試行後）:', noteId);
-      } catch (retryError: any) {
-        const retryErrorMessage = retryError?.message || 
-                                 retryError?.error || 
-                                 String(retryError || '');
-        console.error('❌ [deleteMeetingNote] 再試行も失敗:', {
-          retryError,
-          retryErrorMessage,
-          noteId,
-        });
-        throw new Error(`議事録の削除に失敗しました（データベースロック）: ${retryErrorMessage || '不明なエラー'}`);
-      }
-    } else {
       throw new Error(`議事録の削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+    }
+  } else {
+    // SQLite使用時はバッチ削除コマンドを使用
+    try {
+      console.log('🗑️ [deleteMeetingNote] バッチ削除コマンドを呼び出します:', noteId);
+      await retryDbOperation(async () => {
+        const result = await callTauriCommand('delete_meeting_note_with_relations', {
+          noteId: noteId,
+        });
+        console.log('✅ [deleteMeetingNote] バッチ削除成功:', noteId, result);
+        return result;
+      }, 5, 300);
+      
+      console.log(`✅ [deleteMeetingNote] 削除成功: ${noteId}`);
+    } catch (error: any) {
+      const errorMessage = error?.message || 
+                          error?.error || 
+                          error?.errorString || 
+                          (typeof error === 'string' ? error : String(error || ''));
+      
+      console.error('❌ [deleteMeetingNote] バッチ削除失敗:', {
+        error,
+        errorMessage,
+        errorType: typeof error,
+        errorKeys: error ? Object.keys(error) : [],
+        noteId,
+      });
+      
+      if (errorMessage.includes('database is locked') || errorMessage.includes('locked')) {
+        console.log('🔄 [deleteMeetingNote] データベースロック検出、1秒待機後に再試行...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        try {
+          await retryDbOperation(async () => {
+            const result = await callTauriCommand('delete_meeting_note_with_relations', {
+              noteId: noteId,
+            });
+            console.log('✅ [deleteMeetingNote] バッチ削除成功（再試行）:', noteId, result);
+            return result;
+          }, 5, 300);
+          console.log('✅ [deleteMeetingNote] 削除成功（再試行後）:', noteId);
+        } catch (retryError: any) {
+          const retryErrorMessage = retryError?.message || 
+                                   retryError?.error || 
+                                   String(retryError || '');
+          console.error('❌ [deleteMeetingNote] 再試行も失敗:', {
+            retryError,
+            retryErrorMessage,
+            noteId,
+          });
+          throw new Error(`議事録の削除に失敗しました（データベースロック）: ${retryErrorMessage || '不明なエラー'}`);
+        }
+      } else {
+        throw new Error(`議事録の削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+      }
     }
   }
   
+  // ChromaDBからも削除（非同期、エラーは無視）
   if (meetingNote && topicEmbeddings.length > 0) {
     (async () => {
       try {

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { RelationshipNode, RelationshipLink } from '@/components/RelationshipDiagram2D';
-import type { Theme, FocusInitiative, TopicInfo } from '@/lib/orgApi';
+import type { Theme, FocusInitiative, TopicInfo, Startup } from '@/lib/orgApi';
 import type { OrgNodeData } from '@/lib/orgApi';
 import { devLog, devWarn } from '../utils/devLog';
 
@@ -10,6 +10,7 @@ export function useRelationshipDiagramData({
   selectedThemeId,
   themes,
   initiatives,
+  startups,
   orgData,
   topics,
   selectedTypeFilter,
@@ -17,6 +18,7 @@ export function useRelationshipDiagramData({
   selectedThemeId: string | null;
   themes: Theme[];
   initiatives: FocusInitiative[];
+  startups: Startup[];
   orgData: OrgNodeData | null;
   topics: TopicInfo[];
   selectedTypeFilter: 'all' | 'organization' | 'company' | 'person';
@@ -28,6 +30,7 @@ export function useRelationshipDiagramData({
       hasOrgData: !!orgData,
       themesCount: themes.length,
       initiativesCount: initiatives.length,
+      startupsCount: startups.length,
       topicsCount: topics.length,
     });
 
@@ -84,6 +87,29 @@ export function useRelationshipDiagramData({
         (Array.isArray(init.themeIds) && init.themeIds.includes(theme.id))
       );
 
+      // テーマに関連するスタートアップをフィルタリング
+      const relatedStartups = startups.filter((startup) => {
+        // themeIdまたはthemeIdsで関連付けられているスタートアップを取得
+        if (startup.themeId === theme.id) {
+          return true;
+        }
+        if (Array.isArray(startup.themeIds) && startup.themeIds.includes(theme.id)) {
+          return true;
+        }
+        // themeIdsが文字列（JSON）の場合もパースしてチェック
+        if (typeof startup.themeIds === 'string') {
+          try {
+            const parsed = JSON.parse(startup.themeIds);
+            if (Array.isArray(parsed) && parsed.includes(theme.id)) {
+              return true;
+            }
+          } catch (e) {
+            // パースエラーは無視
+          }
+        }
+        return false;
+      });
+
       const organizationIds = new Set<string>();
       relatedInitiatives.forEach((init) => {
         if (init.organizationId) {
@@ -91,6 +117,23 @@ export function useRelationshipDiagramData({
         }
         if (Array.isArray((init as any).relatedOrganizations)) {
           (init as any).relatedOrganizations.forEach((orgId: string) => {
+            if (orgId) {
+              organizationIds.add(orgId);
+            }
+          });
+        }
+      });
+      
+      // スタートアップの組織IDも追加
+      relatedStartups.forEach((startup) => {
+        if (startup.organizationId) {
+          organizationIds.add(startup.organizationId);
+        }
+        if (startup.companyId) {
+          organizationIds.add(startup.companyId);
+        }
+        if (Array.isArray(startup.relatedOrganizations)) {
+          startup.relatedOrganizations.forEach((orgId: string) => {
             if (orgId) {
               organizationIds.add(orgId);
             }
@@ -233,6 +276,49 @@ export function useRelationshipDiagramData({
           }
         }
       });
+
+      // スタートアップノードを追加
+      relatedStartups.forEach((startup) => {
+        const startupNodeId = `${theme.id}_${startup.id}`;
+        
+        diagramNodes.push({
+          id: startupNodeId,
+          label: startup.title,
+          type: 'startup',
+          data: { ...startup, originalId: startup.id, themeId: theme.id },
+        });
+
+        // テーマからスタートアップへのリンク
+        diagramLinks.push({
+          source: theme.id,
+          target: startupNodeId,
+          type: 'startup',
+        });
+
+        // スタートアップから組織へのリンク
+        if (startup.organizationId) {
+          const orgNodeId = `${theme.id}_${startup.organizationId}`;
+          const orgNodeExists = diagramNodes.find(n => n.id === orgNodeId);
+          if (orgNodeExists) {
+            diagramLinks.push({
+              source: orgNodeId,
+              target: startupNodeId,
+              type: 'branch',
+            });
+          }
+        }
+        if (startup.companyId) {
+          const companyNodeId = `${theme.id}_${startup.companyId}`;
+          const companyNodeExists = diagramNodes.find(n => n.id === companyNodeId);
+          if (companyNodeExists) {
+            diagramLinks.push({
+              source: companyNodeId,
+              target: startupNodeId,
+              type: 'branch',
+            });
+          }
+        }
+      });
     });
 
     const topicNodes = diagramNodes.filter(n => n.type === 'topic');
@@ -275,7 +361,7 @@ export function useRelationshipDiagramData({
     });
 
     return { nodes: diagramNodes, links: validLinks };
-  }, [selectedThemeId, themes, initiatives, orgData, topics, selectedTypeFilter]);
+  }, [selectedThemeId, themes, initiatives, startups, orgData, topics, selectedTypeFilter]);
 
   return { nodes, links };
 }

@@ -1,6 +1,6 @@
 {
   "productName": "Network",
-  "version": "2.1.3",
+  "version": "4.0.0",
   "identifier": "com.network.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri://localhost http://localhost:3020 http://127.0.0.1:3020; connect-src 'self' tauri://localhost ipc://localhost http://localhost:3020 http://localhost:3010 http://localhost:11434 http://127.0.0.1:3020 http://127.0.0.1:3010 http://127.0.0.1:11434 ws://localhost:* ws://127.0.0.1:* https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.ollama.ai https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3020 http://127.0.0.1:3020 https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' http://localhost:3020 http://127.0.0.1:3020 https://cdn.jsdelivr.net; img-src 'self' data: https: file: tauri://localhost http://localhost:3020 http://127.0.0.1:3020; font-src 'self' data: tauri://localhost http://localhost:3020 http://127.0.0.1:3020 https://cdn.jsdelivr.net;"
+      "csp": "default-src 'self' tauri://localhost http://localhost:3020 http://127.0.0.1:3020 https://*.supabase.co; connect-src 'self' tauri://localhost ipc://localhost http://localhost:3020 http://localhost:3010 http://localhost:11434 http://127.0.0.1:3020 http://127.0.0.1:3010 http://127.0.0.1:11434 ws://localhost:* ws://127.0.0.1:* wss://*.supabase.co https://*.supabase.co https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.ollama.ai https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3020 http://127.0.0.1:3020 https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' http://localhost:3020 http://127.0.0.1:3020 https://cdn.jsdelivr.net; img-src 'self' data: https: file: tauri://localhost http://localhost:3020 http://127.0.0.1:3020; font-src 'self' data: tauri://localhost http://localhost:3020 http://127.0.0.1:3020 https://cdn.jsdelivr.net;"
     }
   },
   "bundle": {

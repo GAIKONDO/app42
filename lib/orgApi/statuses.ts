@@ -2,12 +2,74 @@ import type { Status } from './types';
 import { generateUniqueStatusId } from './utils';
 
 /**
- * 全ステータスを取得（SQLiteから取得）
+ * 全ステータスを取得（SQLiteまたはSupabaseから取得）
  */
 export async function getStatuses(): Promise<Status[]> {
   try {
-    console.log('📖 [getStatuses] 開始（SQLiteから取得）');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getStatuses] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        const result = await getCollectionViaDataSource('statuses');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const resultArray = Array.isArray(result) ? result : [];
+        
+        const statuses: Status[] = resultArray.map((item: any) => {
+          // Supabaseから取得したデータは直接オブジェクト形式
+          const itemId = item.id;
+          const data = item;
+          
+          // createdAtとupdatedAtがFirestoreのTimestamp形式の場合、ISO文字列に変換
+          let createdAt: any = null;
+          let updatedAt: any = null;
+          
+          if (data.createdAt) {
+            if (data.createdAt.seconds) {
+              createdAt = new Date(data.createdAt.seconds * 1000).toISOString();
+            } else if (typeof data.createdAt === 'string') {
+              createdAt = data.createdAt;
+            }
+          }
+          
+          if (data.updatedAt) {
+            if (data.updatedAt.seconds) {
+              updatedAt = new Date(data.updatedAt.seconds * 1000).toISOString();
+            } else if (typeof data.updatedAt === 'string') {
+              updatedAt = data.updatedAt;
+            }
+          }
+          
+          return {
+            id: itemId,
+            title: data.title || '',
+            description: data.description || '',
+            position: data.position ?? null,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+          };
+        }).filter((status: Status) => status.id && status.title);
+        
+        // positionでソート
+        statuses.sort((a, b) => {
+          const posA = a.position ?? 999999;
+          const posB = b.position ?? 999999;
+          return posA - posB;
+        });
+        
+        console.log('✅ [getStatuses] 取得成功（Supabaseから取得）:', statuses.length, '件');
+        return statuses;
+      } catch (error: any) {
+        console.error('❌ [getStatuses] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getStatuses] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -143,10 +205,11 @@ export async function getStatusById(statusId: string): Promise<Status | null> {
 }
 
 /**
- * ステータスを保存
+ * ステータスを保存（SQLiteまたはSupabaseに保存）
  */
 export async function saveStatus(status: Partial<Status> & { title: string }): Promise<Status> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
     const now = new Date().toISOString();
     const statusId = status.id || generateUniqueStatusId();
     
@@ -159,6 +222,20 @@ export async function saveStatus(status: Partial<Status> & { title: string }): P
       updatedAt: now,
     };
     
+    // Supabase使用時はDataSource経由で保存
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        await setDocViaDataSource('statuses', statusId, statusData);
+        console.log('✅ [saveStatus] 保存成功（Supabase経由）:', statusId);
+        return statusData;
+      } catch (error: any) {
+        console.error('❌ [saveStatus] Supabase保存エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -169,7 +246,7 @@ export async function saveStatus(status: Partial<Status> & { title: string }): P
           data: statusData,
         });
         
-        console.log('✅ [saveStatus] 保存成功:', statusId);
+        console.log('✅ [saveStatus] 保存成功（Tauriコマンド経由）:', statusId);
         return statusData;
       } catch (error: any) {
         console.error('❌ [saveStatus] Tauriコマンドエラー:', error);
@@ -177,6 +254,7 @@ export async function saveStatus(status: Partial<Status> & { title: string }): P
       }
     }
     
+    // その他の環境（API経由）
     const { apiPost, apiPut } = await import('../apiClient');
     if (status.id) {
       await apiPut(`/api/statuses/${statusId}`, statusData);
@@ -192,10 +270,27 @@ export async function saveStatus(status: Partial<Status> & { title: string }): P
 }
 
 /**
- * ステータスを削除
+ * ステータスを削除（SQLiteまたはSupabaseから削除）
  */
 export async function deleteStatus(statusId: string): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🗑️ [deleteStatus] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から削除）:`, { statusId });
+    
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        await deleteDocViaDataSource('statuses', statusId);
+        console.log('✅ [deleteStatus] 削除成功（Supabase経由）:', statusId);
+        return;
+      } catch (error: any) {
+        console.error('❌ [deleteStatus] Supabase削除エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -205,15 +300,17 @@ export async function deleteStatus(statusId: string): Promise<void> {
           docId: statusId,
         });
         
-        console.log('✅ [deleteStatus] 削除成功:', statusId);
+        console.log('✅ [deleteStatus] 削除成功（Tauriコマンド経由）:', statusId);
+        return;
       } catch (error: any) {
         console.error('❌ [deleteStatus] Tauriコマンドエラー:', error);
         throw error;
       }
-    } else {
-      const { apiDelete } = await import('../apiClient');
-      await apiDelete(`/api/statuses/${statusId}`);
     }
+    
+    // その他の環境（API経由）
+    const { apiDelete } = await import('../apiClient');
+    await apiDelete(`/api/statuses/${statusId}`);
   } catch (error: any) {
     console.error('❌ [deleteStatus] エラー:', error);
     throw error;
@@ -221,10 +318,39 @@ export async function deleteStatus(statusId: string): Promise<void> {
 }
 
 /**
- * ステータスの順序を更新
+ * ステータスの順序を更新（SQLiteまたはSupabaseで更新）
  */
 export async function updateStatusPositions(statuses: Status[]): Promise<void> {
   try {
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🔄 [updateStatusPositions] 開始（${useSupabase ? 'Supabase' : 'SQLite'}で更新）:`, statuses.length, '件');
+    
+    // Supabase使用時はDataSource経由で更新
+    if (useSupabase) {
+      try {
+        const { setDocViaDataSource } = await import('../dataSourceAdapter');
+        
+        // 各ステータスのpositionを更新
+        for (let i = 0; i < statuses.length; i++) {
+          const status = statuses[i];
+          const dataToUpdate = {
+            ...status,
+            position: i,
+            updatedAt: new Date().toISOString(),
+          };
+          
+          await setDocViaDataSource('statuses', status.id, dataToUpdate);
+        }
+        
+        console.log('✅ [updateStatusPositions] 更新成功（Supabase経由）');
+        return;
+      } catch (error: any) {
+        console.error('❌ [updateStatusPositions] Supabase更新エラー:', error);
+        throw error;
+      }
+    }
+    
+    // SQLite使用時（Tauri環境）
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       
@@ -243,15 +369,17 @@ export async function updateStatusPositions(statuses: Status[]): Promise<void> {
           });
         }
         
-        console.log('✅ [updateStatusPositions] 更新成功');
+        console.log('✅ [updateStatusPositions] 更新成功（Tauriコマンド経由）');
+        return;
       } catch (error: any) {
         console.error('❌ [updateStatusPositions] Tauriコマンドエラー:', error);
         throw error;
       }
-    } else {
-      const { apiPut } = await import('../apiClient');
-      await apiPut('/api/statuses/positions', { statuses });
     }
+    
+    // その他の環境（API経由）
+    const { apiPut } = await import('../apiClient');
+    await apiPut('/api/statuses/positions', { statuses });
   } catch (error: any) {
     console.error('❌ [updateStatusPositions] エラー:', error);
     throw error;

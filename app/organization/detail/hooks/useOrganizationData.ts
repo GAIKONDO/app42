@@ -3,6 +3,7 @@ import { getOrgTreeFromDb, findOrganizationById, getOrgMembers, getFocusInitiati
 import type { OrgNodeData } from '@/components/OrgChart';
 import type { FocusInitiative, MeetingNote, Regulation, Startup, OrganizationContent } from '@/lib/orgApi';
 import { sortMembersByPosition } from '@/lib/memberSort';
+import { useRealtimeSync } from '@/lib/hooks';
 
 // 開発環境でのみログを有効化するヘルパー関数（パフォーマンス最適化）
 const isDev = process.env.NODE_ENV === 'development';
@@ -332,47 +333,74 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               membersCount: updatedOrg.members?.length || 0,
             });
             
-            // 組織コンテンツ、注力施策、議事録を取得
-            try {
-              const content = await getOrganizationContent(validOrganizationId);
-              setOrganizationContent(content);
-            } catch (contentError: any) {
-              devWarn('組織コンテンツの取得に失敗しました:', contentError);
+            // 組織コンテンツ、注力施策、議事録を並列取得（Supabase最適化）
+            const dataLoadStartTime = performance.now();
+            
+            // 子組織のIDを収集（再利用可能な関数）
+            const childOrgIds: string[] = [];
+            const collectChildOrgIds = (org: OrgNodeData) => {
+              if (org.children) {
+                for (const child of org.children) {
+                  if (child.id) {
+                    childOrgIds.push(child.id);
+                  }
+                  collectChildOrgIds(child); // 再帰的に子組織を収集
+                }
+              }
+            };
+            
+            if (updatedOrg) {
+              collectChildOrgIds(updatedOrg);
             }
             
+            devLog('📋 [loadOrganizationData] 子組織ID数:', childOrgIds.length);
+            
             try {
-              // 現在の組織の注力施策を取得
-              const currentInitiatives = await getFocusInitiatives(validOrganizationId);
+              // 組織コンテンツ、現在の組織の注力施策、議事録を並列取得
+              const [content, currentInitiatives, currentNotes] = await Promise.all([
+                getOrganizationContent(validOrganizationId).catch((contentError: any) => {
+                  devWarn('組織コンテンツの取得に失敗しました:', contentError);
+                  return null;
+                }),
+                getFocusInitiatives(validOrganizationId).catch((initError: any) => {
+                  devWarn('現在の組織の注力施策取得に失敗しました:', initError);
+                  return [];
+                }),
+                getMeetingNotes(validOrganizationId).catch((notesError: any) => {
+                  devWarn('現在の組織の議事録取得に失敗しました:', notesError);
+                  return [];
+                }),
+              ]);
               
-              // 子組織のIDを収集
-              const childOrgIds: string[] = [];
-              const collectChildOrgIds = (org: OrgNodeData) => {
-                if (org.children) {
-                  for (const child of org.children) {
-                    if (child.id) {
-                      childOrgIds.push(child.id);
-                    }
-                    collectChildOrgIds(child); // 再帰的に子組織を収集
-                  }
-                }
-              };
+              setOrganizationContent(content);
               
-              if (updatedOrg) {
-                collectChildOrgIds(updatedOrg);
-              }
+              // 子組織の注力施策と議事録を並列取得（Supabase最適化）
+              const childDataStartTime = performance.now();
               
-              devLog('📋 [loadOrganizationData] 子組織ID数:', childOrgIds.length);
+              const [childInitiativesResults, childNotesResults] = await Promise.all([
+                Promise.all(
+                  childOrgIds.map(childOrgId =>
+                    getFocusInitiatives(childOrgId).catch((error) => {
+                      devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の注力施策取得に失敗:`, error);
+                      return [];
+                    })
+                  )
+                ),
+                Promise.all(
+                  childOrgIds.map(childOrgId =>
+                    getMeetingNotes(childOrgId).catch((error) => {
+                      devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の議事録取得に失敗:`, error);
+                      return [];
+                    })
+                  )
+                ),
+              ]);
               
-              // 子組織の注力施策を取得
-              const childInitiatives: FocusInitiative[] = [];
-              for (const childOrgId of childOrgIds) {
-                try {
-                  const childInitiativesData = await getFocusInitiatives(childOrgId);
-                  childInitiatives.push(...childInitiativesData);
-                } catch (error) {
-                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の注力施策取得に失敗:`, error);
-                }
-              }
+              const childDataLoadTime = performance.now() - childDataStartTime;
+              devLog(`⏱️ [loadOrganizationData] 子組織データ取得時間: ${childDataLoadTime.toFixed(2)}ms (${childOrgIds.length}組織)`);
+              
+              // 結果をフラット化
+              const childInitiatives = childInitiativesResults.flat();
               
               // すべての注力施策を設定
               const allInitiatives = [...currentInitiatives, ...childInitiatives];
@@ -380,6 +408,20 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               
               // 組織ごとにグループ化
               const initiativesByOrgMap = new Map<string, { orgName: string; initiatives: FocusInitiative[] }>();
+              
+              // 組織名を取得するヘルパー関数
+              const findOrgName = (org: OrgNodeData, targetId: string): string | null => {
+                if (org.id === targetId) {
+                  return org.name || org.title || targetId;
+                }
+                if (org.children) {
+                  for (const child of org.children) {
+                    const found = findOrgName(child, targetId);
+                    if (found) return found;
+                  }
+                }
+                return null;
+              };
               
               // 現在の組織の注力施策
               if (currentInitiatives.length > 0) {
@@ -393,20 +435,6 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               for (const childOrgId of childOrgIds) {
                 const childInitiativesForOrg = childInitiatives.filter(init => init.organizationId === childOrgId);
                 if (childInitiativesForOrg.length > 0) {
-                  // 組織名を取得
-                  const findOrgName = (org: OrgNodeData, targetId: string): string | null => {
-                    if (org.id === targetId) {
-                      return org.name || org.title || targetId;
-                    }
-                    if (org.children) {
-                      for (const child of org.children) {
-                        const found = findOrgName(child, targetId);
-                        if (found) return found;
-                      }
-                    }
-                    return null;
-                  };
-                  
                   const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
                   initiativesByOrgMap.set(childOrgId, {
                     orgName: orgName || childOrgId,
@@ -417,69 +445,15 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               
               setInitiativesByOrg(initiativesByOrgMap);
               
-              devLog('📋 [loadOrganizationData] 組織ごとの注力施策:', {
-                currentOrg: validOrganizationId,
-                currentCount: currentInitiatives.length,
-                childOrgsCount: childOrgIds.length,
-                childCount: childInitiatives.length,
-                totalCount: allInitiatives.length,
-                byOrgCount: initiativesByOrgMap.size,
-              });
-            } catch (initError: any) {
-              devWarn('注力施策の取得に失敗しました:', initError);
-            }
-            
-            try {
-              const currentNotes = await getMeetingNotes(validOrganizationId);
-              
-              // 子組織のIDを収集（注力施策と同じロジック）
-              const childOrgIdsForNotes: string[] = [];
-              const collectChildOrgIdsForNotes = (org: OrgNodeData) => {
-                if (org.children) {
-                  for (const child of org.children) {
-                    if (child.id) {
-                      childOrgIdsForNotes.push(child.id);
-                    }
-                    collectChildOrgIdsForNotes(child); // 再帰的に子組織を収集
-                  }
-                }
-              };
-              
-              if (updatedOrg) {
-                collectChildOrgIdsForNotes(updatedOrg);
-              }
-              
-              // 子組織の議事録を取得
-              const childNotes: MeetingNote[] = [];
-              for (const childOrgId of childOrgIdsForNotes) {
-                try {
-                  const childNotesData = await getMeetingNotes(childOrgId);
-                  childNotes.push(...childNotesData);
-                } catch (error) {
-                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の議事録取得に失敗:`, error);
-                }
-              }
-              
-              // すべての議事録を設定
-              const allNotes = [...currentNotes, ...childNotes];
+              // 議事録の処理（既に取得済み）
+              const allNotes = [...currentNotes, ...childNotesResults.flat()];
               setMeetingNotes(allNotes);
               
-              // 組織ごとにグループ化
+              // 組織ごとにグループ化（議事録）
               const meetingNotesByOrgMap = new Map<string, { orgName: string; meetingNotes: MeetingNote[] }>();
               
               // 現在の組織の議事録
               if (currentNotes.length > 0) {
-                const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
-                  if (org.id === orgId) return org.name || org.title || orgId;
-                  if (org.children) {
-                    for (const child of org.children) {
-                      const found = findOrgName(child, orgId);
-                      if (found) return found;
-                    }
-                  }
-                  return null;
-                };
-                
                 const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
                 meetingNotesByOrgMap.set(validOrganizationId, {
                   orgName: orgName || validOrganizationId,
@@ -488,20 +462,10 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               }
               
               // 子組織の議事録
-              for (const childOrgId of childOrgIdsForNotes) {
+              const childNotes = childNotesResults.flat();
+              for (const childOrgId of childOrgIds) {
                 const childNotesForOrg = childNotes.filter(n => n.organizationId === childOrgId);
                 if (childNotesForOrg.length > 0) {
-                  const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
-                    if (org.id === orgId) return org.name || org.title || orgId;
-                    if (org.children) {
-                      for (const child of org.children) {
-                        const found = findOrgName(child, orgId);
-                        if (found) return found;
-                      }
-                    }
-                    return null;
-                  };
-                  
                   const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
                   meetingNotesByOrgMap.set(childOrgId, {
                     orgName: orgName || childOrgId,
@@ -515,45 +479,49 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               devLog('📋 [loadOrganizationData] 組織ごとの議事録:', {
                 currentOrg: validOrganizationId,
                 currentCount: currentNotes.length,
-                childOrgsCount: childOrgIdsForNotes.length,
+                childOrgsCount: childOrgIds.length,
                 childCount: childNotes.length,
                 totalCount: allNotes.length,
                 byOrgCount: meetingNotesByOrgMap.size,
               });
-            } catch (noteError: any) {
-              devWarn('議事録の取得に失敗しました:', noteError);
+              
+              devLog('📋 [loadOrganizationData] 組織ごとの注力施策:', {
+                currentOrg: validOrganizationId,
+                currentCount: currentInitiatives.length,
+                childOrgsCount: childOrgIds.length,
+                childCount: childInitiatives.length,
+                totalCount: allInitiatives.length,
+                byOrgCount: initiativesByOrgMap.size,
+              });
+              
+              const totalDataLoadTime = performance.now() - dataLoadStartTime;
+              devLog(`⏱️ [loadOrganizationData] データ取得総時間: ${totalDataLoadTime.toFixed(2)}ms`);
+            } catch (dataError: any) {
+              devWarn('データ取得に失敗しました:', dataError);
             }
             
+            // 制度を取得（並列化）
             try {
-              const currentRegulations = await getRegulations(validOrganizationId);
+              const regulationsStartTime = performance.now();
+              const [currentRegulations, childRegulationsResults] = await Promise.all([
+                getRegulations(validOrganizationId).catch((regError: any) => {
+                  devWarn('現在の組織の制度取得に失敗しました:', regError);
+                  return [];
+                }),
+                Promise.all(
+                  childOrgIds.map(childOrgId =>
+                    getRegulations(childOrgId).catch((error) => {
+                      devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の制度取得に失敗:`, error);
+                      return [];
+                    })
+                  )
+                ),
+              ]);
               
-              // 子組織のIDを収集（注力施策と同じロジック）
-              const childOrgIdsForRegulations: string[] = [];
-              const collectChildOrgIdsForRegulations = (org: OrgNodeData) => {
-                if (org.children) {
-                  for (const child of org.children) {
-                    if (child.id) {
-                      childOrgIdsForRegulations.push(child.id);
-                    }
-                    collectChildOrgIdsForRegulations(child); // 再帰的に子組織を収集
-                  }
-                }
-              };
+              const regulationsLoadTime = performance.now() - regulationsStartTime;
+              devLog(`⏱️ [loadOrganizationData] 制度取得時間: ${regulationsLoadTime.toFixed(2)}ms`);
               
-              if (updatedOrg) {
-                collectChildOrgIdsForRegulations(updatedOrg);
-              }
-              
-              // 子組織の制度を取得
-              const childRegulations: Regulation[] = [];
-              for (const childOrgId of childOrgIdsForRegulations) {
-                try {
-                  const childRegulationsData = await getRegulations(childOrgId);
-                  childRegulations.push(...childRegulationsData);
-                } catch (error) {
-                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の制度取得に失敗:`, error);
-                }
-              }
+              const childRegulations = childRegulationsResults.flat();
               
               // すべての制度を設定
               const allRegulations = [...currentRegulations, ...childRegulations];
@@ -564,17 +532,6 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               
               // 現在の組織の制度
               if (currentRegulations.length > 0) {
-                const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
-                  if (org.id === orgId) return org.name || org.title || orgId;
-                  if (org.children) {
-                    for (const child of org.children) {
-                      const found = findOrgName(child, orgId);
-                      if (found) return found;
-                    }
-                  }
-                  return null;
-                };
-                
                 const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
                 regulationsByOrgMap.set(validOrganizationId, {
                   orgName: orgName || validOrganizationId,
@@ -583,20 +540,9 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               }
               
               // 子組織の制度
-              for (const childOrgId of childOrgIdsForRegulations) {
+              for (const childOrgId of childOrgIds) {
                 const childRegulationsForOrg = childRegulations.filter(r => r.organizationId === childOrgId);
                 if (childRegulationsForOrg.length > 0) {
-                  const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
-                    if (org.id === orgId) return org.name || org.title || orgId;
-                    if (org.children) {
-                      for (const child of org.children) {
-                        const found = findOrgName(child, orgId);
-                        if (found) return found;
-                      }
-                    }
-                    return null;
-                  };
-                  
                   const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
                   regulationsByOrgMap.set(childOrgId, {
                     orgName: orgName || childOrgId,
@@ -610,7 +556,7 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               devLog('📋 [loadOrganizationData] 組織ごとの制度:', {
                 currentOrg: validOrganizationId,
                 currentCount: currentRegulations.length,
-                childOrgsCount: childOrgIdsForRegulations.length,
+                childOrgsCount: childOrgIds.length,
                 childCount: childRegulations.length,
                 totalCount: allRegulations.length,
                 byOrgCount: regulationsByOrgMap.size,
@@ -619,37 +565,28 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               devWarn('制度の取得に失敗しました:', regulationError);
             }
             
-            // スタートアップを取得
+            // スタートアップを取得（並列化）
             try {
-              const currentStartups = await getStartups(validOrganizationId);
+              const startupsStartTime = performance.now();
+              const [currentStartups, childStartupsResults] = await Promise.all([
+                getStartups(validOrganizationId).catch((startupError: any) => {
+                  devWarn('現在の組織のスタートアップ取得に失敗しました:', startupError);
+                  return [];
+                }),
+                Promise.all(
+                  childOrgIds.map(childOrgId =>
+                    getStartups(childOrgId).catch((error) => {
+                      devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} のスタートアップ取得に失敗:`, error);
+                      return [];
+                    })
+                  )
+                ),
+              ]);
               
-              // 子組織のIDを収集（注力施策と同じロジック）
-              const childOrgIdsForStartups: string[] = [];
-              const collectChildOrgIdsForStartups = (org: OrgNodeData) => {
-                if (org.children) {
-                  for (const child of org.children) {
-                    if (child.id) {
-                      childOrgIdsForStartups.push(child.id);
-                    }
-                    collectChildOrgIdsForStartups(child); // 再帰的に子組織を収集
-                  }
-                }
-              };
+              const startupsLoadTime = performance.now() - startupsStartTime;
+              devLog(`⏱️ [loadOrganizationData] スタートアップ取得時間: ${startupsLoadTime.toFixed(2)}ms`);
               
-              if (updatedOrg) {
-                collectChildOrgIdsForStartups(updatedOrg);
-              }
-              
-              // 子組織のスタートアップを取得
-              const childStartups: Startup[] = [];
-              for (const childOrgId of childOrgIdsForStartups) {
-                try {
-                  const childStartupsData = await getStartups(childOrgId);
-                  childStartups.push(...childStartupsData);
-                } catch (error) {
-                  devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} のスタートアップ取得に失敗:`, error);
-                }
-              }
+              const childStartups = childStartupsResults.flat();
               
               // すべてのスタートアップを設定
               const allStartups = [...currentStartups, ...childStartups];
@@ -660,17 +597,6 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               
               // 現在の組織のスタートアップ
               if (currentStartups.length > 0) {
-                const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
-                  if (org.id === orgId) return org.name || org.title || orgId;
-                  if (org.children) {
-                    for (const child of org.children) {
-                      const found = findOrgName(child, orgId);
-                      if (found) return found;
-                    }
-                  }
-                  return null;
-                };
-                
                 const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
                 startupsByOrgMap.set(validOrganizationId, {
                   orgName: orgName || validOrganizationId,
@@ -679,20 +605,9 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               }
               
               // 子組織のスタートアップ
-              for (const childOrgId of childOrgIdsForStartups) {
+              for (const childOrgId of childOrgIds) {
                 const childStartupsForOrg = childStartups.filter(s => s.organizationId === childOrgId);
                 if (childStartupsForOrg.length > 0) {
-                  const findOrgName = (org: OrgNodeData, orgId: string): string | null => {
-                    if (org.id === orgId) return org.name || org.title || orgId;
-                    if (org.children) {
-                      for (const child of org.children) {
-                        const found = findOrgName(child, orgId);
-                        if (found) return found;
-                      }
-                    }
-                    return null;
-                  };
-                  
                   const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
                   startupsByOrgMap.set(childOrgId, {
                     orgName: orgName || childOrgId,
@@ -706,7 +621,7 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               devLog('📋 [loadOrganizationData] 組織ごとのスタートアップ:', {
                 currentOrg: validOrganizationId,
                 currentCount: currentStartups.length,
-                childOrgsCount: childOrgIdsForStartups.length,
+                childOrgsCount: childOrgIds.length,
                 childCount: childStartups.length,
                 totalCount: allStartups.length,
                 byOrgCount: startupsByOrgMap.size,
@@ -910,6 +825,97 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
       totalStartups: startups.length,
     });
   }, [startups, organization]);
+
+  // スタートアップのリアルタイム同期（Supabase使用時のみ）
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  useRealtimeSync({
+    table: 'startups',
+    enabled: useSupabase && !!organizationId,
+    onInsert: async (payload) => {
+      devLog('🆕 [RealtimeSync] 新しいスタートアップが追加されました:', payload.new);
+      if (organizationId && payload.new?.organizationId === organizationId) {
+        // 現在の組織のスタートアップを再取得
+        try {
+          const updatedStartups = await getStartups(organizationId);
+          setStartups(updatedStartups);
+          devLog('✅ [RealtimeSync] スタートアップリストを更新しました:', updatedStartups.length);
+        } catch (error) {
+          devWarn('⚠️ [RealtimeSync] スタートアップの再取得に失敗:', error);
+        }
+      }
+    },
+    onUpdate: async (payload) => {
+      devLog('🔄 [RealtimeSync] スタートアップが更新されました:', payload.new);
+      if (organizationId && payload.new?.organizationId === organizationId) {
+        // 現在の組織のスタートアップを再取得
+        try {
+          const updatedStartups = await getStartups(organizationId);
+          setStartups(updatedStartups);
+          devLog('✅ [RealtimeSync] スタートアップリストを更新しました:', updatedStartups.length);
+        } catch (error) {
+          devWarn('⚠️ [RealtimeSync] スタートアップの再取得に失敗:', error);
+        }
+      }
+    },
+    onDelete: async (payload) => {
+      devLog('🗑️ [RealtimeSync] スタートアップが削除されました:', payload.old);
+      if (organizationId && payload.old?.organizationId === organizationId) {
+        // 現在の組織のスタートアップを再取得
+        try {
+          const updatedStartups = await getStartups(organizationId);
+          setStartups(updatedStartups);
+          devLog('✅ [RealtimeSync] スタートアップリストを更新しました:', updatedStartups.length);
+        } catch (error) {
+          devWarn('⚠️ [RealtimeSync] スタートアップの再取得に失敗:', error);
+        }
+      }
+    },
+  });
+
+  // 注力施策のリアルタイム同期（Supabase使用時のみ）
+  useRealtimeSync({
+    table: 'focusInitiatives',
+    enabled: useSupabase && !!organizationId,
+    onInsert: async (payload) => {
+      devLog('🆕 [RealtimeSync] 新しい注力施策が追加されました:', payload.new);
+      if (organizationId && payload.new?.organizationId === organizationId) {
+        // 現在の組織の注力施策を再取得
+        try {
+          const orgTree = await getOrgTreeFromDb();
+          await reloadInitiatives(organizationId, orgTree);
+          devLog('✅ [RealtimeSync] 注力施策リストを更新しました');
+        } catch (error) {
+          devWarn('⚠️ [RealtimeSync] 注力施策の再取得に失敗:', error);
+        }
+      }
+    },
+    onUpdate: async (payload) => {
+      devLog('🔄 [RealtimeSync] 注力施策が更新されました:', payload.new);
+      if (organizationId && payload.new?.organizationId === organizationId) {
+        // 現在の組織の注力施策を再取得
+        try {
+          const orgTree = await getOrgTreeFromDb();
+          await reloadInitiatives(organizationId, orgTree);
+          devLog('✅ [RealtimeSync] 注力施策リストを更新しました');
+        } catch (error) {
+          devWarn('⚠️ [RealtimeSync] 注力施策の再取得に失敗:', error);
+        }
+      }
+    },
+    onDelete: async (payload) => {
+      devLog('🗑️ [RealtimeSync] 注力施策が削除されました:', payload.old);
+      if (organizationId && payload.old?.organizationId === organizationId) {
+        // 現在の組織の注力施策を再取得
+        try {
+          const orgTree = await getOrgTreeFromDb();
+          await reloadInitiatives(organizationId, orgTree);
+          devLog('✅ [RealtimeSync] 注力施策リストを更新しました');
+        } catch (error) {
+          devWarn('⚠️ [RealtimeSync] 注力施策の再取得に失敗:', error);
+        }
+      }
+    },
+  });
 
   return {
     organization,

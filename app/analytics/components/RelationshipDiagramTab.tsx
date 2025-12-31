@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   KeyboardSensor,
   PointerSensor,
@@ -27,7 +27,17 @@ import EditThemesModal from '../modals/EditThemesModal';
 import { useThemeManagement } from '../hooks/useThemeManagement';
 import { useRelationshipDiagramData } from '../hooks/useRelationshipDiagramData';
 import { devLog } from '../utils/devLog';
-import type { Theme, FocusInitiative, TopicInfo } from '@/lib/orgApi';
+import type { Theme, FocusInitiative, TopicInfo, Startup } from '@/lib/orgApi';
+import { getAllStartups } from '@/lib/orgApi';
+
+const DynamicVegaChart = dynamic(() => import('@/components/VegaChart'), {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+      グラフを読み込み中...
+    </div>
+  ),
+});
 
 const DynamicRelationshipDiagram2D = dynamic(() => import('@/components/RelationshipDiagram2D'), {
   ssr: false,
@@ -49,18 +59,19 @@ const DynamicRelationshipBubbleChart = dynamic(() => import('@/components/Relati
 
 interface RelationshipDiagramTabProps {
   selectedThemeId: string | null;
-  viewMode: 'diagram' | 'bubble';
+  viewMode: 'diagram' | 'bubble' | 'bar';
   selectedTypeFilter: 'all' | 'organization' | 'company' | 'person';
   themes: Theme[];
   setThemes: (themes: Theme[]) => void;
   initiatives: FocusInitiative[];
+  startups: Startup[];
   orgData: OrgNodeData | null;
   topics: TopicInfo[];
   setTopics: (topics: Topic[]) => void;
   refreshThemes: () => Promise<void>;
   refreshTopics: () => Promise<void>;
   onSelectedThemeIdChange: (themeId: string | null) => void;
-  onViewModeChange: (mode: 'diagram' | 'bubble') => void;
+  onViewModeChange: (mode: 'diagram' | 'bubble' | 'bar') => void;
   onTypeFilterChange: (filter: 'all' | 'organization' | 'company' | 'person') => void;
 }
 
@@ -71,6 +82,7 @@ export function RelationshipDiagramTab({
   themes,
   setThemes,
   initiatives,
+  startups,
   orgData,
   topics,
   setTopics,
@@ -81,6 +93,8 @@ export function RelationshipDiagramTab({
   onTypeFilterChange,
 }: RelationshipDiagramTabProps) {
   const themeManagement = useThemeManagement(themes, setThemes);
+  const [selectedThemeStartups, setSelectedThemeStartups] = useState<Startup[]>([]);
+  const [loadingStartups, setLoadingStartups] = useState(false);
 
   useEffect(() => {
     if (themes.length > 0) {
@@ -88,6 +102,13 @@ export function RelationshipDiagramTab({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themes]);
+
+  // selectedThemeIdが変更されたとき、またはviewModeが'bar'以外になったときにスタートアップリストをクリア
+  useEffect(() => {
+    if (viewMode !== 'bar' || !selectedThemeId) {
+      setSelectedThemeStartups([]);
+    }
+  }, [selectedThemeId, viewMode]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -104,10 +125,165 @@ export function RelationshipDiagramTab({
     selectedThemeId,
     themes,
     initiatives,
+    startups,
     orgData,
     topics,
     selectedTypeFilter,
   });
+
+  // テーマに関連するスタートアップを判定するヘルパー関数（barChartDataとクリック時の処理で共通使用）
+  const isStartupRelatedToTheme = useCallback((startup: Startup, themeId: string): boolean => {
+    // themeIdまたはthemeIdsで関連付けられているスタートアップを取得
+    if (startup.themeId === themeId) {
+      return true;
+    }
+    if (Array.isArray(startup.themeIds) && startup.themeIds.includes(themeId)) {
+      return true;
+    }
+    // themeIdsが文字列（JSON）の場合もパースしてチェック
+    if (typeof startup.themeIds === 'string') {
+      try {
+        const parsed = JSON.parse(startup.themeIds);
+        if (Array.isArray(parsed) && parsed.includes(themeId)) {
+          return true;
+        }
+      } catch (e) {
+        // パースエラーは無視
+      }
+    }
+    return false;
+  }, []);
+
+  // 棒グラフ用のデータを生成（テーマごとのスタートアップ数）
+  const barChartData = useMemo(() => {
+    const themesToShow = selectedThemeId
+      ? themes.filter((t) => t.id === selectedThemeId)
+      : themes;
+
+    return themesToShow.map(theme => {
+      // テーマに関連するスタートアップをカウント
+      const relatedStartups = startups.filter((startup) => isStartupRelatedToTheme(startup, theme.id));
+
+      return {
+        theme: theme.title,
+        themeId: theme.id,
+        count: relatedStartups.length,
+      };
+    }).filter(item => {
+      // 選択されていない場合は、0件でも表示
+      if (!selectedThemeId) return true;
+      // 選択されている場合は、選択されたテーマのみ表示（0件でも表示）
+      return item.themeId === selectedThemeId;
+    });
+  }, [themes, startups, selectedThemeId, isStartupRelatedToTheme]);
+
+  // 棒グラフの仕様を生成
+  const barChartSpec = useMemo(() => {
+    // 選択されたテーマがある場合は、そのテーマが0件でも表示する
+    if (barChartData.length === 0 && !selectedThemeId) return null;
+
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const chartHeight = isMobile ? 400 : 500;
+
+    // テーマのリストを取得（position順にソート）
+    const themeList = themes
+      .filter(theme => barChartData.some(d => d.themeId === theme.id))
+      .sort((a, b) => {
+        const posA = a.position ?? 999999;
+        const posB = b.position ?? 999999;
+        return posA - posB;
+      })
+      .map(t => t.title);
+
+    return {
+      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+      description: 'テーマごとのスタートアップ件数',
+      width: 'container',
+      height: chartHeight,
+      padding: { top: 20, right: 20, bottom: 60, left: 60 },
+      data: {
+        values: barChartData,
+      },
+      mark: {
+        type: 'bar',
+        tooltip: true,
+        cursor: 'pointer',
+        cornerRadiusTopLeft: 4,
+        cornerRadiusTopRight: 4,
+        color: '#4262FF',
+      },
+      encoding: {
+        x: {
+          field: 'theme',
+          type: 'ordinal',
+          title: 'テーマ',
+          scale: {
+            domain: themeList,
+          },
+          axis: {
+            labelAngle: isMobile ? -90 : -45,
+            labelLimit: isMobile ? 50 : 120,
+            labelFontSize: isMobile ? 11 : 13,
+            labelColor: '#4B5563',
+            labelFont: 'var(--font-inter), var(--font-noto), sans-serif',
+            titleFontSize: isMobile ? 12 : 14,
+            titleFontWeight: '600',
+            titleColor: '#1A1A1A',
+            titleFont: 'var(--font-inter), var(--font-noto), sans-serif',
+            titlePadding: 12,
+            domain: true,
+            domainColor: '#E5E7EB',
+            domainWidth: 1,
+            tickSize: 0,
+          },
+        },
+        y: {
+          field: 'count',
+          type: 'quantitative',
+          title: 'スタートアップ件数',
+          axis: {
+            grid: true,
+            gridColor: '#F3F4F6',
+            gridOpacity: 0.5,
+            labelFontSize: isMobile ? 11 : 13,
+            labelColor: '#6B7280',
+            labelFont: 'var(--font-inter), var(--font-noto), sans-serif',
+            titleFontSize: isMobile ? 12 : 14,
+            titleFontWeight: '600',
+            titleColor: '#1A1A1A',
+            titleFont: 'var(--font-inter), var(--font-noto), sans-serif',
+            titlePadding: 12,
+            domain: true,
+            domainColor: '#E5E7EB',
+            domainWidth: 1,
+            tickSize: 0,
+          },
+        },
+        tooltip: [
+          { field: 'theme', type: 'nominal', title: 'テーマ' },
+          { field: 'count', type: 'quantitative', title: '件数', format: 'd' },
+        ],
+      },
+      selection: {
+        clicked_theme: {
+          type: 'single',
+          on: 'click',
+          fields: ['themeId'],
+          empty: 'none',
+        },
+      },
+      config: {
+        view: {
+          stroke: 'transparent',
+        },
+        background: 'transparent',
+        axis: {
+          labelFont: 'var(--font-inter), var(--font-noto), sans-serif',
+          titleFont: 'var(--font-inter), var(--font-noto), sans-serif',
+        },
+      },
+    };
+  }, [barChartData, themes]);
 
   const handleNodeClick = (node: RelationshipNode) => {
     // ノードクリック時の処理（必要に応じて実装）
@@ -403,9 +579,9 @@ export function RelationshipDiagramTab({
         )}
       </div>
 
-      {/* 2D関係性図またはバブルチャート */}
+      {/* 2D関係性図、バブルチャート、または棒グラフ */}
       {/* テーマが存在する場合は、組織や注力施策、トピックが0件でも、テーマが選択されていなくても（すべて表示）表示 */}
-      {(nodes.length > 0 || themes.length > 0) ? (
+      {(nodes.length > 0 || themes.length > 0 || viewMode === 'bar') ? (
         <div style={{ marginBottom: '32px' }}>
           {viewMode === 'diagram' ? (
             <DynamicRelationshipDiagram2D
@@ -418,7 +594,7 @@ export function RelationshipDiagramTab({
               onTopicMetadataSaved={refreshTopics}
               maxNodes={1000}
             />
-          ) : (
+          ) : viewMode === 'bubble' ? (
             <DynamicRelationshipBubbleChart
               width={1200}
               height={800}
@@ -426,6 +602,176 @@ export function RelationshipDiagramTab({
               links={links}
               onNodeClick={handleNodeClick}
             />
+          ) : viewMode === 'bar' ? (
+            barChartSpec ? (
+              <div>
+                <DynamicVegaChart
+                  spec={barChartSpec}
+                  chartData={barChartData}
+                  onSignal={async (signalName: string, value: any) => {
+                    // VegaChartのクリックイベントを処理
+                    if (signalName === 'clicked_theme' && value && value.themeId) {
+                      console.log('🔍 [棒グラフ] テーマクリック:', value.themeId);
+                      onSelectedThemeIdChange(value.themeId);
+                      
+                      // 最新のスタートアップデータを取得（Supabaseから）
+                      try {
+                        setLoadingStartups(true);
+                        const allStartups = await getAllStartups();
+                        console.log('📖 [棒グラフ] 全スタートアップ取得:', allStartups.length, '件');
+                        
+                        // barChartDataの生成ロジックと同じ方法でフィルタリング
+                        const relatedStartups = allStartups.filter((startup) => {
+                          const isRelated = isStartupRelatedToTheme(startup, value.themeId);
+                          if (isRelated) {
+                            console.log('✅ [棒グラフ] 関連スタートアップ:', {
+                              id: startup.id,
+                              title: startup.title,
+                              themeId: startup.themeId,
+                              themeIds: startup.themeIds,
+                              themeIdsType: typeof startup.themeIds,
+                              themeIdsIsArray: Array.isArray(startup.themeIds),
+                            });
+                          }
+                          return isRelated;
+                        });
+                        
+                        console.log('📖 [棒グラフ] 選択テーマに紐づくスタートアップ:', relatedStartups.length, '件', {
+                          themeId: value.themeId,
+                          allStartupsCount: allStartups.length,
+                          relatedStartupsCount: relatedStartups.length,
+                          sampleStartup: relatedStartups.length > 0 ? {
+                            id: relatedStartups[0].id,
+                            title: relatedStartups[0].title,
+                            themeId: relatedStartups[0].themeId,
+                            themeIds: relatedStartups[0].themeIds,
+                            themeIdsType: typeof relatedStartups[0].themeIds,
+                            themeIdsIsArray: Array.isArray(relatedStartups[0].themeIds),
+                          } : null,
+                        });
+                        setSelectedThemeStartups(relatedStartups);
+                      } catch (error) {
+                        console.error('❌ [棒グラフ] スタートアップ取得エラー:', error);
+                        setSelectedThemeStartups([]);
+                      } finally {
+                        setLoadingStartups(false);
+                      }
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ 
+                padding: '60px', 
+                textAlign: 'center', 
+                color: '#808080',
+                fontSize: '14px',
+                fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                backgroundColor: '#FAFAFA',
+                borderRadius: '8px',
+                border: '1px dashed #E0E0E0',
+              }}>
+                表示するデータがありません
+              </div>
+            )
+          ) : null}
+          
+          {/* 選択されたテーマに紐づくスタートアップのリスト（棒グラフ表示時のみ） */}
+          {viewMode === 'bar' && selectedThemeId && (
+            <div style={{ marginTop: '32px' }}>
+              <h3 style={{
+                fontSize: '18px',
+                fontWeight: '600',
+                color: '#1A1A1A',
+                marginBottom: '16px',
+                fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+              }}>
+                {themes.find(t => t.id === selectedThemeId)?.title || '選択されたテーマ'}に紐づくスタートアップ
+                {loadingStartups && (
+                  <span style={{ marginLeft: '8px', fontSize: '14px', color: '#808080', fontWeight: '400' }}>
+                    (読み込み中...)
+                  </span>
+                )}
+              </h3>
+              
+              {loadingStartups ? (
+                <div style={{
+                  padding: '40px',
+                  textAlign: 'center',
+                  color: '#808080',
+                  fontSize: '14px',
+                  fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                }}>
+                  データを読み込み中...
+                </div>
+              ) : selectedThemeStartups.length > 0 ? (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                  gap: '16px',
+                }}>
+                  {selectedThemeStartups.map((startup) => (
+                    <div
+                      key={startup.id}
+                      style={{
+                        padding: '16px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E0E0E0',
+                        borderRadius: '8px',
+                        transition: 'all 0.2s ease',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#4262FF';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(66, 98, 255, 0.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#E0E0E0';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <h4 style={{
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        color: '#1A1A1A',
+                        marginBottom: '8px',
+                        fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                      }}>
+                        {startup.title}
+                      </h4>
+                      {startup.description && (
+                        <p style={{
+                          fontSize: '14px',
+                          color: '#666',
+                          margin: 0,
+                          lineHeight: '1.5',
+                          fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}>
+                          {startup.description}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  padding: '40px',
+                  textAlign: 'center',
+                  color: '#808080',
+                  fontSize: '14px',
+                  fontFamily: 'var(--font-inter), var(--font-noto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                  backgroundColor: '#FAFAFA',
+                  borderRadius: '8px',
+                  border: '1px dashed #E0E0E0',
+                }}>
+                  選択されたテーマに紐づくスタートアップがありません
+                </div>
+              )}
+            </div>
           )}
         </div>
       ) : (

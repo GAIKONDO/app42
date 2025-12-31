@@ -279,11 +279,43 @@ export async function saveGraphvizYamlFileAttachment(
  */
 export async function getGraphvizYamlFileAttachments(yamlFileId: string): Promise<Array<{ path: string; description?: string; detailedDescription?: string; id?: string; fileName?: string; mimeType?: string; fileSize?: number }>> {
   try {
-    const { callTauriCommand } = await import('@/lib/localFirebase');
-    const result = await callTauriCommand('query_get', {
-      collectionName: 'graphvizYamlFileAttachments',
-      conditions: { yamlFileId },
-    });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    let result: Array<{ id: string; data: any }> = [];
+    
+    if (useSupabase) {
+      // Supabase経由で取得
+      try {
+        const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
+        const results = await queryGetViaDataSource('graphvizYamlFileAttachments', {
+          field: 'yamlfileid',
+          operator: 'eq',
+          value: yamlFileId,
+        });
+        result = results.map((r: any) => ({
+          id: r.id || r.data?.id,
+          data: r.data || r,
+        }));
+      } catch (supabaseError: any) {
+        // テーブルが存在しない場合のエラーを無視（PGRST205）
+        const errorMessage = supabaseError?.message || String(supabaseError || '');
+        const isTableNotFoundError = errorMessage.includes('PGRST205') || 
+                                     errorMessage.includes('Could not find the table') ||
+                                     errorMessage.includes('graphvizyamlfileattachments');
+        
+        if (isTableNotFoundError) {
+          console.warn('⚠️ [getGraphvizYamlFileAttachments] テーブルが存在しません（Supabase）:', errorMessage);
+          return [];
+        }
+        throw supabaseError;
+      }
+    } else {
+      // SQLite経由で取得
+      const { callTauriCommand } = await import('@/lib/localFirebase');
+      result = await callTauriCommand('query_get', {
+        collectionName: 'graphvizYamlFileAttachments',
+        conditions: { yamlFileId },
+      }) as Array<{ id: string; data: any }>;
+    }
     
     if (result && Array.isArray(result) && result.length > 0) {
       return result.map((item: any) => {
@@ -316,7 +348,7 @@ export async function deleteGraphvizYamlFileAttachment(
   filePath: string
 ): Promise<void> {
   try {
-    const { callTauriCommand } = await import('@/lib/localFirebase');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
     
     // ファイルIDを取得
     const attachments = await getGraphvizYamlFileAttachments(yamlFileId);
@@ -324,10 +356,18 @@ export async function deleteGraphvizYamlFileAttachment(
     
     if (attachment && attachment.id) {
       // データベースから削除
-      await callTauriCommand('doc_delete', {
-        collectionName: 'graphvizYamlFileAttachments',
-        docId: attachment.id,
-      });
+      if (useSupabase) {
+        // Supabase経由で削除
+        const { deleteDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+        await deleteDocViaDataSource('graphvizYamlFileAttachments', attachment.id);
+      } else {
+        // SQLite経由で削除
+        const { callTauriCommand } = await import('@/lib/localFirebase');
+        await callTauriCommand('doc_delete', {
+          collectionName: 'graphvizYamlFileAttachments',
+          docId: attachment.id,
+        });
+      }
       
       // 物理ファイルはデータベースから削除するだけで、ファイルシステム上のファイルは残す
       // （後で必要に応じて手動で削除可能）

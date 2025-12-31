@@ -7,49 +7,129 @@ import { generateUniqueStartupId } from './utils';
  */
 export async function getStartups(organizationId: string): Promise<Startup[]> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    console.log(`📖 [getStartups] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）:`, { organizationId });
+    const useSupabaseEnv = process.env.NEXT_PUBLIC_USE_SUPABASE;
+    const useSupabase = useSupabaseEnv === 'true';
+    console.log(`📖 [getStartups] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）:`, { 
+      organizationId,
+      NEXT_PUBLIC_USE_SUPABASE: useSupabaseEnv,
+      useSupabase: useSupabase,
+    });
     
     // Supabase使用時はDataSource経由で取得
     if (useSupabase) {
       try {
-        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
-        const result = await getCollectionViaDataSource('startups');
+        // パフォーマンス最適化: organizationIdでフィルタリングしてから取得
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
         
-        // Supabaseから取得したデータは既に配列形式
+        // organizationIdでフィルタリング（クライアント側でのフィルタリングを回避）
+        // startupsテーブルでは"createdAt"（引用符付き）が使用されているため、createdAt（キャメルケース）を使用可能
+        const result = await dataSource.collection_get('startups', {
+          filters: [
+            { field: 'organizationId', operator: 'eq', value: organizationId }
+          ],
+          orderBy: 'createdAt',
+          orderDirection: 'desc'
+        });
+        
+        // Supabaseから取得したデータは既に配列形式でフィルタリング済み
         const allStartups = Array.isArray(result) ? result : [];
-        console.log('📖 [getStartups] Supabaseから取得:', allStartups.length, '件');
+        console.log('📖 [getStartups] Supabaseから取得（フィルタリング済み）:', allStartups.length, '件');
         
+        // JSON配列をパースするヘルパー関数
+        const parseJsonArray = (value: any): string[] => {
+          if (Array.isArray(value)) return value;
+          if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+              return [];
+            }
+          }
+          return [];
+        };
+        
+        // 既にフィルタリングされているので、そのままマッピング
         const filtered = allStartups
-          .filter((item: any) => {
+          .map((item: any) => {
             // Supabaseから取得したデータは直接オブジェクト形式
             const data = item;
-            const matches = data.organizationId === organizationId;
-            return matches;
-          })
-          .map((item: any) => {
-            const data = item;
+            // 日付の変換
+            let createdAt: any = null;
+            let updatedAt: any = null;
+            
+            if (data.createdAt) {
+              if (data.createdAt.seconds) {
+                createdAt = new Date(data.createdAt.seconds * 1000).toISOString();
+              } else if (typeof data.createdAt === 'string') {
+                createdAt = data.createdAt;
+              }
+            }
+            
+            if (data.updatedAt) {
+              if (data.updatedAt.seconds) {
+                updatedAt = new Date(data.updatedAt.seconds * 1000).toISOString();
+              } else if (typeof data.updatedAt === 'string') {
+                updatedAt = data.updatedAt;
+              }
+            }
+            
             return {
               id: data.id,
               organizationId: data.organizationId,
+              companyId: data.companyId,
               title: data.title || '',
               description: data.description || '',
               content: data.content || '',
-              createdAt: data.createdAt,
-              updatedAt: data.updatedAt,
+              assignee: parseJsonArray(data.assignee),
+              method: parseJsonArray(data.method),
+              methodOther: data.methodOther,
+              methodDetails: data.methodDetails ? (typeof data.methodDetails === 'string' ? JSON.parse(data.methodDetails) : data.methodDetails) : {},
+              means: parseJsonArray(data.means),
+              meansOther: data.meansOther,
+              categoryIds: parseJsonArray(data.categoryIds),
+              status: data.status,
+              agencyContractMonth: data.agencyContractMonth,
+              engagementLevel: data.engagementLevel,
+              bizDevPhase: data.bizDevPhase,
+              relatedVCS: parseJsonArray(data.relatedVCS),
+              responsibleDepartments: parseJsonArray(data.responsibleDepartments),
+              hpUrl: data.hpUrl,
+              asanaUrl: data.asanaUrl,
+              boxUrl: data.boxUrl,
+              objective: data.objective,
+              evaluation: data.evaluation,
+              evaluationChart: data.evaluationChart ? (typeof data.evaluationChart === 'string' ? JSON.parse(data.evaluationChart) : data.evaluationChart) : null,
+              evaluationChartSnapshots: parseJsonArray(data.evaluationChartSnapshots),
+              considerationPeriod: data.considerationPeriod,
+              executionPeriod: data.executionPeriod,
+              monetizationPeriod: data.monetizationPeriod,
+              monetizationRenewalNotRequired: data.monetizationRenewalNotRequired === 1 ? true : false,
+              relatedOrganizations: parseJsonArray(data.relatedOrganizations),
+              relatedGroupCompanies: parseJsonArray(data.relatedGroupCompanies),
+              monetizationDiagram: data.monetizationDiagram,
+              monetizationDiagramId: data.monetizationDiagramId,
+              relationDiagram: data.relationDiagram,
+              relationDiagramId: data.relationDiagramId,
+              causeEffectDiagramId: data.causeEffectDiagramId,
+              themeId: data.themeId,
+              themeIds: parseJsonArray(data.themeIds),
+              topicIds: parseJsonArray(data.topicIds),
+              competitorComparison: data.competitorComparison ? (typeof data.competitorComparison === 'string' ? JSON.parse(data.competitorComparison) : data.competitorComparison) : undefined,
+              deepSearch: data.deepSearch ? (typeof data.deepSearch === 'string' ? JSON.parse(data.deepSearch) : data.deepSearch) : undefined,
+              createdAt: createdAt,
+              updatedAt: updatedAt,
             } as Startup;
           });
       
-      console.log('📖 [getStartups] フィルタ後:', {
-        filteredCount: filtered.length,
-        filteredIds: filtered.map(s => s.id),
+      console.log('📖 [getStartups] マッピング後:', {
+        count: filtered.length,
+        ids: filtered.map(s => s.id),
       });
       
-      const sorted = filtered.sort((a, b) => {
-        const aTime = a.createdAt ? (typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : (a.createdAt.toMillis ? a.createdAt.toMillis() : 0)) : 0;
-        const bTime = b.createdAt ? (typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : (b.createdAt.toMillis ? b.createdAt.toMillis() : 0)) : 0;
-        return bTime - aTime;
-      });
+      // 既にソートされているので、そのまま返す
+      const sorted = filtered;
       
         console.log('📖 [getStartups] 最終結果（Supabaseから取得）:', {
           count: sorted.length,
@@ -307,7 +387,142 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
     });
     
     try {
-      if (typeof window !== 'undefined' && '__TAURI__' in window) {
+      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+      
+      // Supabase使用時はSupabaseDataSource経由で保存
+      if (useSupabase) {
+        console.log('🔍 [saveStartup] Supabase経由でスタートアップを保存します');
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // Supabaseのスキーマに合わせてデータを準備（カラム名は引用符付き）
+        const supabaseData: any = {
+          id: startupId,
+          organizationId: data.organizationId, // Supabaseでは"organizationId"として保存される
+          companyId: null, // CHECK制約により、organizationIdとcompanyIdのどちらか一方が必須
+          title: data.title || '',
+          description: data.description || null,
+          content: data.content || null,
+          status: data.status || null,
+          agencyContractMonth: data.agencyContractMonth || null,
+          engagementLevel: data.engagementLevel || null,
+          bizDevPhase: data.bizDevPhase || null,
+          hpUrl: data.hpUrl || null,
+          asanaUrl: data.asanaUrl || null,
+          boxUrl: data.boxUrl || null,
+          objective: data.objective || null,
+          evaluation: data.evaluation || null,
+          considerationPeriod: data.considerationPeriod || null,
+          executionPeriod: data.executionPeriod || null,
+          monetizationPeriod: data.monetizationPeriod || null,
+          monetizationRenewalNotRequired: data.monetizationRenewalNotRequired === true ? 1 : 0,
+          monetizationDiagram: data.monetizationDiagram || null,
+          monetizationDiagramId: data.monetizationDiagramId || null,
+          relationDiagram: data.relationDiagram || null,
+          relationDiagramId: data.relationDiagramId || null,
+          causeEffectDiagramId: data.causeEffectDiagramId || null,
+          themeId: data.themeId || null,
+          updatedAt: data.updatedAt,
+          createdAt: data.createdAt,
+        };
+        
+        // JSON配列形式のフィールドを文字列化（Supabaseスキーマに合わせてカラム名を調整）
+        if (Array.isArray(data.method) && data.method.length > 0) {
+          supabaseData.method = JSON.stringify(data.method);
+        }
+        if (data.methodOther) {
+          supabaseData.methodOther = data.methodOther;
+        }
+        if (data.methodDetails && Object.keys(data.methodDetails).length > 0) {
+          supabaseData.methodDetails = JSON.stringify(data.methodDetails);
+        }
+        if (Array.isArray(data.means) && data.means.length > 0) {
+          supabaseData.means = JSON.stringify(data.means);
+        }
+        if (data.meansOther) {
+          supabaseData.meansOther = data.meansOther;
+        }
+        if (Array.isArray(data.categoryIds) && data.categoryIds.length > 0) {
+          supabaseData.categoryIds = JSON.stringify(data.categoryIds);
+        }
+        // themeIdsは空配列の場合も明示的に保存（nullではなく空配列として保存）
+        if (Array.isArray(data.themeIds)) {
+          supabaseData.themeIds = data.themeIds.length > 0 ? JSON.stringify(data.themeIds) : '[]';
+        } else {
+          supabaseData.themeIds = '[]';
+        }
+        if (Array.isArray(data.topicIds) && data.topicIds.length > 0) {
+          supabaseData.topicIds = JSON.stringify(data.topicIds);
+        }
+        if (Array.isArray(data.relatedVCS) && data.relatedVCS.length > 0) {
+          supabaseData.relatedVCS = JSON.stringify(data.relatedVCS);
+        }
+        if (Array.isArray(data.responsibleDepartments) && data.responsibleDepartments.length > 0) {
+          supabaseData.responsibleDepartments = JSON.stringify(data.responsibleDepartments);
+        }
+        if (Array.isArray(data.relatedOrganizations) && data.relatedOrganizations.length > 0) {
+          supabaseData.relatedOrganizations = JSON.stringify(data.relatedOrganizations);
+        }
+        if (Array.isArray(data.relatedGroupCompanies) && data.relatedGroupCompanies.length > 0) {
+          supabaseData.relatedGroupCompanies = JSON.stringify(data.relatedGroupCompanies);
+        }
+        if (data.evaluationChart) {
+          supabaseData.evaluationChart = JSON.stringify(data.evaluationChart);
+        }
+        if (Array.isArray(data.evaluationChartSnapshots) && data.evaluationChartSnapshots.length > 0) {
+          supabaseData.evaluationChartSnapshots = JSON.stringify(data.evaluationChartSnapshots);
+        }
+        if (data.competitorComparison) {
+          supabaseData.competitorComparison = JSON.stringify(data.competitorComparison);
+        }
+        if (data.deepSearch) {
+          supabaseData.deepSearch = JSON.stringify(data.deepSearch);
+        }
+        if (data.assignee) {
+          supabaseData.assignee = data.assignee;
+        }
+        
+        // organizationIdが存在するか確認（外部キー制約のため）
+        if (supabaseData.organizationId) {
+          const parentOrg = await dataSource.doc_get('organizations', supabaseData.organizationId);
+          if (!parentOrg) {
+            throw new Error(`組織ID "${supabaseData.organizationId}" がorganizationsテーブルに存在しません`);
+          }
+        }
+        
+        // SupabaseDataSource経由で保存
+        try {
+          console.log('💾 [saveStartup] Supabaseに保存するデータ:', {
+            id: supabaseData.id,
+            organizationId: supabaseData.organizationId,
+            companyId: supabaseData.companyId,
+            title: supabaseData.title,
+            hasTitle: !!supabaseData.title,
+            titleLength: supabaseData.title?.length || 0,
+            dataKeys: Object.keys(supabaseData),
+          });
+          
+          await dataSource.doc_set('startups', startupId, supabaseData);
+          
+          console.log('✅ [saveStartup] Supabase経由でスタートアップを保存成功:', startupId, {
+            title: supabaseData.title,
+            organizationId: supabaseData.organizationId,
+          });
+        } catch (saveError: any) {
+          console.error('❌ [saveStartup] Supabase保存エラー:', {
+            error: saveError,
+            errorMessage: saveError?.message,
+            errorCode: saveError?.code,
+            errorDetails: saveError?.details,
+            errorHint: saveError?.hint,
+            startupId,
+            organizationId: supabaseData.organizationId,
+            title: supabaseData.title,
+            dataKeys: Object.keys(supabaseData),
+          });
+          throw saveError;
+        }
+      } else if (typeof window !== 'undefined' && '__TAURI__' in window) {
         const { callTauriCommand } = await import('../localFirebase');
         
         const dataForDb: any = {
@@ -504,6 +719,111 @@ export async function getStartupById(startupId: string): Promise<Startup | null>
       return null;
     }
     
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
+    // Supabase使用時は直接Supabaseから取得（パフォーマンス最適化）
+    if (useSupabase) {
+      try {
+        const { getDataSourceInstance } = await import('../dataSource');
+        const dataSource = getDataSourceInstance();
+        
+        // Supabaseから直接取得
+        console.log('🔍 [getStartupById] Supabaseから取得を試みます:', { startupId });
+        const data = await dataSource.doc_get('startups', startupId);
+        
+        if (data) {
+          console.log('✅ [getStartupById] Supabaseから取得成功:', { startupId, hasData: !!data });
+          
+          const parseJsonArray = (value: any): string[] => {
+            if (Array.isArray(value)) return value;
+            if (typeof value === 'string') {
+              try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch (e) {
+                return [];
+              }
+            }
+            return [];
+          };
+          
+          const parseJsonObject = (value: any): any => {
+            if (value === null || value === undefined) return null;
+            if (typeof value === 'object' && !Array.isArray(value)) return value;
+            if (typeof value === 'string') {
+              try {
+                return JSON.parse(value);
+              } catch (e) {
+                return null;
+              }
+            }
+            return null;
+          };
+          
+          const startup: Startup = {
+            id: data.id || startupId,
+            organizationId: data.organizationId,
+            companyId: data.companyId,
+            title: data.title || '',
+            description: data.description || '',
+            content: data.content || '',
+            assignee: parseJsonArray(data.assignee),
+            method: parseJsonArray(data.method),
+            methodOther: data.methodOther || '',
+            methodDetails: parseJsonObject(data.methodDetails) || {},
+            means: parseJsonArray(data.means),
+            meansOther: data.meansOther || '',
+            objective: data.objective || '',
+            evaluation: data.evaluation || '',
+            evaluationChart: parseJsonObject(data.evaluationChart),
+            evaluationChartSnapshots: parseJsonArray(data.evaluationChartSnapshots),
+            considerationPeriod: data.considerationPeriod || '',
+            executionPeriod: data.executionPeriod || '',
+            monetizationPeriod: data.monetizationPeriod || '',
+            monetizationRenewalNotRequired: data.monetizationRenewalNotRequired === 1 ? true : false,
+            relatedOrganizations: parseJsonArray(data.relatedOrganizations),
+            relatedGroupCompanies: parseJsonArray(data.relatedGroupCompanies),
+            monetizationDiagram: data.monetizationDiagram || '',
+            monetizationDiagramId: data.monetizationDiagramId || '',
+            relationDiagram: data.relationDiagram || '',
+            relationDiagramId: data.relationDiagramId || '',
+            causeEffectDiagramId: data.causeEffectDiagramId || '',
+            themeId: data.themeId || '',
+            themeIds: parseJsonArray(data.themeIds),
+            topicIds: parseJsonArray(data.topicIds),
+            categoryIds: parseJsonArray(data.categoryIds),
+            relatedVCS: parseJsonArray(data.relatedVCS),
+            responsibleDepartments: parseJsonArray(data.responsibleDepartments),
+            status: data.status,
+            agencyContractMonth: data.agencyContractMonth,
+            engagementLevel: data.engagementLevel,
+            bizDevPhase: data.bizDevPhase,
+            hpUrl: data.hpUrl,
+            asanaUrl: data.asanaUrl,
+            boxUrl: data.boxUrl,
+            competitorComparison: parseJsonObject(data.competitorComparison),
+            deepSearch: parseJsonObject(data.deepSearch),
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+          };
+          
+          return startup;
+        } else {
+          console.warn('📖 [getStartupById] Supabaseからデータが見つかりませんでした。フォールバックに進みます:', { startupId });
+          // フォールバック: Tauriコマンド（下のコードに続く）
+        }
+      } catch (supabaseError: any) {
+        console.error('❌ [getStartupById] Supabase取得エラー:', {
+          error: supabaseError,
+          errorMessage: supabaseError?.message,
+          errorCode: supabaseError?.code,
+          startupId,
+        });
+        // フォールバック: Tauriコマンド
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
@@ -796,25 +1116,44 @@ export async function getStartupById(startupId: string): Promise<Startup | null>
  */
 export async function deleteStartup(startupId: string): Promise<void> {
   try {
-    console.log('🗑️ [deleteStartup] 開始:', startupId);
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`🗑️ [deleteStartup] 開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, startupId);
     
-    const { callTauriCommand } = await import('../localFirebase');
-    
-    try {
-      await callTauriCommand('doc_delete', {
-        collectionName: 'startups',
-        docId: startupId,
-      });
+    // Supabase使用時はDataSource経由で削除
+    if (useSupabase) {
+      try {
+        const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
+        await deleteDocViaDataSource('startups', startupId);
+        console.log('✅ [deleteStartup] Supabase経由で削除成功:', startupId);
+      } catch (deleteError: any) {
+        const errorMessage = deleteError?.message || String(deleteError || '');
+        console.error('❌ [deleteStartup] Supabase経由での削除失敗:', {
+          error: deleteError,
+          errorMessage,
+          startupId,
+        });
+        throw new Error(`スタートアップの削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+      }
+    } else {
+      // ローカルSQLite使用時はTauriコマンド経由で削除
+      const { callTauriCommand } = await import('../localFirebase');
       
-      console.log('✅ [deleteStartup] 削除成功:', startupId);
-    } catch (deleteError: any) {
-      const errorMessage = deleteError?.message || String(deleteError || '');
-      console.error('❌ [deleteStartup] 削除失敗:', {
-        error: deleteError,
-        errorMessage,
-        startupId,
-      });
-      throw new Error(`スタートアップの削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+      try {
+        await callTauriCommand('doc_delete', {
+          collectionName: 'startups',
+          docId: startupId,
+        });
+        
+        console.log('✅ [deleteStartup] Tauri経由で削除成功:', startupId);
+      } catch (deleteError: any) {
+        const errorMessage = deleteError?.message || String(deleteError || '');
+        console.error('❌ [deleteStartup] Tauri経由での削除失敗:', {
+          error: deleteError,
+          errorMessage,
+          startupId,
+        });
+        throw new Error(`スタートアップの削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+      }
     }
   } catch (error: any) {
     console.error('❌ [deleteStartup] エラー:', error);

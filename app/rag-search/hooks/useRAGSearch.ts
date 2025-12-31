@@ -91,51 +91,76 @@ export function useRAGSearch(options: UseRAGSearchOptions = {}) {
       
       // organizationIdが未指定の場合の警告
       if (!filters.organizationId) {
-        console.warn('[useRAGSearch] organizationIdが指定されていません。検索結果が空になる可能性があります。');
+        console.log('[useRAGSearch] organizationIdが未指定のため、全組織横断検索を実行します。');
       }
       
       // 検索設定を取得
-      const searchConfig = getSearchConfig();
+      let searchConfig;
+      try {
+        searchConfig = getSearchConfig();
+        console.log('[useRAGSearch] 検索設定:', searchConfig);
+      } catch (error) {
+        console.error('[useRAGSearch] 検索設定の取得エラー:', error);
+        searchConfig = {
+          enableBM25: false,
+          enableRouter: false,
+          useHybridSearchByDefault: false,
+        };
+      }
       
       // クエリルーターが有効な場合は、ルーターを使用した検索を実行
       let results: KnowledgeGraphSearchResult[];
-      if (searchConfig.enableRouter) {
-        console.log('[useRAGSearch] クエリルーターを使用した検索を実行');
-        results = await searchKnowledgeGraphWithRouter(
-          query,
-          maxResults,
-          {
-            organizationId: filters.organizationId,
-            entityType: filters.entityType,
-            relationType: filters.relationType,
-            createdAfter: filters.createdAfter,
-            createdBefore: filters.createdBefore,
-            updatedAfter: filters.updatedAfter,
-            updatedBefore: filters.updatedBefore,
-            filterLogic: filters.filterLogic,
-          },
-          useCache
-        );
-      } else {
-        // 従来の検索（ベクトル検索のみ、またはハイブリッド検索）
-        results = await searchKnowledgeGraph(
-          query,
-          maxResults,
-          {
-            organizationId: filters.organizationId,
-            entityType: filters.entityType,
-            relationType: filters.relationType,
-            createdAfter: filters.createdAfter,
-            createdBefore: filters.createdBefore,
-            updatedAfter: filters.updatedAfter,
-            updatedBefore: filters.updatedBefore,
-            filterLogic: filters.filterLogic,
-          },
-          useCache
-        );
+      try {
+        if (searchConfig.enableRouter) {
+          console.log('[useRAGSearch] クエリルーターを使用した検索を実行');
+          results = await searchKnowledgeGraphWithRouter(
+            query,
+            maxResults,
+            {
+              organizationId: filters.organizationId,
+              entityType: filters.entityType,
+              relationType: filters.relationType,
+              createdAfter: filters.createdAfter,
+              createdBefore: filters.createdBefore,
+              updatedAfter: filters.updatedAfter,
+              updatedBefore: filters.updatedBefore,
+              filterLogic: filters.filterLogic,
+            },
+            useCache
+          );
+        } else {
+          // 従来の検索（ベクトル検索のみ、またはハイブリッド検索）
+          console.log('[useRAGSearch] 従来の検索を実行（ルーター無効）');
+          results = await searchKnowledgeGraph(
+            query,
+            maxResults,
+            {
+              organizationId: filters.organizationId,
+              entityType: filters.entityType,
+              relationType: filters.relationType,
+              createdAfter: filters.createdAfter,
+              createdBefore: filters.createdBefore,
+              updatedAfter: filters.updatedAfter,
+              updatedBefore: filters.updatedBefore,
+              filterLogic: filters.filterLogic,
+            },
+            useCache
+          );
+        }
+        
+        console.log('[useRAGSearch] 検索結果取得:', results.length, '件');
+        if (results.length > 0) {
+          console.log('[useRAGSearch] 検索結果のサンプル:', results.slice(0, 3).map(r => ({
+            type: r.type,
+            id: r.id,
+            score: r.score,
+          })));
+        }
+      } catch (searchError: any) {
+        console.error('[useRAGSearch] 検索実行エラー:', searchError);
+        console.error('[useRAGSearch] エラースタック:', searchError?.stack);
+        throw searchError;
       }
-      
-      console.log('[useRAGSearch] 検索結果取得:', results.length, '件', results);
       
       setSearchResults(results);
       

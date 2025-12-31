@@ -552,6 +552,67 @@ export async function createOrg(
   position: number,
   orgType?: string
 ): Promise<any> {
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  
+  // Supabase使用時はSupabaseDataSource経由で作成
+  if (useSupabase) {
+    try {
+      console.log('🔍 [createOrg] Supabase経由で組織を作成します');
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      
+      // parentIdが指定されている場合、親組織が存在するか確認
+      if (parentId) {
+        const parentOrg = await dataSource.doc_get('organizations', parentId);
+        if (!parentOrg) {
+          throw new Error(`親組織が見つかりません: ${parentId}`);
+        }
+      }
+      
+      // 組織データを準備（Supabaseのスキーマに合わせてカラム名を調整）
+      const orgData: any = {
+        name,
+        level,
+        levelName,
+        position,
+        type: orgType || 'organization',
+      };
+      
+      // NULLでない値のみ追加
+      if (parentId) {
+        orgData.parentId = parentId; // Supabaseスキーマでは"parentId"（引用符付き）
+      }
+      if (title) {
+        orgData.title = title;
+      }
+      if (description) {
+        orgData.description = description;
+      }
+      
+      // SupabaseDataSource経由で作成
+      const orgId = await dataSource.collection_add('organizations', orgData);
+      
+      // 作成された組織を取得して返す
+      const createdOrg = await dataSource.doc_get('organizations', orgId);
+      
+      if (!createdOrg) {
+        throw new Error('組織の作成に失敗しました: 作成後の取得に失敗');
+      }
+      
+      console.log('✅ [createOrg] Supabase経由で組織を作成成功:', {
+        id: createdOrg.id,
+        name: createdOrg.name,
+        parentId: createdOrg.parentId || null,
+      });
+      
+      return createdOrg;
+    } catch (error: any) {
+      console.error('❌ [createOrg] Supabase経由の作成に失敗:', error);
+      throw error;
+    }
+  }
+  
+  // ローカルSQLite使用時は従来の方法
   try {
     // Rust API経由で作成
     const payload: any = {
@@ -584,7 +645,7 @@ export async function createOrg(
 }
 
 /**
- * 組織を更新
+ * 組織を更新（Supabase対応）
  */
 export async function updateOrg(
   id: string,
@@ -593,25 +654,9 @@ export async function updateOrg(
   description?: string,
   position?: number
 ): Promise<any> {
-  try {
-    // Rust API経由で更新
-    return await apiPut<any>(`/api/organizations/${id}`, {
-      name: name || null,
-      title: title || null,
-      description: description || null,
-      position: position || null,
-    });
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の更新に失敗、Tauriコマンドにフォールバック:', error);
-    return callTauriCommand('update_org', {
-      id,
-      name: name || null,
-      title: title || null,
-      description: description || null,
-      position: position || null,
-    });
-  }
+  // lib/orgApi/organizations.tsのupdateOrg関数を使用
+  const { updateOrg: updateOrgFromOrganizations } = await import('./orgApi/organizations');
+  return await updateOrgFromOrganizations(id, name, title, description, position);
 }
 
 /**
@@ -643,32 +688,61 @@ export async function searchOrgsByName(namePattern: string): Promise<any[]> {
   }
 }
 
-/**
- * 組織を削除
- */
-/**
- * 削除対象の子組織とメンバーを取得
- */
-export async function getDeletionTargets(organizationId: string): Promise<{
-  childOrganizations: Array<{ id: string; name: string; title?: string; level: number; levelName: string; type?: string }>;
-  members: Array<{ id: string; name: string; position?: string; organizationId: string }>;
-}> {
-  try {
-    const result = await callTauriCommand('get_deletion_targets_cmd', {
-      organizationId,
-    }) as {
-      childOrganizations: Array<{ id: string; name: string; title?: string; level: number; levelName: string }>;
-      members: Array<{ id: string; name: string; position?: string; organizationId: string }>;
-    };
-    return result;
-  } catch (error: any) {
-    console.error('❌ [getDeletionTargets] 削除対象の取得に失敗しました:', error);
-    throw new Error(`削除対象の取得に失敗しました: ${error.message || error}`);
-  }
-}
 
 export async function deleteOrg(id: string): Promise<void> {
-  console.log('🗑️ [deleteOrg] 削除開始:', id);
+  // getOrgTreeFromDbと同じ方法でSupabaseが有効かどうかを判定
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  console.log(`🗑️ [deleteOrg] 削除開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, id);
+  console.log(`🔍 [deleteOrg] 環境変数確認: NEXT_PUBLIC_USE_SUPABASE=${process.env.NEXT_PUBLIC_USE_SUPABASE}, useSupabase=${useSupabase}`);
+  
+  // Supabase使用時はDataSource経由で削除
+  if (useSupabase) {
+    try {
+      // lib/orgApi/organizations.tsのdeleteOrg関数を使用
+      const { deleteOrg: deleteOrgFromOrganizations } = await import('./orgApi/organizations');
+      await deleteOrgFromOrganizations(id);
+      return;
+    } catch (error: any) {
+      console.error('❌ [deleteOrg] Supabase経由での削除が失敗しました:', error);
+      throw error;
+    }
+  }
+  
+  // 環境変数ではSupabaseが無効だが、getOrgTreeFromDbがSupabaseから取得している可能性がある
+  // 念のため、DataSourceを確認してSupabaseが有効な場合はSupabaseから削除
+  try {
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    // DataSourceがSupabaseDataSourceかどうかを確認
+    const dataSourceType = dataSource.constructor.name;
+    const isSupabaseDataSource = dataSourceType === 'SupabaseDataSource';
+    
+    if (isSupabaseDataSource) {
+      console.log('🔍 [deleteOrg] 環境変数ではSupabaseが無効ですが、SupabaseDataSourceが検出されました。Supabaseから削除を試みます。');
+      try {
+        const { deleteDocViaDataSource } = await import('./dataSourceAdapter');
+        await deleteDocViaDataSource('organizations', id);
+        console.log('✅ [deleteOrg] Supabase経由で削除成功:', id);
+        // Supabaseから削除が成功した場合、SQLiteからの削除は不要
+        return;
+      } catch (supabaseError: any) {
+        const supabaseErrorMessage = supabaseError?.message || '';
+        // レコードが見つからないエラーの場合は成功として扱う
+        if (supabaseErrorMessage.includes('No rows found') || 
+            supabaseErrorMessage.includes('PGRST116') ||
+            supabaseErrorMessage.includes('Query returned no rows')) {
+          console.log('ℹ️ [deleteOrg] Supabaseからは既に削除されています:', id);
+          // Supabaseから既に削除されている場合、SQLiteからの削除は不要
+          return;
+        } else {
+          console.warn('⚠️ [deleteOrg] Supabaseからの削除に失敗しました（SQLiteからの削除は続行します）:', supabaseError);
+        }
+      }
+    }
+  } catch (dataSourceError: any) {
+    // DataSourceが利用できない場合は無視（SQLiteからの削除は続行）
+    console.log('ℹ️ [deleteOrg] DataSourceが利用できないため、SQLiteからのみ削除します:', dataSourceError?.message);
+  }
   
   // 削除前に、該当する組織が存在するか確認
   try {
@@ -893,6 +967,38 @@ export async function getOrgMembers(organizationId: string): Promise<any[]> {
   if (organizationId === 'virtual-root') {
     console.log('⚠️ [getOrgMembers] virtual-rootは仮想組織のため、メンバーを返しません');
     return [];
+  }
+  
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  
+  // Supabase使用時はDataSource経由で直接取得（パフォーマンス最適化）
+  if (useSupabase) {
+    try {
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      
+      // organizationIdでフィルタリングしてから取得（クライアント側でのフィルタリングを回避）
+      // normalizeFieldNameで自動的に小文字に変換されるため、organizationId（キャメルケース）を使用可能
+      const result = await dataSource.collection_get('organizationMembers', {
+        filters: [
+          { field: 'organizationId', operator: 'eq', value: organizationId }
+        ],
+        orderBy: 'position',
+        orderDirection: 'asc'
+      });
+      
+      console.log('✅ [getOrgMembers] Supabase経由でメンバー取得成功:', { 
+        organizationId, 
+        count: result?.length || 0
+      });
+      return result || [];
+    } catch (supabaseError: any) {
+      console.warn('⚠️ [getOrgMembers] Supabase経由の取得に失敗、フォールバック:', { 
+        organizationId, 
+        error: supabaseError?.message 
+      });
+      // フォールバック: Rust API経由
+    }
   }
   
   try {
@@ -1164,783 +1270,15 @@ export interface Startup {
   updatedAt?: any;
 }
 
-/**
- * 注力施策を取得
- */
-export async function getFocusInitiatives(organizationId: string): Promise<FocusInitiative[]> {
-  try {
-    console.log('📖 [getFocusInitiatives] 開始:', { organizationId });
-    
-    // Tauriコマンドを直接使用してデータを取得
-    const { callTauriCommand } = await import('./localFirebase');
-    
-    try {
-      // collection_getコマンドを使用
-      const result = await callTauriCommand('collection_get', {
-        collectionName: 'focusInitiatives',
-      });
-      
-      console.log('📖 [getFocusInitiatives] collection_get結果:', result);
-      
-      const allInitiatives = Array.isArray(result) ? result : [];
-      console.log('📖 [getFocusInitiatives] 全データ数:', allInitiatives.length);
-      
-      // デバッグ: データベースから取得した生データをログ出力
-      if (allInitiatives.length > 0) {
-        console.log('📖 [getFocusInitiatives] 生データサンプル (最初の1件):', JSON.stringify(allInitiatives[0], null, 2));
-      }
-      
-      const filtered = allInitiatives
-        .filter((item: any) => {
-          const data = item.data || item;
-          const matches = data.organizationId === organizationId;
-          if (!matches) {
-            console.log('📖 [getFocusInitiatives] フィルタ除外:', { 
-              itemId: data.id || item.id, 
-              itemOrgId: data.organizationId, 
-              targetOrgId: organizationId 
-            });
-          }
-          return matches;
-        })
-        .map((item: any) => {
-          const data = item.data || item;
-          
-          // JSON文字列を配列にパースするヘルパー関数
-          const parseJsonArray = (value: any): string[] => {
-            if (Array.isArray(value)) {
-              return value;
-            }
-            if (typeof value === 'string') {
-              try {
-                const parsed = JSON.parse(value);
-                return Array.isArray(parsed) ? parsed : [];
-              } catch (e) {
-                console.warn('⚠️ [getFocusInitiatives] JSONパースエラー:', e, 'value:', value);
-                return [];
-              }
-            }
-            return [];
-          };
-          
-          // デバッグ: 各注力施策の生データをログ出力
-          console.log(`📖 [getFocusInitiatives] 注力施策「${data.title || data.id}」の生データ:`, {
-            id: data.id || item.id,
-            themeId: data.themeId,
-            themeIds: data.themeIds,
-            themeIdsType: typeof data.themeIds,
-            topicIds: data.topicIds,
-            topicIdsType: typeof data.topicIds,
-            relatedOrganizations: data.relatedOrganizations,
-            organizationId: data.organizationId,
-          });
-          
-          return {
-            id: data.id || item.id,
-            organizationId: data.organizationId,
-            title: data.title || '',
-            description: data.description || '',
-            content: data.content || '',
-            assignee: data.assignee || '',
-            method: data.method || [],
-            methodOther: data.methodOther || '',
-            methodDetails: data.methodDetails || {},
-            means: data.means || [],
-            meansOther: data.meansOther || '',
-            objective: data.objective || '',
-            considerationPeriod: data.considerationPeriod || '',
-            executionPeriod: data.executionPeriod || '',
-            monetizationPeriod: data.monetizationPeriod || '',
-            relatedOrganizations: Array.isArray(data.relatedOrganizations) ? data.relatedOrganizations : (data.relatedOrganizations ? [data.relatedOrganizations] : []),
-            relatedGroupCompanies: Array.isArray(data.relatedGroupCompanies) ? data.relatedGroupCompanies : [],
-            monetizationDiagram: data.monetizationDiagram || '',
-            relationDiagram: data.relationDiagram || '',
-            causeEffectDiagramId: data.causeEffectDiagramId,
-            themeId: data.themeId,
-            themeIds: parseJsonArray(data.themeIds) || (data.themeId ? [data.themeId] : []),
-            topicIds: parseJsonArray(data.topicIds) || [],
-            createdAt: data.createdAt,
-            updatedAt: data.updatedAt,
-          } as FocusInitiative;
-        });
-      
-      console.log('📖 [getFocusInitiatives] フィルタ後:', filtered.length, '件');
-      
-      // createdAtでソート（新しい順）
-      const sorted = filtered.sort((a, b) => {
-        const aTime = a.createdAt ? (typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : (a.createdAt.toMillis ? a.createdAt.toMillis() : 0)) : 0;
-        const bTime = b.createdAt ? (typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : (b.createdAt.toMillis ? b.createdAt.toMillis() : 0)) : 0;
-        return bTime - aTime;
-      });
-      
-      console.log('📖 [getFocusInitiatives] 最終結果:', sorted);
-      return sorted;
-    } catch (collectionError: any) {
-      console.error('📖 [getFocusInitiatives] collection_getエラー:', collectionError);
-      // フォールバック: 空配列を返す
-      return [];
-    }
-  } catch (error) {
-    console.error('❌ [getFocusInitiatives] エラー:', error);
-    return [];
-  }
-}
-
-/**
- * 特性要因図IDで注力施策を取得
- */
-export async function getFocusInitiativeByCauseEffectDiagramId(causeEffectDiagramId: string): Promise<FocusInitiative | null> {
-  try {
-    console.log('📖 [getFocusInitiativeByCauseEffectDiagramId] 開始:', { causeEffectDiagramId });
-    
-    const { callTauriCommand } = await import('./localFirebase');
-    
-    try {
-      const result = await callTauriCommand('collection_get', {
-        collectionName: 'focusInitiatives',
-      });
-      
-      const allInitiatives = Array.isArray(result) ? result : [];
-      
-      const found = allInitiatives.find((item: any) => {
-        const data = item.data || item;
-        return data.causeEffectDiagramId === causeEffectDiagramId;
-      });
-      
-      if (found) {
-        const data = found.data || found;
-        
-        // JSON文字列を配列にパースするヘルパー関数
-        const parseJsonArray = (value: any): string[] => {
-          if (Array.isArray(value)) {
-            return value;
-          }
-          if (typeof value === 'string') {
-            try {
-              const parsed = JSON.parse(value);
-              return Array.isArray(parsed) ? parsed : [];
-            } catch (e) {
-              console.warn('⚠️ [getFocusInitiativeByCauseEffectDiagramId] JSONパースエラー:', e, 'value:', value);
-              return [];
-            }
-          }
-          return [];
-        };
-        
-        const initiative: FocusInitiative = {
-          id: data.id || found.id,
-          organizationId: data.organizationId,
-          title: data.title || '',
-          description: data.description || '',
-          content: data.content || '',
-          assignee: data.assignee || '',
-          method: data.method || [],
-          methodOther: data.methodOther || '',
-          methodDetails: data.methodDetails || {},
-          means: data.means || [],
-          meansOther: data.meansOther || '',
-          objective: data.objective || '',
-          considerationPeriod: data.considerationPeriod || '',
-          executionPeriod: data.executionPeriod || '',
-          monetizationPeriod: data.monetizationPeriod || '',
-          relatedOrganizations: data.relatedOrganizations || [],
-          relatedGroupCompanies: data.relatedGroupCompanies || [],
-          monetizationDiagram: data.monetizationDiagram || '',
-          relationDiagram: data.relationDiagram || '',
-          causeEffectDiagramId: data.causeEffectDiagramId,
-          themeId: data.themeId,
-          themeIds: parseJsonArray(data.themeIds) || [],
-          topicIds: parseJsonArray(data.topicIds) || [],
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
-        };
-        
-        console.log('✅ [getFocusInitiativeByCauseEffectDiagramId] 見つかりました:', initiative.id);
-        return initiative;
-      }
-      
-      console.warn('⚠️ [getFocusInitiativeByCauseEffectDiagramId] 見つかりませんでした');
-      return null;
-    } catch (error: any) {
-      console.error('❌ [getFocusInitiativeByCauseEffectDiagramId] エラー:', error);
-      return null;
-    }
-  } catch (error: any) {
-    console.error('❌ [getFocusInitiativeByCauseEffectDiagramId] エラー:', error);
-    return null;
-  }
-}
-
-/**
- * 注力施策を取得（ID指定）
- */
-export async function getFocusInitiativeById(initiativeId: string): Promise<FocusInitiative | null> {
-  try {
-    console.log('📖 [getFocusInitiativeById] 開始:', { initiativeId });
-    
-    // まずJSONファイルから読み込みを試みる
-    const jsonData = await loadInitiativeFromJson(initiativeId);
-    if (jsonData) {
-      console.log('✅ [getFocusInitiativeById] JSONファイルから読み込み成功:', {
-        hasCompanyId: !!jsonData.companyId,
-        hasOrganizationId: !!jsonData.organizationId,
-        companyId: jsonData.companyId,
-        organizationId: jsonData.organizationId,
-      });
-      // JSONファイルにcompanyIdまたはorganizationIdが含まれていない場合は、データベースから再取得
-      // （古いJSONファイルの可能性があるため）
-      if (!jsonData.companyId && !jsonData.organizationId) {
-        console.warn('⚠️ [getFocusInitiativeById] JSONファイルにcompanyId/organizationIdが含まれていません。データベースから再取得します。');
-        // データベースから再取得するために続行
-      } else {
-        return jsonData;
-      }
-    }
-    
-    // JSONファイルがない場合、データベースから読み込みを試みる
-    const { callTauriCommand } = await import('./localFirebase');
-    
-    try {
-      // doc_getコマンドを使用
-      const result = await callTauriCommand('doc_get', {
-        collectionName: 'focusInitiatives',
-        docId: initiativeId,
-      });
-      
-      console.log('📖 [getFocusInitiativeById] doc_get結果:', result);
-      console.log('📖 [getFocusInitiativeById] doc_get結果の型:', typeof result, 'keys:', result ? Object.keys(result) : []);
-      
-      // result.existsをチェック
-      if (result && (result.exists === false || (result.exists === undefined && !result.data))) {
-        console.warn('📖 [getFocusInitiativeById] ドキュメントが存在しません:', { initiativeId, exists: result.exists });
-        return null;
-      }
-      
-      // 結果の構造を確認（result.data または result 自体がデータ）
-      const data = (result && result.data) ? result.data : result;
-      
-      // dataが存在しない場合はnullを返す
-      if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
-        console.warn('📖 [getFocusInitiativeById] データが存在しません:', { initiativeId, result });
-        return null;
-      }
-      console.log('📖 [getFocusInitiativeById] データ構造確認:', {
-        hasData: !!data,
-        dataKeys: data ? Object.keys(data) : [],
-        organizationId: data?.organizationId,
-        companyId: data?.companyId,
-        topicIds: data?.topicIds,
-        topicIdsType: typeof data?.topicIds,
-        themeIds: data?.themeIds,
-        themeIdsType: typeof data?.themeIds,
-        fullData: JSON.stringify(data, null, 2),
-      });
-      
-      // JSON文字列を配列にパースするヘルパー関数
-      const parseJsonArray = (value: any): string[] => {
-        if (Array.isArray(value)) {
-          return value;
-        }
-        if (typeof value === 'string') {
-          try {
-            const parsed = JSON.parse(value);
-            return Array.isArray(parsed) ? parsed : [];
-          } catch (e) {
-            console.warn('⚠️ [getFocusInitiativeById] JSONパースエラー:', e, 'value:', value);
-            return [];
-          }
-        }
-        return [];
-      };
-      
-      if (data && (data.id || data.title || data.organizationId || data.companyId)) {
-        // データをFocusInitiative形式に変換
-        // companyIdとorganizationIdの処理を改善
-        // nullは有効な値として扱う（事業会社の注力施策の場合、organizationIdはnull）
-        // undefinedや空文字列の場合のみundefinedに変換
-        const processedOrganizationId = (data.organizationId !== undefined && data.organizationId !== '') 
-          ? data.organizationId 
-          : undefined;
-        const processedCompanyId = (data.companyId !== undefined && data.companyId !== '') 
-          ? data.companyId 
-          : undefined;
-        
-        console.log('📖 [getFocusInitiativeById] ID処理:', {
-          rawOrganizationId: data.organizationId,
-          rawCompanyId: data.companyId,
-          rawOrganizationIdType: typeof data.organizationId,
-          rawCompanyIdType: typeof data.companyId,
-          rawOrganizationIdIsNull: data.organizationId === null,
-          rawCompanyIdIsNull: data.companyId === null,
-          processedOrganizationId,
-          processedCompanyId,
-          allDataKeys: Object.keys(data),
-        });
-        
-        const initiative: FocusInitiative = {
-          id: data.id || initiativeId,
-          organizationId: processedOrganizationId,
-          companyId: processedCompanyId,
-          title: data.title || '',
-          description: data.description || '',
-          content: data.content || '',
-          assignee: data.assignee || '',
-          method: Array.isArray(data.method) ? data.method : (data.method ? [data.method] : []),
-          methodOther: data.methodOther || '',
-          methodDetails: data.methodDetails || {},
-          means: Array.isArray(data.means) ? data.means : (data.means ? [data.means] : []),
-          meansOther: data.meansOther || '',
-          objective: data.objective || '',
-          considerationPeriod: data.considerationPeriod || '',
-          executionPeriod: data.executionPeriod || '',
-          monetizationPeriod: data.monetizationPeriod || '',
-          relatedOrganizations: Array.isArray(data.relatedOrganizations) ? data.relatedOrganizations : [],
-          relatedGroupCompanies: Array.isArray(data.relatedGroupCompanies) ? data.relatedGroupCompanies : [],
-          monetizationDiagram: data.monetizationDiagram || '',
-          relationDiagram: data.relationDiagram || '',
-          causeEffectDiagramId: data.causeEffectDiagramId,
-          themeId: data.themeId,
-          themeIds: parseJsonArray(data.themeIds) || (data.themeId ? [data.themeId] : []),
-          topicIds: parseJsonArray(data.topicIds) || [],
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
-        };
-        
-        console.log('📖 [getFocusInitiativeById] 変換後:', {
-          id: initiative.id,
-          title: initiative.title,
-          organizationId: initiative.organizationId,
-          companyId: initiative.companyId,
-          assignee: initiative.assignee,
-          description: initiative.description,
-          contentLength: initiative.content?.length || 0,
-          method: initiative.method,
-          means: initiative.means,
-          objective: initiative.objective,
-          considerationPeriod: initiative.considerationPeriod,
-          executionPeriod: initiative.executionPeriod,
-          monetizationPeriod: initiative.monetizationPeriod,
-          monetizationDiagram: initiative.monetizationDiagram,
-          relationDiagram: initiative.relationDiagram,
-        });
-        return initiative;
-    }
-      
-      console.warn('📖 [getFocusInitiativeById] データが見つかりませんでした。result:', result);
-    return null;
-    } catch (docError: any) {
-      console.error('📖 [getFocusInitiativeById] doc_getエラー:', docError);
-      // フォールバック: nullを返す
-      return null;
-    }
-  } catch (error: any) {
-    console.error('❌ [getFocusInitiativeById] エラー:', error);
-    return null;
-  }
-}
-
-/**
- * 注力施策を保存
- */
-export async function saveFocusInitiative(initiative: Partial<FocusInitiative>): Promise<string> {
-  try {
-    // ユニークIDを生成（既存のIDがない場合）
-    const initiativeId = initiative.id || generateUniqueId();
-    console.log('💾 [saveFocusInitiative] 開始:', { 
-      initiativeId, 
-      organizationId: initiative.organizationId,
-      title: initiative.title,
-      hasId: !!initiative.id 
-    });
-    
-    // organizationIdまたはcompanyIdが指定されている必要がある
-    if (!initiative.organizationId && !initiative.companyId) {
-      throw new Error('organizationIdまたはcompanyIdが指定されていません');
-    }
-    
-    // organizationIdが指定されている場合、organizationsテーブルに存在するか確認
-    if (initiative.organizationId) {
-      try {
-        const orgDocRef = doc(null, 'organizations', initiative.organizationId);
-        const orgDoc = await getDoc(orgDocRef);
-        if (!orgDoc.exists()) {
-          throw new Error(`組織ID "${initiative.organizationId}" がorganizationsテーブルに存在しません`);
-        }
-        console.log('✅ [saveFocusInitiative] 組織IDの存在確認成功:', initiative.organizationId);
-      } catch (orgCheckError: any) {
-        const errorMessage = orgCheckError?.message || String(orgCheckError || '');
-        if (errorMessage.includes('存在しません')) {
-          throw new Error(`組織ID "${initiative.organizationId}" がorganizationsテーブルに存在しません。組織一覧ページから正しい組織を選択してください。`);
-        }
-        // その他のエラーは警告のみ（組織が存在しない可能性があるが、続行を試みる）
-        console.warn('⚠️ [saveFocusInitiative] 組織IDの存在確認でエラー（続行します）:', errorMessage);
-      }
-    }
-    
-    // companyIdが指定されている場合、companiesテーブルに存在するか確認（Tauri環境の場合）
-    if (initiative.companyId && typeof window !== 'undefined' && '__TAURI__' in window) {
-      try {
-        const { callTauriCommand } = await import('./localFirebase');
-        const result = await callTauriCommand('doc_get', {
-          collectionName: 'companies',
-          docId: initiative.companyId,
-        });
-        if (!result || !(result as any).exists) {
-          throw new Error(`事業会社ID "${initiative.companyId}" がcompaniesテーブルに存在しません`);
-        }
-        console.log('✅ [saveFocusInitiative] 事業会社IDの存在確認成功:', initiative.companyId);
-      } catch (companyCheckError: any) {
-        const errorMessage = companyCheckError?.message || String(companyCheckError || '');
-        if (errorMessage.includes('存在しません') || errorMessage.includes('no rows')) {
-          throw new Error(`事業会社ID "${initiative.companyId}" がcompaniesテーブルに存在しません。`);
-        }
-        console.warn('⚠️ [saveFocusInitiative] 事業会社IDの存在確認でエラー（続行します）:', errorMessage);
-      }
-    }
-    
-    const docRef = doc(null, 'focusInitiatives', initiativeId);
-    console.log('💾 [saveFocusInitiative] docRef作成:', { 
-      collectionName: 'focusInitiatives', 
-      docId: initiativeId 
-    });
-    
-    // 既存ドキュメントの確認（エラーハンドリング付き）
-    let existingData: FocusInitiative | null = null;
-    let isNew = true;
-    
-    try {
-      const existingDoc = await getDoc(docRef);
-      if (existingDoc.exists()) {
-        existingData = existingDoc.data() as FocusInitiative;
-        isNew = false;
-        console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在します', { 
-          id: existingDoc.id,
-          title: existingData.title
-        });
-      } else {
-        console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成）');
-      }
-    } catch (getDocError: any) {
-      // ドキュメントが存在しない場合はエラーではなく、新規作成として扱う
-      const errorMessage = getDocError?.message || getDocError?.error || String(getDocError || '');
-      const isNoRowsError = errorMessage.includes('no rows') || 
-                           errorMessage.includes('Query returned no rows') ||
-                           errorMessage.includes('ドキュメント取得エラー');
-      
-      if (isNoRowsError) {
-        console.log('💾 [saveFocusInitiative] 既存ドキュメント確認: 存在しません（新規作成） - エラーは無視します', {
-          errorMessage
-        });
-        isNew = true;
-      } else {
-        // その他のエラーは再スロー
-        console.error('💾 [saveFocusInitiative] 既存ドキュメント確認エラー:', {
-          error: getDocError,
-          errorMessage,
-          errorType: typeof getDocError
-        });
-        throw getDocError;
-      }
-    }
-    
-    // serverTimestamp()は特殊なオブジェクトを返すため、Tauriコマンドに渡す前に文字列に変換
-    const now = new Date().toISOString();
-    
-    const data: any = {
-      id: initiativeId,
-      organizationId: initiative.organizationId || null,
-      companyId: initiative.companyId || null,
-      title: initiative.title || '',
-      description: initiative.description || '',
-      content: initiative.content || '',
-      assignee: initiative.assignee || '',
-      method: initiative.method || [],
-      methodOther: initiative.methodOther || '',
-      methodDetails: initiative.methodDetails || {},
-      means: initiative.means || [],
-      meansOther: initiative.meansOther || '',
-      objective: initiative.objective || '',
-      considerationPeriod: initiative.considerationPeriod || '',
-      executionPeriod: initiative.executionPeriod || '',
-      monetizationPeriod: initiative.monetizationPeriod || '',
-      relatedOrganizations: initiative.relatedOrganizations || [],
-      relatedGroupCompanies: initiative.relatedGroupCompanies || [],
-      monetizationDiagram: initiative.monetizationDiagram || '',
-      relationDiagram: initiative.relationDiagram || '',
-      themeId: initiative.themeId || '',
-      themeIds: Array.isArray(initiative.themeIds) ? initiative.themeIds : (initiative.themeIds ? [initiative.themeIds] : []),
-      topicIds: Array.isArray(initiative.topicIds) ? initiative.topicIds : (initiative.topicIds ? [initiative.topicIds] : []),
-      updatedAt: now,
-    };
-    
-    // 特性要因図IDを設定（存在しない場合は自動生成）
-    if (initiative.causeEffectDiagramId) {
-      // 明示的に設定されている場合はそれを使用
-      data.causeEffectDiagramId = initiative.causeEffectDiagramId;
-    } else if (existingData?.causeEffectDiagramId) {
-      // 既存データがある場合は保持
-      data.causeEffectDiagramId = existingData.causeEffectDiagramId;
-    } else {
-      // 新規作成時は自動生成
-      data.causeEffectDiagramId = `ced_${generateUniqueId()}`;
-    }
-    
-    if (isNew) {
-      // 新規作成の場合
-      data.createdAt = now;
-      console.log('📝 [saveFocusInitiative] 新規作成:', initiativeId, { data });
-    } else {
-      // 更新の場合
-      if (existingData?.createdAt) {
-        // createdAtは既存の値を保持
-        data.createdAt = typeof existingData.createdAt === 'string' 
-          ? existingData.createdAt 
-          : (existingData.createdAt.toMillis ? new Date(existingData.createdAt.toMillis()).toISOString() : now);
-      } else {
-        data.createdAt = now;
-      }
-      console.log('🔄 [saveFocusInitiative] 更新:', initiativeId, { data });
-    }
-    
-    console.log('💾 [saveFocusInitiative] setDoc呼び出し前:', { 
-      collectionName: 'focusInitiatives', 
-      docId: initiativeId, 
-      dataKeys: Object.keys(data),
-      topicIds: data.topicIds,
-      themeIds: data.themeIds,
-      data: JSON.stringify(data)
-    });
-    
-    // setDocを呼び出す
-    // Tauri環境ではcallTauriCommandを使用
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
-      const { callTauriCommand } = await import('./localFirebase');
-      
-      // themeIdsとtopicIdsをJSON文字列に変換
-      const dataForDb: any = {
-        ...data,
-        themeIds: Array.isArray(data.themeIds) && data.themeIds.length > 0 ? JSON.stringify(data.themeIds) : null,
-        topicIds: Array.isArray(data.topicIds) && data.topicIds.length > 0 ? JSON.stringify(data.topicIds) : null,
-        method: Array.isArray(data.method) && data.method.length > 0 ? JSON.stringify(data.method) : null,
-        means: Array.isArray(data.means) && data.means.length > 0 ? JSON.stringify(data.means) : null,
-        relatedOrganizations: Array.isArray(data.relatedOrganizations) && data.relatedOrganizations.length > 0 ? JSON.stringify(data.relatedOrganizations) : null,
-        relatedGroupCompanies: Array.isArray(data.relatedGroupCompanies) && data.relatedGroupCompanies.length > 0 ? JSON.stringify(data.relatedGroupCompanies) : null,
-        methodDetails: data.methodDetails && Object.keys(data.methodDetails).length > 0 ? JSON.stringify(data.methodDetails) : null,
-      };
-      
-      await callTauriCommand('doc_set', {
-        collectionName: 'focusInitiatives',
-        docId: initiativeId,
-        data: dataForDb,
-      });
-      console.log('✅ [saveFocusInitiative] データベース保存成功（Tauri）:', initiativeId, {
-        title: data.title,
-        organizationId: data.organizationId,
-        companyId: data.companyId,
-        topicIds: data.topicIds,
-        themeIds: data.themeIds,
-      });
-    } else {
-      // フォールバック: Firestoreを使用
-      await setDoc(docRef, data);
-      console.log('✅ [saveFocusInitiative] データベース保存成功（Firestore）:', initiativeId, {
-        title: data.title,
-        topicIds: data.topicIds,
-        themeIds: data.themeIds,
-      });
-    }
-    
-    // 保存後に確認のため再取得
-    try {
-      const { callTauriCommand } = await import('./localFirebase');
-      const verifyResult = await callTauriCommand('doc_get', {
-        collectionName: 'focusInitiatives',
-        docId: initiativeId,
-      });
-      const verifyData = (verifyResult && verifyResult.data) ? verifyResult.data : verifyResult;
-      console.log('🔍 [saveFocusInitiative] 保存後の確認:', {
-        savedTopicIds: verifyData?.topicIds,
-        savedThemeIds: verifyData?.themeIds,
-        verifyDataKeys: verifyData ? Object.keys(verifyData) : [],
-        fullVerifyData: JSON.stringify(verifyData, null, 2),
-      });
-    } catch (verifyError) {
-      console.warn('⚠️ [saveFocusInitiative] 保存後の確認に失敗:', verifyError);
-    }
-    
-    // テーマ側のinitiativeIdsも更新（双方向の関連付けを維持）
-    if (data.themeIds && Array.isArray(data.themeIds) && data.themeIds.length > 0) {
-      console.log('🔄 [saveFocusInitiative] テーマ側のinitiativeIdsを更新中...', { 
-        themeIds: data.themeIds,
-        initiativeId,
-        existingDataExists: !!existingData,
-        existingThemeIds: existingData?.themeIds 
-      });
-      
-      // 既存のテーマデータを取得して更新
-      const existingThemeIds = Array.isArray(existingData?.themeIds) ? existingData.themeIds : [];
-      const newThemeIds = Array.isArray(data.themeIds) ? data.themeIds.filter((id: any) => id && typeof id === 'string') : [];
-      
-      // 削除されたテーマからこの注力施策IDを削除
-      const removedThemeIds = existingThemeIds.filter(id => !newThemeIds.includes(id));
-      for (const themeId of removedThemeIds) {
-        try {
-          if (!themeId) continue;
-          const themeDocRef = doc(null, 'themes', themeId);
-          const themeDoc = await getDoc(themeDocRef);
-          if (themeDoc && typeof themeDoc.exists === 'function' && themeDoc.exists()) {
-            const themeData = themeDoc.data();
-            if (themeData) {
-              const updatedInitiativeIds = Array.isArray(themeData.initiativeIds) 
-                ? themeData.initiativeIds.filter((id: string) => id !== initiativeId)
-                : [];
-              
-              await setDoc(themeDocRef, {
-                ...themeData,
-                initiativeIds: updatedInitiativeIds,
-                updatedAt: new Date().toISOString(),
-              });
-              console.log(`✅ [saveFocusInitiative] テーマ「${themeId}」から注力施策IDを削除しました`);
-            }
-          }
-        } catch (error: any) {
-          console.warn(`⚠️ [saveFocusInitiative] テーマ「${themeId}」の更新に失敗しました:`, error);
-        }
-      }
-      
-      // 追加されたテーマにこの注力施策IDを追加
-      for (const themeId of newThemeIds) {
-        try {
-          if (!themeId || typeof themeId !== 'string') {
-            console.warn(`⚠️ [saveFocusInitiative] 無効なテーマIDをスキップ:`, themeId);
-            continue;
-          }
-          
-          console.log(`🔄 [saveFocusInitiative] テーマ「${themeId}」を更新中...`);
-          const themeDocRef = doc(null, 'themes', themeId);
-          
-          if (!themeDocRef) {
-            console.warn(`⚠️ [saveFocusInitiative] テーマDocRefの作成に失敗:`, themeId);
-            continue;
-          }
-          
-          const themeDoc = await getDoc(themeDocRef);
-          
-          if (!themeDoc) {
-            console.warn(`⚠️ [saveFocusInitiative] テーマドキュメントの取得に失敗:`, themeId);
-            continue;
-          }
-          
-          if (typeof themeDoc.exists === 'function' && themeDoc.exists()) {
-            const themeData = themeDoc.data();
-            if (themeData && typeof themeData === 'object') {
-              const existingInitiativeIds = Array.isArray(themeData.initiativeIds) ? themeData.initiativeIds : [];
-              
-              if (!existingInitiativeIds.includes(initiativeId)) {
-                await setDoc(themeDocRef, {
-                  ...themeData,
-                  initiativeIds: [...existingInitiativeIds, initiativeId],
-                  updatedAt: new Date().toISOString(),
-                });
-                console.log(`✅ [saveFocusInitiative] テーマ「${themeId}」に注力施策IDを追加しました`);
-              } else {
-                console.log(`ℹ️ [saveFocusInitiative] テーマ「${themeId}」には既に注力施策IDが含まれています`);
-              }
-            } else {
-              console.warn(`⚠️ [saveFocusInitiative] テーマデータが無効です:`, themeId, themeData);
-            }
-          } else {
-            console.warn(`⚠️ [saveFocusInitiative] テーマ「${themeId}」が見つかりません`);
-          }
-        } catch (error: any) {
-          console.error(`❌ [saveFocusInitiative] テーマ「${themeId}」の更新に失敗しました:`, {
-            errorMessage: error?.message,
-            errorName: error?.name,
-            errorStack: error?.stack,
-            error: error
-          });
-        }
-      }
-    } else if (existingData?.themeIds && Array.isArray(existingData.themeIds) && existingData.themeIds.length > 0) {
-      // themeIdsが空になった場合、既存のテーマからこの注力施策IDを削除
-      console.log('🔄 [saveFocusInitiative] テーマ関連が削除されました。既存のテーマから注力施策IDを削除中...');
-      for (const themeId of existingData.themeIds) {
-        try {
-          if (!themeId) continue;
-          const themeDocRef = doc(null, 'themes', themeId);
-          const themeDoc = await getDoc(themeDocRef);
-          if (themeDoc && typeof themeDoc.exists === 'function' && themeDoc.exists()) {
-            const themeData = themeDoc.data();
-            if (themeData) {
-              const updatedInitiativeIds = Array.isArray(themeData.initiativeIds) 
-                ? themeData.initiativeIds.filter((id: string) => id !== initiativeId)
-                : [];
-              
-              await setDoc(themeDocRef, {
-                ...themeData,
-                initiativeIds: updatedInitiativeIds,
-                updatedAt: new Date().toISOString(),
-              });
-              console.log(`✅ [saveFocusInitiative] テーマ「${themeId}」から注力施策IDを削除しました`);
-            }
-          }
-        } catch (error: any) {
-          console.warn(`⚠️ [saveFocusInitiative] テーマ「${themeId}」の更新に失敗しました:`, error);
-        }
-      }
-    }
-    
-    // JSONファイルにも保存
-    try {
-      const fullInitiative: FocusInitiative = {
-        id: initiativeId,
-        organizationId: data.organizationId,
-        companyId: data.companyId,
-        title: data.title,
-        description: data.description,
-        content: data.content,
-        assignee: data.assignee,
-        method: data.method,
-        methodOther: data.methodOther,
-        methodDetails: data.methodDetails,
-        means: data.means,
-        meansOther: data.meansOther,
-        objective: data.objective,
-        considerationPeriod: data.considerationPeriod,
-        executionPeriod: data.executionPeriod,
-        monetizationPeriod: data.monetizationPeriod,
-        relatedOrganizations: data.relatedOrganizations,
-        relatedGroupCompanies: data.relatedGroupCompanies,
-        monetizationDiagram: data.monetizationDiagram,
-        relationDiagram: data.relationDiagram,
-        causeEffectDiagramId: data.causeEffectDiagramId,
-        themeId: data.themeId,
-        themeIds: data.themeIds,
-        topicIds: data.topicIds,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      };
-      
-      await saveInitiativeToJson(fullInitiative);
-      console.log('✅ [saveFocusInitiative] JSONファイル保存成功:', initiativeId);
-    } catch (jsonError: any) {
-      // JSONファイルの保存に失敗しても、データベースへの保存は成功しているので警告のみ
-      console.warn('⚠️ [saveFocusInitiative] JSONファイルの保存に失敗しました（データベースへの保存は成功）:', jsonError);
-    }
-    
-    return initiativeId;
-  } catch (error: any) {
-    console.error('❌ [saveFocusInitiative] 保存失敗:', {
-      errorMessage: error?.message,
-      errorName: error?.name,
-      errorStack: error?.stack,
-      error: error,
-      initiativeId: initiative.id || '未生成',
-      organizationId: initiative.organizationId,
-    });
-    throw error;
-  }
-}
+// 注力施策関連の関数は lib/orgApi/focusInitiatives.ts に移動しました
+// focusInitiatives.tsから再エクスポート（後方互換性のため）
+export {
+  getFocusInitiatives,
+  getFocusInitiativeByCauseEffectDiagramId,
+  getFocusInitiativeById,
+  saveFocusInitiative,
+  deleteFocusInitiative,
+} from './orgApi/focusInitiatives';
 
 /**
  * Tauriダイアログを使用した確認
@@ -2008,36 +1346,8 @@ export async function tauriAlert(message: string, title: string = 'お知らせ'
   }
 }
 
-/**
- * 注力施策を削除
- */
-export async function deleteFocusInitiative(initiativeId: string): Promise<void> {
-  try {
-    console.log('🗑️ [deleteFocusInitiative] 開始:', initiativeId);
-    
-    const docRef = doc(null, 'focusInitiatives', initiativeId);
-    console.log('🗑️ [deleteFocusInitiative] docRef作成:', {
-      collectionName: 'focusInitiatives', 
-      docId: initiativeId 
-    });
-    
-    // deleteDocを直接呼び出す
-    console.log('🗑️ [deleteFocusInitiative] docRef.delete()を呼び出します...');
-    const result = await docRef.delete();
-    console.log('✅ [deleteFocusInitiative] docRef.delete()成功:', result);
-    console.log('✅ [deleteFocusInitiative] 削除成功:', initiativeId);
-  } catch (error: any) {
-    console.error('❌ [deleteFocusInitiative] 削除失敗:', {
-      initiativeId,
-      errorMessage: error?.message,
-      errorName: error?.name,
-      errorCode: error?.errorCode,
-      errorStack: error?.stack,
-      error: error,
-    });
-    throw error;
-  }
-}
+// 注力施策関連の関数は lib/orgApi/focusInitiatives.ts に移動しました
+// deleteFocusInitiative は lib/orgApi/focusInitiatives.ts から再エクスポートされています
 
 // 議事録関連の関数は lib/orgApi/meetingNotes.ts に移動しました
 // 制度関連の関数は lib/orgApi/regulations.ts に移動しました
@@ -2070,6 +1380,7 @@ export async function deleteFocusInitiative(initiativeId: string): Promise<void>
 
 // 注力施策関連の関数は lib/orgApi/focusInitiatives.ts に移動しました
 // すべての移動済み関数は lib/orgApi/index.ts から再エクスポートされています
+// 注力施策関連の関数は上記（1230行目）で再エクスポートされています
 
 // 注力施策関連の関数は lib/orgApi/focusInitiatives.ts に移動しました
 
@@ -2191,6 +1502,7 @@ export {
 export {
   getOrganizationContent,
   saveOrganizationContent,
+  getDeletionTargets,
 } from './orgApi/organizations';
 
 // lib/orgApi/index.tsからすべてを再エクスポート（カテゴリー関連を含む）

@@ -1,6 +1,6 @@
 /**
  * データソース抽象化レイヤー
- * SQLiteとSupabaseを切り替え可能にするためのインターフェース
+ * Supabase専用
  */
 
 export interface DataSource {
@@ -28,41 +28,20 @@ export interface DataSource {
   unsubscribe?(table: string): void;
 }
 
-// データソースの選択
+// データソースの取得（常にSupabaseを使用）
 export function getDataSource(): DataSource {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  
-  if (useSupabase) {
-    // Supabaseデータソースを使用
-    const { SupabaseDataSource } = require('./supabaseDataSource');
-    return new SupabaseDataSource();
-  } else {
-    // ローカルSQLiteデータソースを使用
-    const { LocalSQLiteDataSource } = require('./localSQLiteDataSource');
-    return new LocalSQLiteDataSource();
-  }
+  console.log('[DataSource] Supabaseデータソースを使用します');
+  const { SupabaseDataSource } = require('./supabaseDataSource');
+  return new SupabaseDataSource();
 }
 
 // シングルトンインスタンス
 let dataSourceInstance: DataSource | null = null;
-let lastUseSupabase: string | undefined = undefined;
 
 export function getDataSourceInstance(): DataSource {
-  const currentUseSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE;
-  
-  // 環境変数が変更された場合、インスタンスを再作成
-  if (dataSourceInstance && lastUseSupabase !== currentUseSupabase) {
-    console.log(`[DataSource] 環境変数が変更されました。データソースを再初期化します。`);
-    console.log(`[DataSource] 前回: ${lastUseSupabase}, 現在: ${currentUseSupabase}`);
-    dataSourceInstance = null;
-  }
-  
   if (!dataSourceInstance) {
     dataSourceInstance = getDataSource();
-    lastUseSupabase = currentUseSupabase;
-    
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    console.log(`[DataSource] データソースを初期化しました: ${useSupabase ? 'Supabase' : 'ローカルSQLite'}`);
+    console.log('[DataSource] データソースを初期化しました: Supabase');
   }
   
   return dataSourceInstance;

@@ -116,7 +116,9 @@ export function useAnalyticsData() {
         setLoading(true);
         setError(null);
         
-        devLog('📖 テーマを読み込み中...');
+        devLog('📖 データの並列読み込みを開始...');
+        
+        // テーマを先に取得（重複チェックのため）
         let themesData = await getThemes();
         devLog('📖 読み込んだテーマ数:', themesData.length);
         
@@ -140,49 +142,68 @@ export function useAnalyticsData() {
         
         if (duplicatesToDelete.length > 0) {
           devLog(`🗑️ ${duplicatesToDelete.length}件の重複テーマを削除中...`);
-          for (const themeId of duplicatesToDelete) {
-            try {
-              await deleteTheme(themeId);
-              devLog(`✅ 重複テーマを削除しました: ${themeId}`);
-            } catch (error: any) {
-              console.error(`❌ 重複テーマの削除に失敗しました (ID: ${themeId}):`, error);
-            }
-          }
+          // 重複削除も並列化
+          await Promise.all(
+            duplicatesToDelete.map(async (themeId) => {
+              try {
+                await deleteTheme(themeId);
+                devLog(`✅ 重複テーマを削除しました: ${themeId}`);
+              } catch (error: any) {
+                console.error(`❌ 重複テーマの削除に失敗しました (ID: ${themeId}):`, error);
+              }
+            })
+          );
           themesData = await getThemes();
           devLog(`✅ 重複削除後のテーマ数: ${themesData.length}`);
         }
         
         devLog('📖 最終的なテーマ数:', themesData.length);
         
-        devLog('📖 カテゴリーを読み込み中...');
-        const categoriesData = await getCategories();
-        devLog('📖 読み込んだカテゴリー数:', categoriesData.length);
-        
-        devLog('📖 スタートアップを読み込み中...');
-        const startupsData = await getAllStartups();
-        devLog('📖 読み込んだスタートアップ数:', startupsData.length);
-        
-        devLog('📖 VCを読み込み中...');
-        const vcsData = await getVcs();
-        devLog('📖 読み込んだVC数:', vcsData.length);
-        
-        devLog('📖 部署を読み込み中...');
-        const departmentsData = await getDepartments();
-        devLog('📖 読み込んだ部署数:', departmentsData.length);
-        
-        devLog('📖 ステータスを読み込み中...');
-        const statusesData = await getStatuses();
-        devLog('📖 読み込んだステータス数:', statusesData.length);
-        
-        devLog('📖 ねじ込み注力度を読み込み中...');
-        const engagementLevelsData = await getEngagementLevels();
-        devLog('📖 読み込んだねじ込み注力度数:', engagementLevelsData.length);
-        
-        devLog('📖 Biz-Devフェーズを読み込み中...');
-        const bizDevPhasesData = await getBizDevPhases();
-        devLog('📖 読み込んだBiz-Devフェーズ数:', bizDevPhasesData.length);
-        
-        const orgTree = await getOrgTreeFromDb();
+        // 独立したデータ取得を並列化（Supabase最適化）
+        devLog('📖 独立データの並列読み込みを開始...');
+        const [
+          categoriesData,
+          startupsData,
+          vcsData,
+          departmentsData,
+          statusesData,
+          engagementLevelsData,
+          bizDevPhasesData,
+          orgTree,
+        ] = await Promise.all([
+          getCategories().then(data => {
+            devLog('📖 読み込んだカテゴリー数:', data.length);
+            return data;
+          }),
+          getAllStartups().then(data => {
+            devLog('📖 読み込んだスタートアップ数:', data.length);
+            return data;
+          }),
+          getVcs().then(data => {
+            devLog('📖 読み込んだVC数:', data.length);
+            return data;
+          }),
+          getDepartments().then(data => {
+            devLog('📖 読み込んだ部署数:', data.length);
+            return data;
+          }),
+          getStatuses().then(data => {
+            devLog('📖 読み込んだステータス数:', data.length);
+            return data;
+          }),
+          getEngagementLevels().then(data => {
+            devLog('📖 読み込んだねじ込み注力度数:', data.length);
+            return data;
+          }),
+          getBizDevPhases().then(data => {
+            devLog('📖 読み込んだBiz-Devフェーズ数:', data.length);
+            return data;
+          }),
+          getOrgTreeFromDb().then(data => {
+            devLog('📖 組織ツリーを取得しました');
+            return data;
+          }),
+        ]);
         
         setThemes(themesData);
         setCategories(categoriesData);
@@ -198,50 +219,61 @@ export function useAnalyticsData() {
           (window as any).refreshThemes = refreshThemes;
         }
         
+        // 組織ツリーから取得するデータも並列化
         if (orgTree) {
-          const allInitiatives: FocusInitiative[] = [];
-          const collectInitiatives = async (org: OrgNodeData) => {
+          devLog('📖 組織ツリーからデータを並列取得中...');
+          
+          // すべての組織IDを収集
+          const getAllOrgIds = (org: OrgNodeData): string[] => {
+            const ids: string[] = [];
             if (org.id) {
-              const orgInitiatives = await getFocusInitiatives(org.id);
-              allInitiatives.push(...orgInitiatives);
+              ids.push(org.id);
             }
-            
             if (org.children) {
               for (const child of org.children) {
-                await collectInitiatives(child);
+                ids.push(...getAllOrgIds(child));
               }
             }
+            return ids;
           };
           
-          await collectInitiatives(orgTree);
+          const allOrgIds = getAllOrgIds(orgTree);
+          devLog('📖 組織数:', allOrgIds.length);
+          
+          // すべての組織のinitiativesとtopicsを並列取得
+          const [allInitiativesArrays, allTopicsArrays] = await Promise.all([
+            Promise.all(
+              allOrgIds.map(orgId => 
+                getFocusInitiatives(orgId).catch(error => {
+                  console.error(`❌ [getFocusInitiatives] エラー (orgId: ${orgId}):`, error);
+                  return [];
+                })
+              )
+            ),
+            Promise.all(
+              allOrgIds.map(orgId => 
+                getAllTopics(orgId).catch(error => {
+                  console.error(`❌ [getAllTopics] エラー (orgId: ${orgId}):`, error);
+                  return [];
+                })
+              )
+            ),
+          ]);
+          
+          // 配列をフラット化
+          const allInitiatives = allInitiativesArrays.flat();
+          const allTopics = allTopicsArrays.flat();
           
           const initiativesWithTopics = allInitiatives.filter(i => i.topicIds && i.topicIds.length > 0);
           devLog('🔍 [Analytics] トピックが紐づけられた注力施策:', {
             count: initiativesWithTopics.length,
           });
           
-          setInitiatives(allInitiatives);
-          
-          const allTopics: TopicInfo[] = [];
-          const collectTopics = async (org: OrgNodeData) => {
-            if (org.id) {
-              const orgTopics = await getAllTopics(org.id);
-              allTopics.push(...orgTopics);
-            }
-            
-            if (org.children) {
-              for (const child of org.children) {
-                await collectTopics(child);
-              }
-            }
-          };
-          
-          await collectTopics(orgTree);
-          
           devLog('🔍 [Analytics] 取得したトピック:', {
             count: allTopics.length,
           });
           
+          setInitiatives(allInitiatives);
           setTopics(allTopics);
         }
       } catch (error: any) {

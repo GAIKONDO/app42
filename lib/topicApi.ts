@@ -3,7 +3,6 @@
  * トピック情報の取得と管理
  */
 
-import { callTauriCommand } from './localFirebase';
 import type { TopicInfo } from './orgApi';
 
 /**
@@ -51,162 +50,87 @@ export async function getTopicById(
   try {
     const parentId = meetingNoteId || regulationId;
     
-    // まず、topicsテーブルから直接取得を試みる（優先）
-    // idが {meetingNoteId}-topic-{topicId} 形式の場合
-    if (parentId) {
-      const { callTauriCommand } = await import('./localFirebase');
-      const embeddingId = `${parentId}-topic-${topicId}`;
-      
-      try {
-        // topicsテーブルから直接取得を試みる
-        const topicResults = await callTauriCommand('query_get', {
-          collectionName: 'topics',
-          conditions: { id: embeddingId },
-        }) as Array<{ id: string; data: any }>;
-        
-        if (topicResults && topicResults.length > 0) {
-          const topicData = topicResults[0].data || topicResults[0];
-          console.log(`[getTopicById] topicsテーブルから直接取得成功: topicId=${topicId}, id=${embeddingId}`);
-          
-          return {
-            topicId: topicData.topicId || topicId,
-            meetingNoteId: topicData.meetingNoteId || meetingNoteId,
-            regulationId: topicData.regulationId || regulationId,
-            title: topicData.title || '',
-            content: topicData.content || '',
-            summary: topicData.description || topicData.contentSummary || topicData.summary,
-            semanticCategory: topicData.semanticCategory,
-            importance: topicData.importance,
-            organizationId: topicData.organizationId || '',
-            keywords: topicData.keywords ? (Array.isArray(topicData.keywords) ? topicData.keywords : (typeof topicData.keywords === 'string' ? JSON.parse(topicData.keywords) : [])) : [],
-            createdAt: topicData.createdAt,
-            updatedAt: topicData.updatedAt,
-            searchCount: topicData.searchCount || 0,
-          };
-        } else {
-          console.log(`[getTopicById] topicsテーブルにデータが見つかりませんでした（id検索）: id=${embeddingId}。フォールバック処理に進みます。`);
-        }
-      } catch (error) {
-        console.warn(`[getTopicById] topicsテーブルからの取得エラー（続行）:`, error);
-      }
-      
-      // topicIdとmeetingNoteId/regulationIdで検索も試みる
-      try {
-        const conditions: any = { topicId };
-        if (meetingNoteId) {
-          conditions.meetingNoteId = meetingNoteId;
-        } else if (regulationId) {
-          // regulationIdの場合は、meetingNoteIdがregulationIdとして保存されている可能性がある
-          conditions.meetingNoteId = regulationId;
-        }
-        
-        const topicResults = await callTauriCommand('query_get', {
-          collectionName: 'topics',
-          conditions,
-        }) as Array<{ id: string; data: any }>;
-        
-        if (topicResults && topicResults.length > 0) {
-          const topicData = topicResults[0].data || topicResults[0];
-          console.log(`[getTopicById] topicsテーブルから取得成功（topicId検索）: topicId=${topicId}`);
-          
-          return {
-            topicId: topicData.topicId || topicId,
-            meetingNoteId: topicData.meetingNoteId || meetingNoteId,
-            regulationId: topicData.regulationId || regulationId,
-            title: topicData.title || '',
-            content: topicData.content || '',
-            summary: topicData.description || topicData.contentSummary || topicData.summary,
-            semanticCategory: topicData.semanticCategory,
-            importance: topicData.importance,
-            organizationId: topicData.organizationId || '',
-            keywords: topicData.keywords ? (Array.isArray(topicData.keywords) ? topicData.keywords : (typeof topicData.keywords === 'string' ? JSON.parse(topicData.keywords) : [])) : [],
-            createdAt: topicData.createdAt,
-            updatedAt: topicData.updatedAt,
-            searchCount: topicData.searchCount || 0,
-          };
-        } else {
-          console.log(`[getTopicById] topicsテーブルにデータが見つかりませんでした（topicId検索）: topicId=${topicId}。フォールバック処理に進みます。`);
-        }
-      } catch (error) {
-        console.warn(`[getTopicById] topicsテーブルからの取得エラー（topicId検索、続行）:`, error);
-      }
-    }
-    
-    // topicsテーブルにない場合、議事録または制度のJSONからパースして取得（フォールバック）
     if (!parentId) {
       console.warn(`[getTopicById] meetingNoteIdまたはregulationIdが必要です: topicId=${topicId}`);
       return null;
     }
     
-    console.log(`[getTopicById] フォールバック処理: 議事録/制度のJSONからパースして取得します。topicId=${topicId}, meetingNoteId=${meetingNoteId}, regulationId=${regulationId}`);
+    // topicsテーブルから直接取得を試みる
+    // idが {meetingNoteId}-topic-{topicId} 形式の場合
+    const embeddingId = `${parentId}-topic-${topicId}`;
     
-    // 議事録または制度からトピック情報を取得
-    if (meetingNoteId) {
-      const { getTopicsByMeetingNote } = await import('./orgApi');
-      const topics = await getTopicsByMeetingNote(meetingNoteId);
+    try {
+      let topicData: any = null;
       
-      console.log(`[getTopicById] 取得したトピック数: ${topics.length}, topicId=${topicId}, meetingNoteId=${meetingNoteId}`);
-      if (topics.length > 0) {
-        console.log(`[getTopicById] トピックIDのサンプル:`, topics.slice(0, 3).map(t => t.id));
+      // Supabaseから取得
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      
+      // まずIDで直接取得を試みる
+      try {
+        const data = await dataSource.doc_get('topics', embeddingId);
+        if (data) {
+          topicData = data;
+          console.log(`[getTopicById] topicsテーブルから直接取得成功: topicId=${topicId}, id=${embeddingId}`);
+        }
+      } catch (docGetError: any) {
+        // doc_getで見つからない場合は、queryで検索
+        const errorMessage = docGetError?.message || String(docGetError || '');
+        const isNoRowsError = errorMessage.includes('no rows') || 
+                              errorMessage.includes('Query returned no rows') ||
+                              errorMessage.includes('PGRST116');
+        
+        if (!isNoRowsError) {
+          console.warn(`[getTopicById] doc_getエラー（続行）:`, docGetError);
+        }
       }
       
-      const topic = topics.find(t => t.id === topicId);
-      if (!topic) {
-        console.warn(`[getTopicById] トピックが見つかりません: topicId=${topicId}, meetingNoteId=${meetingNoteId}`);
-        console.warn(`[getTopicById] 利用可能なトピックID:`, topics.map(t => t.id));
-        return null;
+      // IDで見つからない場合、topicIdとmeetingNoteIdで検索
+      if (!topicData) {
+        const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+        const allTopics = await getCollectionViaDataSource('topics');
+        
+        // topicIdとmeetingNoteIdでフィルタリング
+        const filtered = allTopics.filter((item: any) => {
+          const itemTopicId = item.topicId || item.topicid;
+          const itemMeetingNoteId = item.meetingNoteId || item.meetingnoteid;
+          return itemTopicId === topicId && 
+                 (meetingNoteId ? itemMeetingNoteId === meetingNoteId : 
+                  regulationId ? itemMeetingNoteId === regulationId : true);
+        });
+        
+        if (filtered.length > 0) {
+          topicData = filtered[0];
+          console.log(`[getTopicById] topicsテーブルから取得成功（topicId検索）: topicId=${topicId}`);
+        }
       }
       
-      // TopicInfoをTopicSearchInfoに変換
-      return {
-        topicId: topic.id,
-        meetingNoteId: topic.meetingNoteId,
-        title: topic.title,
-        content: topic.content,
-        summary: topic.summary,
-        semanticCategory: topic.semanticCategory,
-        importance: topic.importance,
-        organizationId: topic.organizationId,
-        keywords: topic.keywords || [], // キーワードも含める
-        createdAt: topic.topicDate || undefined,
-        updatedAt: topic.topicDate || undefined,
-        searchCount: 0, // デフォルト値
-      };
-    } else if (regulationId) {
-      const { getTopicsByRegulation } = await import('./orgApi');
-      const topics = await getTopicsByRegulation(regulationId);
-      
-      console.log(`[getTopicById] 取得したトピック数: ${topics.length}, topicId=${topicId}, regulationId=${regulationId}`);
-      if (topics.length > 0) {
-        console.log(`[getTopicById] トピックIDのサンプル:`, topics.slice(0, 3).map(t => t.id));
+      if (topicData) {
+        // データをTopicSearchInfo形式に変換
+        const data = topicData;
+        return {
+          topicId: data.topicId || data.topicid || topicId,
+          meetingNoteId: data.meetingNoteId || data.meetingnoteid || meetingNoteId,
+          regulationId: data.regulationId || data.regulationid || regulationId,
+          title: data.title || '',
+          content: data.content || '',
+          summary: data.description || data.contentSummary || data.contentsummary || data.summary,
+          semanticCategory: data.semanticCategory || data.semanticcategory,
+          importance: data.importance,
+          organizationId: data.organizationId || data.organizationid || '',
+          keywords: data.keywords ? (Array.isArray(data.keywords) ? data.keywords : (typeof data.keywords === 'string' ? JSON.parse(data.keywords) : [])) : [],
+          createdAt: data.createdAt || data.createdat,
+          updatedAt: data.updatedAt || data.updatedat,
+          searchCount: data.searchCount || data.searchcount || 0,
+        };
       }
       
-      const topic = topics.find(t => t.id === topicId);
-      if (!topic) {
-        console.warn(`[getTopicById] トピックが見つかりません: topicId=${topicId}, regulationId=${regulationId}`);
-        console.warn(`[getTopicById] 利用可能なトピックID:`, topics.map(t => t.id));
-        return null;
-      }
-      
-      // TopicInfoをTopicSearchInfoに変換
-      return {
-        topicId: topic.id,
-        meetingNoteId: topic.meetingNoteId, // 制度IDが入っている可能性がある
-        regulationId: regulationId,
-        title: topic.title,
-        content: topic.content,
-        summary: topic.summary,
-        semanticCategory: topic.semanticCategory,
-        importance: topic.importance,
-        organizationId: topic.organizationId,
-        keywords: topic.keywords || [], // キーワードも含める
-        createdAt: topic.topicDate || undefined,
-        updatedAt: topic.topicDate || undefined,
-        searchCount: 0, // デフォルト値
-      };
+      console.log(`[getTopicById] topicsテーブルにデータが見つかりませんでした: id=${embeddingId}`);
+      return null;
+    } catch (error) {
+      console.warn(`[getTopicById] topicsテーブルからの取得エラー:`, error);
+      return null;
     }
-    
-    return null;
   } catch (error) {
     console.error(`[getTopicById] エラー:`, error);
     return null;
@@ -268,7 +192,6 @@ export async function getTopicFilesByTopicIds(
   }
 
   try {
-    const { callTauriCommand } = await import('./localFirebase');
     const allFiles: TopicFileInfo[] = [];
 
     // バッチで取得（topicIdsを分割してクエリ）
@@ -276,37 +199,20 @@ export async function getTopicFilesByTopicIds(
     for (let i = 0; i < topicIds.length; i += batchSize) {
       const batch = topicIds.slice(i, i + batchSize);
       
-      // デバッグ: topicFilesテーブルの全件を取得して確認（最初の1回のみ）
-      if (i === 0) {
-        try {
-          const allFilesDebug = await callTauriCommand('query_get', {
-            collectionName: 'topicFiles',
-            conditions: {},
-          }) as Array<{ id: string; data: any }>;
-          console.log(`[getTopicFilesByTopicIds] 🔍 デバッグ: topicFilesテーブルの全件数=${allFilesDebug?.length || 0}`, {
-            allFiles: allFilesDebug?.slice(0, 10).map((item: any) => ({
-              id: item.id,
-              topicId: item.data?.topicId || item.topicId,
-              fileName: item.data?.fileName || item.fileName,
-              meetingNoteId: item.data?.meetingNoteId || item.meetingNoteId,
-            })),
-            totalCount: allFilesDebug?.length || 0,
-          });
-        } catch (debugError) {
-          console.warn('[getTopicFilesByTopicIds] デバッグ用の全件取得エラー:', debugError);
-        }
-      }
-      
       // 各トピックIDでファイルを取得
       const filePromises = batch.map(async (topicId) => {
         try {
           console.log(`[getTopicFilesByTopicIds] ファイル取得開始: topicId=${topicId}`);
           
-          // 1. topicFilesテーブルから取得
-          const filesResult = await callTauriCommand('query_get', {
-            collectionName: 'topicFiles',
-            conditions: { topicId },
-          }) as Array<{ id: string; data: any }>;
+          // 1. topicFilesテーブルから取得（Supabase経由）
+          const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+          const topicFilesData = await getCollectionViaDataSource('topicFiles', {
+            filters: [{ field: 'topicid', operator: 'eq', value: topicId }]
+          });
+          const filesResult = topicFilesData.map((file: any) => ({
+            id: file.id,
+            data: file
+          }));
 
           console.log(`[getTopicFilesByTopicIds] topicFilesテーブルから取得: topicId=${topicId}, count=${filesResult?.length || 0}`);
 
@@ -338,10 +244,31 @@ export async function getTopicFilesByTopicIds(
               console.log(`[getTopicFilesByTopicIds] Graphvizカードのファイルを取得: yamlFileId=${yamlFileId}`);
               
               try {
-                const graphvizFilesResult = await callTauriCommand('query_get', {
-                  collectionName: 'graphvizYamlFileAttachments',
-                  conditions: { yamlFileId },
-                }) as Array<{ id: string; data: any }>;
+                // Graphvizカードのファイルを取得（Supabase経由）
+                let graphvizFilesResult: Array<{ id: string; data: any }> = [];
+                try {
+                  const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+                  const graphvizFiles = await getCollectionViaDataSource('graphvizYamlFileAttachments', {
+                    filters: [{ field: 'yamlfileid', operator: 'eq', value: yamlFileId }]
+                  });
+                  graphvizFilesResult = graphvizFiles.map((file: any) => ({
+                    id: file.id,
+                    data: file
+                  }));
+                } catch (supabaseError: any) {
+                  // テーブルが存在しない場合のエラーを無視（PGRST205）
+                  const errorMessage = supabaseError?.message || String(supabaseError || '');
+                  const isTableNotFoundError = errorMessage.includes('PGRST205') || 
+                                               errorMessage.includes('Could not find the table') ||
+                                               errorMessage.includes('graphvizyamlfileattachments');
+                  
+                  if (isTableNotFoundError) {
+                    console.warn(`⚠️ [getTopicFilesByTopicIds] graphvizYamlFileAttachmentsテーブルが存在しません（Supabase）: yamlFileId=${yamlFileId}`);
+                    graphvizFilesResult = [];
+                  } else {
+                    throw supabaseError;
+                  }
+                }
                 
                 console.log(`[getTopicFilesByTopicIds] graphvizYamlFileAttachmentsテーブルから取得: yamlFileId=${yamlFileId}, count=${graphvizFilesResult?.length || 0}`);
                 
@@ -360,8 +287,16 @@ export async function getTopicFilesByTopicIds(
                     } as TopicFileInfo;
                   }));
                 }
-              } catch (graphvizError) {
-                console.warn(`[getTopicFilesByTopicIds] Graphvizカードのファイル取得エラー:`, graphvizError);
+              } catch (graphvizError: any) {
+                // テーブルが存在しない場合のエラーは既に処理済みなので、その他のエラーのみ警告
+                const errorMessage = graphvizError?.message || String(graphvizError || '');
+                const isTableNotFoundError = errorMessage.includes('PGRST205') || 
+                                           errorMessage.includes('Could not find the table') ||
+                                           errorMessage.includes('graphvizyamlfileattachments');
+                
+                if (!isTableNotFoundError) {
+                  console.warn(`[getTopicFilesByTopicIds] Graphvizカードのファイル取得エラー:`, graphvizError);
+                }
               }
             }
           }

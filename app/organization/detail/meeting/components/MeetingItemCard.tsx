@@ -841,24 +841,68 @@ export default function MeetingItemCard({
                   (async () => {
                   try {
                     // メタデータが未設定のトピックを抽出
-                    const topicsWithoutMetadata = (item.topics || []).filter(topic => 
-                      !topic.semanticCategory && !topic.importance && 
-                      (!topic.keywords || (Array.isArray(topic.keywords) ? topic.keywords.length === 0 : !topic.keywords)) && 
-                      !topic.summary
-                    );
+                    const allTopics = item.topics || [];
+                    console.log('📊 全トピック数:', allTopics.length);
+                    console.log('📊 全トピックの詳細:', allTopics.map(t => ({
+                      id: t.id,
+                      title: t.title,
+                      hasSemanticCategory: !!t.semanticCategory,
+                      hasImportance: !!t.importance,
+                      hasKeywords: !!(t.keywords && (Array.isArray(t.keywords) ? t.keywords.length > 0 : t.keywords)),
+                      hasSummary: !!t.summary,
+                    })));
+
+                    const topicsWithoutMetadata = allTopics.filter(topic => {
+                      const hasSemanticCategory = !!topic.semanticCategory;
+                      const hasImportance = !!topic.importance;
+                      const hasKeywords = !!(topic.keywords && (Array.isArray(topic.keywords) ? topic.keywords.length > 0 : topic.keywords));
+                      const hasSummary = !!topic.summary;
+                      const isWithoutMetadata = !hasSemanticCategory && !hasImportance && !hasKeywords && !hasSummary;
+                      
+                      console.log(`📊 トピック ${topic.id} (${topic.title}):`, {
+                        hasSemanticCategory,
+                        hasImportance,
+                        hasKeywords,
+                        hasSummary,
+                        isWithoutMetadata,
+                      });
+                      
+                      return isWithoutMetadata;
+                    });
 
                     console.log('📊 メタデータ未設定のトピック数:', topicsWithoutMetadata.length);
-                    console.log('📊 全トピック数:', item.topics?.length || 0);
+                    console.log('📊 メタデータ未設定のトピック:', topicsWithoutMetadata.map(t => ({ id: t.id, title: t.title })));
 
-                    if (topicsWithoutMetadata.length === 0) {
-                      alert('メタデータが未設定のトピックがありません。');
-                      return;
+                    // メタデータ未設定のトピックがない場合、既存のメタデータを上書きして再生成
+                    let topicsToProcess = topicsWithoutMetadata;
+                    if (topicsToProcess.length === 0) {
+                      // 既存のメタデータがあるトピックも対象にする（デフォルトで再生成）
+                      const hasMetadataTopics = allTopics.filter(topic => {
+                        const hasSemanticCategory = !!topic.semanticCategory;
+                        const hasImportance = !!topic.importance;
+                        const hasKeywords = !!(topic.keywords && (Array.isArray(topic.keywords) ? topic.keywords.length > 0 : topic.keywords));
+                        const hasSummary = !!topic.summary;
+                        return hasSemanticCategory || hasImportance || hasKeywords || hasSummary;
+                      });
+                      
+                      if (hasMetadataTopics.length > 0) {
+                        // 既存のメタデータがあるトピックも対象にする（確認なしで再生成）
+                        topicsToProcess = hasMetadataTopics;
+                        console.log('📊 既存のメタデータを上書きして再生成します:', topicsToProcess.map(t => ({ id: t.id, title: t.title })));
+                        console.log(`ℹ️ ${hasMetadataTopics.length}個のトピックのメタデータを再生成します`);
+                      } else {
+                        // トピックが存在しない場合
+                        const message = 'メタデータが未設定のトピックがありません。すべてのトピックにメタデータが設定されているか、トピックが存在しません。';
+                        console.warn('⚠️', message);
+                        alert(message);
+                        return;
+                      }
                     }
 
                     // ローディング状態を開始
                     setIsGeneratingMetadata(true);
-                    setBulkMetadataProgress({ current: 0, total: topicsWithoutMetadata.length });
-                    console.log('✅ 処理を開始します...');
+                    setBulkMetadataProgress({ current: 0, total: topicsToProcess.length });
+                    console.log('✅ 処理を開始します...', `対象トピック数: ${topicsToProcess.length}`);
 
                     const updatedContents = { ...monthContents };
                     const tabData = updatedContents[activeTab];
@@ -880,10 +924,10 @@ export default function MeetingItemCard({
                     let processedCount = 0;
 
                     // 各トピックに対して順番に処理
-                    for (let index = 0; index < topicsWithoutMetadata.length; index++) {
-                      const topic = topicsWithoutMetadata[index];
+                    for (let index = 0; index < topicsToProcess.length; index++) {
+                      const topic = topicsToProcess[index];
                       // 進捗を更新
-                      setBulkMetadataProgress({ current: index + 1, total: topicsWithoutMetadata.length });
+                      setBulkMetadataProgress({ current: index + 1, total: topicsToProcess.length });
                       try {
                         // メタデータを生成
                         const metadata = await generateTopicMetadata(

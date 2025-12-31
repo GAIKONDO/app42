@@ -117,10 +117,42 @@ export function useInitiativeData(
       try {
         setLoading(true);
         
-        // 組織データを取得
-        let orgTree: OrgNodeData | null = null;
+        // パフォーマンス最適化: 注力施策を最初に取得（最重要データ）
+        const initiativePromise = getFocusInitiativeById(initiativeId);
+        
+        // パフォーマンス最適化: 並列でデータを取得
+        const [initiativeData, orgTree, themesData, allNotes] = await Promise.all([
+          initiativePromise,
+          organizationId ? getOrgTreeFromDb() : Promise.resolve(null),
+          getThemes(),
+          getAllMeetingNotes(),
+        ]);
+        
+        // 注力施策の検証
+        if (!initiativeData) {
+          setError('注力施策が見つかりませんでした');
+          setLoading(false);
+          return;
+        }
+        
+        // organizationIdが指定されている場合、取得したデータのorganizationIdと一致するか確認
         if (organizationId) {
-          orgTree = await getOrgTreeFromDb();
+          devLog('🔍 [ページ] organizationId検証:', {
+            urlOrganizationId: organizationId,
+            dataOrganizationId: initiativeData.organizationId,
+            hasOrganizationId: !!initiativeData.organizationId,
+            match: initiativeData.organizationId === organizationId,
+          });
+          if (!initiativeData.organizationId || initiativeData.organizationId !== organizationId) {
+            setError('注力施策が見つかりませんでした（組織IDが一致しません）');
+            setLoading(false);
+            return;
+          }
+        }
+        
+        // 組織データの処理
+        let modalOrgTree: OrgNodeData | null = null;
+        if (organizationId && orgTree) {
           const findOrganization = (node: OrgNodeData): OrgNodeData | null => {
             if (node.id === organizationId) {
               return node;
@@ -133,25 +165,19 @@ export function useInitiativeData(
             }
             return null;
           };
-          const foundOrg = orgTree ? findOrganization(orgTree) : null;
+          const foundOrg = findOrganization(orgTree);
           setOrgData(foundOrg);
-        } else {
-          setOrgData(null);
-        }
-        
-        // テーマを取得
-        const themesData = await getThemes();
-        setThemes(themesData);
-        
-        // すべての組織を取得（モーダル用）
-        let modalOrgTree: OrgNodeData | null = null;
-        if (orgTree) {
           modalOrgTree = orgTree;
         } else {
-          try {
-            modalOrgTree = await getOrgTreeFromDb();
-          } catch (treeError: any) {
-            devWarn('⚠️ [ページ] モーダル用組織ツリー取得に失敗:', treeError);
+          setOrgData(null);
+          if (!orgTree && organizationId) {
+            try {
+              modalOrgTree = await getOrgTreeFromDb();
+            } catch (treeError: any) {
+              devWarn('⚠️ [ページ] モーダル用組織ツリー取得に失敗:', treeError);
+            }
+          } else {
+            modalOrgTree = orgTree;
           }
         }
         
@@ -164,68 +190,82 @@ export function useInitiativeData(
           setOrgTreeForModal(null);
         }
         
-        // 組織のメンバーを取得
+        setThemes(themesData);
+        setAllMeetingNotes(allNotes);
+        
+        // 組織のメンバーを取得（並列化）
         if (organizationId) {
-          try {
-            const membersData = await getOrgMembers(organizationId);
-            const membersList = membersData.map((member: any) => ({
-              id: member.id,
-              name: member.name,
-              position: member.position || undefined,
-            }));
-            setOrgMembers(membersList);
-            devLog('✅ [ページ] メンバー取得完了:', { count: membersList.length });
-          } catch (memberError: any) {
-            console.warn('⚠️ [ページ] メンバー取得に失敗:', memberError);
-            setOrgMembers([]);
+          const memberPromises: Promise<void>[] = [];
+          
+          // 現在の組織のメンバーを取得
+          memberPromises.push(
+            getOrgMembers(organizationId)
+              .then(membersData => {
+                const membersList = membersData.map((member: any) => ({
+                  id: member.id,
+                  name: member.name,
+                  position: member.position || undefined,
+                }));
+                setOrgMembers(membersList);
+                devLog('✅ [ページ] メンバー取得完了:', { count: membersList.length });
+              })
+              .catch(memberError => {
+                console.warn('⚠️ [ページ] メンバー取得に失敗:', memberError);
+                setOrgMembers([]);
+              })
+          );
+          
+          // 全組織のメンバーを取得（並列化でN+1問題を解決）
+          if (modalOrgTree) {
+            memberPromises.push(
+              (async () => {
+                try {
+                  const allOrgsForMembers = getAllOrganizationsFromTree(modalOrgTree!);
+                  const orgIds = allOrgsForMembers.map(org => org.id);
+                  
+                  // パフォーマンス最適化: すべての組織のメンバーを並列で取得
+                  const allMemberPromises = orgIds.map(orgId =>
+                    getOrgMembers(orgId)
+                      .then(membersData => membersData.map((member: any) => ({
+                        id: member.id,
+                        name: member.name,
+                        position: member.position || undefined,
+                        organizationId: orgId,
+                      })))
+                      .catch(err => {
+                        devWarn(`⚠️ [ページ] 組織 ${orgId} のメンバー取得に失敗:`, err);
+                        return [];
+                      })
+                  );
+                  
+                  const allMembersArrays = await Promise.all(allMemberPromises);
+                  const allMembersList = allMembersArrays.flat();
+                  
+                  const uniqueMembers = new Map<string, { id: string; name: string; position?: string; organizationId?: string }>();
+                  allMembersList.forEach(member => {
+                    if (!uniqueMembers.has(member.name) || !uniqueMembers.get(member.name)?.position) {
+                      uniqueMembers.set(member.name, member);
+                    }
+                  });
+                  
+                  setAllOrgMembers(Array.from(uniqueMembers.values()));
+                  devLog('✅ [ページ] 全組織メンバー取得完了:', { count: Array.from(uniqueMembers.values()).length });
+                } catch (allMemberError: any) {
+                  devWarn('⚠️ [ページ] 全組織メンバー取得に失敗:', allMemberError);
+                  setAllOrgMembers([]);
+                }
+              })()
+            );
           }
           
-          // 全組織のメンバーを取得
-          if (modalOrgTree) {
-            try {
-              const allOrgsForMembers = getAllOrganizationsFromTree(modalOrgTree);
-              const allMembersList: Array<{ id: string; name: string; position?: string; organizationId?: string }> = [];
-              
-              for (const org of allOrgsForMembers) {
-                try {
-                  const orgMembersData = await getOrgMembers(org.id);
-                  const orgMembersList = orgMembersData.map((member: any) => ({
-                    id: member.id,
-                    name: member.name,
-                    position: member.position || undefined,
-                    organizationId: org.id,
-                  }));
-                  allMembersList.push(...orgMembersList);
-                } catch (err) {
-                  devWarn(`⚠️ [ページ] 組織 ${org.id} のメンバー取得に失敗:`, err);
-                }
-              }
-              
-              const uniqueMembers = new Map<string, { id: string; name: string; position?: string; organizationId?: string }>();
-              allMembersList.forEach(member => {
-                if (!uniqueMembers.has(member.name) || !uniqueMembers.get(member.name)?.position) {
-                  uniqueMembers.set(member.name, member);
-                }
-              });
-              
-              setAllOrgMembers(Array.from(uniqueMembers.values()));
-              devLog('✅ [ページ] 全組織メンバー取得完了:', { count: Array.from(uniqueMembers.values()).length });
-            } catch (allMemberError: any) {
-              devWarn('⚠️ [ページ] 全組織メンバー取得に失敗:', allMemberError);
-              setAllOrgMembers([]);
-            }
-          }
+          // メンバー取得は非同期で続行（ブロックしない）
+          Promise.all(memberPromises).catch(err => {
+            devWarn('⚠️ [ページ] メンバー取得でエラー:', err);
+          });
         } else {
           setOrgMembers([]);
           setAllOrgMembers([]);
         }
-        
-        // すべての議事録を取得
-        const allNotes = await getAllMeetingNotes();
-        setAllMeetingNotes(allNotes);
-        
-        // 注力施策を取得
-        const initiativeData = await getFocusInitiativeById(initiativeId);
         if (!initiativeData) {
           setError('注力施策が見つかりませんでした');
           setLoading(false);

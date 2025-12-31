@@ -26,6 +26,11 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+// モジュールレベルで初回読み込みフラグを管理（コンポーネントの再マウントに関係なく保持）
+let globalIsInitialLoad = true;
+// モジュールレベルで認証済みユーザーをキャッシュ（ページ遷移時も保持）
+let cachedUser: User | null = null;
+
 export default function Layout({ children }: LayoutProps) {
   // Tauri環境を検出（Tauriアプリ内では__TAURI__が存在する）
   const isTauri = typeof window !== 'undefined' && (
@@ -37,8 +42,16 @@ export default function Layout({ children }: LayoutProps) {
     (window as any).__TAURI_METADATA__ !== undefined
   );
   
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  // キャッシュされたユーザーがあれば即座に使用（ページ遷移時のログイン画面表示を防ぐ）
+  const [user, setUser] = useState<User | null>(() => cachedUser);
+  // 初回読み込み時のみローディングを表示（ページ遷移時は表示しない）
+  const [loading, setLoading] = useState(() => {
+    // 初回読み込みが完了している場合は、即座にfalseを返す
+    if (!globalIsInitialLoad) {
+      return false;
+    }
+    return true;
+  });
   // Tauri環境ではFirebaseエラーを表示しないため、初期値をnullに設定
   const [firebaseError, setFirebaseError] = useState<string | null>(isTauri ? null : null);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
@@ -252,8 +265,13 @@ export default function Layout({ children }: LayoutProps) {
             // 管理者の場合は承認チェックをスキップ
             if (user.uid === ADMIN_UID) {
               console.log('Layout: 管理者としてログイン');
+              cachedUser = user; // ユーザーをキャッシュ
               setUser(user);
               setLoading(false);
+              // 初回読み込み完了をマーク
+              if (globalIsInitialLoad) {
+                globalIsInitialLoad = false;
+              }
               return;
             }
             
@@ -269,18 +287,73 @@ export default function Layout({ children }: LayoutProps) {
                 isApproved = cached.approved;
                 console.log('Layout: キャッシュから承認状態を取得:', { approved: isApproved });
               } else {
-                // キャッシュが無効または存在しない場合はローカルデータベースから取得
-                const userDocResult = await callTauriCommand('doc_get', {
-                  collectionName: 'users',
-                  docId: user.uid
-                });
-                const userDoc = userDocResult && userDocResult.data ? {
-                  exists: () => true,
-                  data: () => userDocResult.data
-                } : {
-                  exists: () => false,
-                  data: () => undefined
-                };
+                // キャッシュが無効または存在しない場合はデータベースから取得
+                const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+                let userDoc: { exists: () => boolean; data: () => any };
+                
+                if (useSupabase) {
+                  // Supabase使用時はDataSource経由で取得
+                  // auth.usersのIDとpublic.usersのIDは一致しない可能性があるため、
+                  // emailでpublic.usersテーブルから検索する
+                  try {
+                    const { queryGetViaDataSource } = await import('../lib/dataSourceAdapter');
+                    const results = await queryGetViaDataSource('users', {
+                      filters: [{ field: 'email', operator: 'eq', value: user.email }]
+                    });
+                    
+                    if (results && results.length > 0) {
+                      // emailで検索した結果の最初のレコードを使用
+                      const userData = results[0];
+                      
+                      // デバッグ: 取得したデータの全体をログ出力
+                      console.log('Layout: Supabaseから取得したユーザーデータ（全体）:', JSON.stringify(userData, null, 2));
+                      console.log('Layout: approvedの値（詳細）:', {
+                        approved: userData.approved,
+                        approvedType: typeof userData.approved,
+                        approvedString: String(userData.approved),
+                        approvedNumber: Number(userData.approved),
+                        allKeys: Object.keys(userData),
+                      });
+                      
+                      userDoc = {
+                        exists: () => true,
+                        data: () => userData
+                      };
+                    } else {
+                      // ユーザーが見つからない場合
+                      userDoc = {
+                        exists: () => false,
+                        data: () => undefined
+                      };
+                    }
+                  } catch (error: any) {
+                    // ユーザーが見つからない場合は存在しないとみなす
+                    const errorMessage = error?.message || String(error || '');
+                    const isNoRowsError = errorMessage.includes('no rows') || 
+                                          errorMessage.includes('Query returned no rows') ||
+                                          errorMessage.includes('PGRST116');
+                    userDoc = isNoRowsError ? {
+                      exists: () => false,
+                      data: () => undefined
+                    } : {
+                      exists: () => false,
+                      data: () => undefined
+                    };
+                  }
+                } else {
+                  // SQLite使用時はTauriコマンド経由で取得
+                  const userDocResult = await callTauriCommand('doc_get', {
+                    collectionName: 'users',
+                    docId: user.uid
+                  });
+                  userDoc = userDocResult && userDocResult.data ? {
+                    exists: () => true,
+                    data: () => userDocResult.data
+                  } : {
+                    exists: () => false,
+                    data: () => undefined
+                  };
+                }
                 
                 if (userDoc.exists()) {
                   const userData = userDoc.data();
@@ -288,32 +361,67 @@ export default function Layout({ children }: LayoutProps) {
                   // デバッグログ
                   console.log('Layout: ユーザーデータ確認:', {
                     approved: userData.approved,
+                    approvedBy: userData.approvedBy || userData.approvedby,
                   });
                   
-                  // 承認されていない場合はログアウト
-                  // approvedがfalse、0、または明示的にfalseと設定されている場合
-                  if (userData.approved === false || userData.approved === 0) {
+                  // 承認状態の判定
+                  // approvedカラムとapprovedByカラムの両方をチェック
+                  // 1. approvedByが存在する場合は承認済みとみなす（approvedの値に関係なく）
+                  // 2. approvedがtrue、1、"1"の場合は承認済み
+                  // 3. approvedがfalse、0、"0"の場合は未承認
+                  // 4. approvedがundefined/nullでapprovedByもない場合は未承認
+                  const approvedBy = userData.approvedBy || userData.approvedby;
+                  // approvedの値を数値に変換して比較（文字列"1"や"0"にも対応）
+                  const approved = userData.approved;
+                  const approvedNum = typeof approved === 'string' ? parseInt(approved, 10) : Number(approved);
+                  const isApprovedValue = approvedNum === 1 || approved === true || approved === '1' || approved === 1;
+                  const isNotApprovedValue = approvedNum === 0 || approved === false || approved === '0' || approved === 0;
+                  
+                  // デバッグログ
+                  console.log('Layout: 承認状態の判定:', {
+                    approved: approved,
+                    approvedNum: approvedNum,
+                    approvedType: typeof approved,
+                    approvedBy: approvedBy,
+                    isApprovedValue: isApprovedValue,
+                    isNotApprovedValue: isNotApprovedValue,
+                  });
+                  
+                  if (approvedBy) {
+                    // approvedByが存在する場合は承認済み（approvedの値に関係なく）
+                    isApproved = true;
+                    console.log('Layout: approvedByが存在するため承認済みとみなします');
+                    userApprovalCache.set(user.uid, { approved: true, timestamp: now });
+                  } else if (isApprovedValue) {
+                    // approvedがtrue、1、"1"の場合は承認済み
+                    isApproved = true;
+                    console.log('Layout: approvedが承認済みのため承認済みとみなします');
+                    userApprovalCache.set(user.uid, { approved: true, timestamp: now });
+                  } else if (isNotApprovedValue) {
+                    // approvedがfalse、0、"0"の場合は未承認
                     console.log('Layout: 承認されていないためログアウト');
                     userApprovalCache.set(user.uid, { approved: false, timestamp: now });
+                    cachedUser = null; // キャッシュをクリア
                     await signOut(null);
                     setUser(null);
                     setLoading(false);
+                    // 初回読み込み完了をマーク（エラー時も完了とみなす）
+                    if (globalIsInitialLoad) {
+                      globalIsInitialLoad = false;
+                    }
                     return;
-                  }
-                  
-                  // approvedがtrue、1、またはundefined（既存ユーザー）の場合は承認済み
-                  // 数値の1もtruthyな値として承認済みとみなす
-                  if (userData.approved === true || userData.approved === 1 || userData.approved === undefined || Boolean(userData.approved)) {
-                    isApproved = true;
-                    // キャッシュに保存
-                    userApprovalCache.set(user.uid, { approved: true, timestamp: now });
                   } else {
-                    // その他の値（nullなど）の場合は未承認として扱う
-                    console.log('Layout: 承認状態が不明なためログアウト', { approved: userData.approved });
+                    // approvedがundefined/nullでapprovedByもない場合は未承認
+                    console.log('Layout: 承認状態が不明なためログアウト', { approved, approvedBy });
                     userApprovalCache.set(user.uid, { approved: false, timestamp: now });
+                    cachedUser = null; // キャッシュをクリア
                     await signOut(null);
                     setUser(null);
                     setLoading(false);
+                    // 初回読み込み完了をマーク（エラー時も完了とみなす）
+                    if (globalIsInitialLoad) {
+                      globalIsInitialLoad = false;
+                    }
                     return;
                   }
                 } else {
@@ -322,9 +430,14 @@ export default function Layout({ children }: LayoutProps) {
                   // （新規登録時は必ずユーザードキュメントが作成される）
                   console.log('Layout: ユーザードキュメントが存在しないため、安全のためログアウト');
                   userApprovalCache.set(user.uid, { approved: false, timestamp: now });
+                  cachedUser = null; // キャッシュをクリア
                   await signOut(null);
                   setUser(null);
                   setLoading(false);
+                  // 初回読み込み完了をマーク（エラー時も完了とみなす）
+                  if (globalIsInitialLoad) {
+                    globalIsInitialLoad = false;
+                  }
                   return;
                 }
               }
@@ -333,26 +446,46 @@ export default function Layout({ children }: LayoutProps) {
               // エラーが発生した場合は、安全側に倒してログアウト
               // 承認状態が確認できない場合はログインを許可しない
               console.log('Layout: 承認状態が確認できないため、安全のためログアウト');
+              cachedUser = null; // キャッシュをクリア
               await signOut(null);
               setUser(null);
               setLoading(false);
+              // 初回読み込み完了をマーク（エラー時も完了とみなす）
+              if (globalIsInitialLoad) {
+                globalIsInitialLoad = false;
+              }
               return;
             }
             
             // 承認チェックが成功した場合のみユーザーを設定
             if (isApproved) {
+              cachedUser = user; // ユーザーをキャッシュ
               setUser(user);
               setLoading(false);
+              // 初回読み込み完了をマーク
+              if (globalIsInitialLoad) {
+                globalIsInitialLoad = false;
+              }
             } else {
               // 承認されていない場合はログアウト
+              cachedUser = null; // キャッシュをクリア
               await signOut(null);
               setUser(null);
               setLoading(false);
+              // 初回読み込み完了をマーク（エラー時も完了とみなす）
+              if (globalIsInitialLoad) {
+                globalIsInitialLoad = false;
+              }
             }
           } else {
             // ログアウト時はキャッシュをクリア
+            cachedUser = null; // キャッシュをクリア
             setUser(null);
             setLoading(false);
+            // 初回読み込み完了をマーク
+            if (globalIsInitialLoad) {
+              globalIsInitialLoad = false;
+            }
           }
         });
         return () => {
@@ -370,20 +503,34 @@ export default function Layout({ children }: LayoutProps) {
           console.warn('Layout: window.electronAPIが利用できません。Electron環境で実行していることを確認してください。');
           setFirebaseError('Electron APIが利用できません。アプリケーションを再起動してください。');
           setLoading(false);
+          // 初回読み込み完了をマーク（エラー時も完了とみなす）
+          if (globalIsInitialLoad) {
+            globalIsInitialLoad = false;
+          }
           return;
         }
       }
 
       // Tauri環境でない場合（通常のWebブラウザ環境）
-      if (!detectedTauri && !isElectron) {
+      // Supabase使用時はFirebase設定チェックをスキップ
+      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+      if (!detectedTauri && !isElectron && !useSupabase) {
         setFirebaseError('Firebaseが設定されていません。.env.localファイルにFirebase設定を追加してください。');
         setLoading(false);
+        // 初回読み込み完了をマーク（エラー時も完了とみなす）
+        if (globalIsInitialLoad) {
+          globalIsInitialLoad = false;
+        }
         return;
       }
 
       // Electron環境の場合の処理（必要に応じて実装）
       // 現在はTauri環境のみをサポート
       setLoading(false);
+      // 初回読み込み完了をマーク（認証チェックが不要な場合）
+      if (globalIsInitialLoad) {
+        globalIsInitialLoad = false;
+      }
     };
 
     initializeAuth();
@@ -425,8 +572,9 @@ export default function Layout({ children }: LayoutProps) {
     });
   }
   
-  // Tauri環境ではfirebaseErrorを無視
-  if (firebaseError && !renderIsTauri) {
+  // Tauri環境またはSupabase使用時はfirebaseErrorを無視
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  if (firebaseError && !renderIsTauri && !useSupabase) {
     return (
       <main>
         <Header user={null} />
@@ -585,7 +733,7 @@ function LayoutContent({
       {shouldShowTabBarAndUrlBar && !isPresentationMode && user && <TabBar sidebarOpen={sidebarOpen} user={user} />}
       {shouldShowTabBarAndUrlBar && !isPresentationMode && user && <UrlBar sidebarOpen={sidebarOpen} user={user} />}
       {shouldShowContent && !isPresentationMode && user && (
-        <Sidebar isOpen={sidebarOpen} onToggle={handleToggleSidebar} currentPage={currentPage} />
+        <Sidebar isOpen={sidebarOpen} onToggle={handleToggleSidebar} currentPage={currentPage} user={user} />
       )}
       {shouldShowContent && !isPresentationMode && (
         <Header 

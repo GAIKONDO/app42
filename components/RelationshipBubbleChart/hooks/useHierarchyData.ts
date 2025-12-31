@@ -81,12 +81,14 @@ export function useHierarchyData(
       // 子ノードをタイプごとに分類
       const orgChildren = children.filter(n => n.type === 'organization' || n.type === 'company');
       const initiativeChildren = children.filter(n => n.type === 'initiative');
+      const startupChildren = children.filter(n => n.type === 'startup'); // テーマから直接リンクされているスタートアップ
       const topicChildren = children.filter(n => n.type === 'topic');
       
-      // 組織/事業会社ノードの子として注力施策を配置
+      // 組織/事業会社ノードの子として注力施策とスタートアップを配置
       const orgNodesWithInitiatives = orgChildren.map(orgNode => {
         const orgChildren = childrenMap.get(orgNode.id) || [];
         const initiativeChildren = orgChildren.filter(n => n.type === 'initiative');
+        const startupChildren = orgChildren.filter(n => n.type === 'startup'); // 組織の子としてリンクされているスタートアップ
         
         // 各注力施策の子としてトピックを配置
         const initiativesWithTopics = initiativeChildren.map(initNode => {
@@ -111,6 +113,19 @@ export function useHierarchyData(
           };
         });
         
+        // スタートアップノードを構築
+        const startups = startupChildren.map(startupNode => ({
+          name: startupNode.label,
+          id: startupNode.id,
+          value: 1,
+          depth: depth + 2,
+          nodeType: startupNode.type,
+          originalData: startupNode,
+        }));
+        
+        // 注力施策とスタートアップを結合
+        const allChildren = [...initiativesWithTopics, ...startups];
+        
         return {
           name: orgNode.label,
           id: orgNode.id,
@@ -118,9 +133,22 @@ export function useHierarchyData(
           depth: depth + 1,
           nodeType: orgNode.type,
           originalData: orgNode,
-          children: initiativesWithTopics.length > 0 ? initiativesWithTopics : undefined,
+          children: allChildren.length > 0 ? allChildren : undefined,
         };
       });
+      
+      // テーマから直接リンクされているスタートアップノードを構築
+      const directStartups = startupChildren.map(startupNode => ({
+        name: startupNode.label,
+        id: startupNode.id,
+        value: 1,
+        depth: depth + 1,
+        nodeType: startupNode.type,
+        originalData: startupNode,
+      }));
+      
+      // 組織ノードと直接リンクされているスタートアップノードを結合
+      const allThemeChildren = [...orgNodesWithInitiatives, ...directStartups];
       
       return {
         name: node.label,
@@ -129,7 +157,7 @@ export function useHierarchyData(
         depth: depth,
         nodeType: node.type,
         originalData: node,
-        children: orgNodesWithInitiatives.length > 0 ? orgNodesWithInitiatives : undefined,
+        children: allThemeChildren.length > 0 ? allThemeChildren : undefined,
       };
     };
 

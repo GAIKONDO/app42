@@ -1,6 +1,6 @@
 {
   "name": "network-supabase",
-  "version": "2.2.0-supabase-dev",
+  "version": "4.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3020",

@@ -47,8 +47,51 @@ async function saveMeetingNoteToJson(note: MeetingNote): Promise<void> {
  */
 export async function getAllMeetingNotes(): Promise<MeetingNote[]> {
   try {
-    console.log('📖 [getAllMeetingNotes] 開始');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getAllMeetingNotes] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        // PostgreSQLでは大文字小文字を区別しないため、小文字でアクセス
+        const result = await getCollectionViaDataSource('meetingnotes');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const allNotes = Array.isArray(result) ? result : [];
+        console.log('📖 [getAllMeetingNotes] Supabaseから取得:', allNotes.length, '件');
+        
+        const meetingNotes = allNotes.map((item: any) => {
+          // Supabaseから取得したデータは直接オブジェクト形式
+          const data = item;
+          return {
+            id: data.id,
+            organizationId: data.organizationId || data.organizationid,
+            companyId: data.companyId || data.companyid || undefined,
+            title: data.title || '',
+            description: data.description || '',
+            content: data.content || '',
+            createdAt: data.createdAt || data.createdat,
+            updatedAt: data.updatedAt || data.updatedat,
+          } as MeetingNote & { companyId?: string };
+        });
+      
+      const sorted = meetingNotes.sort((a, b) => {
+        const aTime = a.createdAt ? (typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : (a.createdAt.toMillis ? a.createdAt.toMillis() : 0)) : 0;
+        const bTime = b.createdAt ? (typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : (b.createdAt.toMillis ? b.createdAt.toMillis() : 0)) : 0;
+        return bTime - aTime;
+      });
+      
+        console.log('✅ [getAllMeetingNotes] 取得成功（Supabaseから取得）:', sorted.length, '件');
+        return sorted;
+      } catch (error: any) {
+        console.error('❌ [getAllMeetingNotes] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getAllMeetingNotes] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
@@ -81,7 +124,7 @@ export async function getAllMeetingNotes(): Promise<MeetingNote[]> {
         return bTime - aTime;
       });
       
-      console.log('✅ [getAllMeetingNotes] 取得成功:', sorted.length, '件');
+      console.log('✅ [getAllMeetingNotes] 取得成功（SQLiteから取得）:', sorted.length, '件');
       return sorted;
     } catch (collectionError: any) {
       console.error('📖 [getAllMeetingNotes] collection_getエラー:', collectionError);
@@ -98,8 +141,64 @@ export async function getAllMeetingNotes(): Promise<MeetingNote[]> {
  */
 export async function getMeetingNotes(organizationId: string): Promise<MeetingNote[]> {
   try {
-    console.log('📖 [getMeetingNotes] 開始:', { organizationId });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getMeetingNotes] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）:`, { organizationId });
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        // PostgreSQLでは大文字小文字を区別しないため、小文字でアクセス
+        const result = await getCollectionViaDataSource('meetingnotes');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const allNotes = Array.isArray(result) ? result : [];
+        console.log('📖 [getMeetingNotes] Supabaseから取得:', allNotes.length, '件');
+        
+        const filtered = allNotes
+          .filter((item: any) => {
+            // Supabaseから取得したデータは直接オブジェクト形式
+            const data = item;
+            const matches = (data.organizationId || data.organizationid) === organizationId;
+            return matches;
+          })
+          .map((item: any) => {
+            const data = item;
+            return {
+              id: data.id,
+              organizationId: data.organizationId || data.organizationid,
+              title: data.title || '',
+              description: data.description || '',
+              content: data.content || '',
+              createdAt: data.createdAt || data.createdat,
+              updatedAt: data.updatedAt || data.updatedat,
+            } as MeetingNote;
+          });
+      
+      console.log('📖 [getMeetingNotes] フィルタ後:', {
+        filteredCount: filtered.length,
+        filteredIds: filtered.map(n => n.id),
+      });
+      
+      const sorted = filtered.sort((a, b) => {
+        const aTime = a.createdAt ? (typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : (a.createdAt.toMillis ? a.createdAt.toMillis() : 0)) : 0;
+        const bTime = b.createdAt ? (typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : (b.createdAt.toMillis ? b.createdAt.toMillis() : 0)) : 0;
+        return bTime - aTime;
+      });
+      
+        console.log('📖 [getMeetingNotes] 最終結果（Supabaseから取得）:', {
+          count: sorted.length,
+          notes: sorted.map(n => ({ id: n.id, title: n.title, organizationId: n.organizationId })),
+        });
+        return sorted;
+      } catch (error: any) {
+        console.error('❌ [getMeetingNotes] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getMeetingNotes] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {

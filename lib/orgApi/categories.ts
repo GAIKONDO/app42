@@ -2,12 +2,79 @@ import type { Category } from './types';
 import { generateUniqueCategoryId } from './utils';
 
 /**
- * 全カテゴリーを取得（SQLiteから取得）
+ * 全カテゴリーを取得（SQLiteまたはSupabaseから取得）
  */
 export async function getCategories(): Promise<Category[]> {
   try {
-    console.log('📖 [getCategories] 開始（SQLiteから取得）');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getCategories] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        const result = await getCollectionViaDataSource('categories');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const resultArray = Array.isArray(result) ? result : [];
+        
+        console.log('📖 [getCategories] Supabaseから取得:', resultArray.length, '件');
+        
+        const categories: Category[] = resultArray.map((item: any) => {
+          // Supabaseから取得したデータは直接オブジェクト形式
+          const itemId = item.id;
+          const data = item;
+          
+          // createdAtとupdatedAtがFirestoreのTimestamp形式の場合、ISO文字列に変換
+          let createdAt: any = null;
+          let updatedAt: any = null;
+          
+          if (data.createdAt) {
+            if (data.createdAt.seconds) {
+              // Firestore Timestamp形式
+              createdAt = new Date(data.createdAt.seconds * 1000).toISOString();
+            } else if (typeof data.createdAt === 'string') {
+              createdAt = data.createdAt;
+            }
+          }
+          
+          if (data.updatedAt) {
+            if (data.updatedAt.seconds) {
+              // Firestore Timestamp形式
+              updatedAt = new Date(data.updatedAt.seconds * 1000).toISOString();
+            } else if (typeof data.updatedAt === 'string') {
+              updatedAt = data.updatedAt;
+            }
+          }
+          
+          return {
+            id: itemId,
+            title: data.title || '',
+            description: data.description || '',
+            parentCategoryId: data.parentCategoryId || undefined,
+            position: data.position ?? null,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+          };
+        }).filter((category: Category) => category.id && category.title);
+        
+        // positionでソート
+        categories.sort((a, b) => {
+          const posA = a.position ?? 999999;
+          const posB = b.position ?? 999999;
+          return posA - posB;
+        });
+        
+        console.log('✅ [getCategories] 取得成功（Supabaseから取得）:', categories.length, '件');
+        return categories;
+      } catch (error: any) {
+        console.error('❌ [getCategories] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getCategories] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     if (typeof window !== 'undefined' && '__TAURI__' in window) {
       const { callTauriCommand } = await import('../localFirebase');
       

@@ -507,7 +507,7 @@ pub async fn init_chromadb_server(data_dir: PathBuf, port: u16) -> Result<(), St
     
     // MutexGuardをdropしてから.awaitする必要がある
     let should_init = {
-        let mut server_guard = server_lock.lock().unwrap();
+        let server_guard = server_lock.lock().unwrap();
         if server_guard.is_some() {
             eprintln!("⚠️ ChromaDB Serverは既に初期化されています");
             return Ok(());
@@ -1529,8 +1529,7 @@ pub async fn save_topic_embedding(
     metadata: HashMap<String, Value>,
     regulation_id: Option<String>,
 ) -> Result<(), String> {
-    let parent_id = meeting_note_id.as_ref().or(regulation_id.as_ref());
-    let parent_id_str = parent_id.map(|s| s.as_str()).unwrap_or("unknown");
+    let _parent_id = meeting_note_id.as_ref().or(regulation_id.as_ref());
     eprintln!("[save_topic_embedding] 開始: topicId={}, meetingNoteId={:?}, regulationId={:?}, organizationId={}, embedding_dim={}", 
         topic_id, meeting_note_id, regulation_id, organization_id, combined_embedding.len());
     
@@ -2129,9 +2128,9 @@ pub async fn find_similar_design_docs(
         if !tags_vec.is_empty() {
             // 最初のタグでフィルタリング（簡易実装）
             // 完全な実装には検索後のフィルタリングが必要
-            let mut filter = serde_json::Map::new();
             // タグはJSON文字列として保存されているため、直接フィルタリングは困難
             // 検索後にフィルタリングする方が実用的
+            let _filter = serde_json::Map::new();
         }
     }
     

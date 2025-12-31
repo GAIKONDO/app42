@@ -17,7 +17,7 @@ import SearchBar from './components/SearchBar';
 import SearchCandidates from './components/SearchCandidates';
 import FilterResults from './components/FilterResults';
 import { mapMembersToMemberInfo, findOrgInTree } from './utils/organizationUtils';
-import { useOrganizationData } from './hooks/useOrganizationData';
+import { useOrganizationDataWithRealtime } from './hooks/useOrganizationDataWithRealtime';
 import { useOrganizationFilters } from './hooks/useOrganizationFilters';
 import { useOrganizationManagement } from './hooks/useOrganizationManagement';
 import { useFinderManagement } from './hooks/useFinderManagement';
@@ -41,7 +41,7 @@ export default function OrganizationPage() {
   const [showFinderDeleteModal, setShowFinderDeleteModal] = useState(false);
   const [orgToDeleteInFinder, setOrgToDeleteInFinder] = useState<{ id: string; name: string } | null>(null);
 
-  // データ取得フック
+  // データ取得フック（リアルタイム同期対応）
   const {
     selectedNode,
     setSelectedNode,
@@ -52,7 +52,7 @@ export default function OrganizationPage() {
     selectedNodeMembers,
     setSelectedNodeMembers,
     refreshOrgData,
-  } = useOrganizationData();
+  } = useOrganizationDataWithRealtime();
 
   // フィルターフック
   const {

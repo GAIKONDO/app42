@@ -9,6 +9,7 @@ mod design_doc;
 mod themes;
 pub mod chromadb;
 pub mod pool;
+pub mod supabase;
 
 use rusqlite::{Result as SqlResult, params};
 use r2d2::PooledConnection;

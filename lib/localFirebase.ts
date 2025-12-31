@@ -1,6 +1,6 @@
 /**
  * Firebase互換APIラッパー (Electron/Tauri版)
- * 常にローカルデータベースを使用
+ * DataSourceインターフェースを使用してSQLiteまたはSupabaseにアクセス
  */
 
 // 環境を検出（Tauriアプリ内では__TAURI__が存在する）
@@ -14,6 +14,19 @@ const isTauri = typeof window !== 'undefined' && (
   (window as any).__TAURI_METADATA__ !== undefined
 );
 const isElectron = typeof window !== 'undefined' && window.electronAPI;
+
+// Supabaseを使用するかどうか
+const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+
+// DataSourceアダプターをインポート（Supabase使用時のみ）
+let dataSourceAdapter: any = null;
+if (useSupabase) {
+  try {
+    dataSourceAdapter = require('./dataSourceAdapter');
+  } catch (e) {
+    console.warn('DataSourceアダプターの読み込みに失敗しました。Tauriコマンドを使用します。', e);
+  }
+}
 
 // Tauriコマンドを呼び出すヘルパー関数
 export async function callTauriCommand(command: string, args?: any): Promise<any> {
@@ -254,7 +267,37 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
       path: collectionName,
     },
     get: async () => {
-      if (isTauri) {
+      // Supabase使用時はDataSourceアダプターを使用
+      if (useSupabase && dataSourceAdapter) {
+        try {
+          const data = await dataSourceAdapter.getDocViaDataSource(collectionName, docId);
+          if (!data) {
+            return { 
+              exists: () => false, 
+              data: () => undefined, 
+              id: docId 
+            };
+          }
+          return {
+            exists: () => true,
+            data: () => enhanceTimestampsInData(data),
+            id: data.id || docId,
+          };
+        } catch (error: any) {
+          const errorMessage = error?.message || error?.error || String(error || '');
+          if (errorMessage.includes('no rows') || 
+              errorMessage.includes('Query returned no rows') ||
+              errorMessage.includes('ドキュメント取得エラー') ||
+              errorMessage.includes('PGRST116')) {
+            return { 
+              exists: () => false, 
+              data: () => undefined, 
+              id: docId 
+            };
+          }
+          throw error;
+        }
+      } else if (isTauri) {
         try {
           const result = await callTauriCommand('doc_get', { collectionName: collectionName, docId: docId });
           if (!result || !result.data || result.exists === false) {
@@ -303,7 +346,21 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
       }
     },
     set: async (data: any, options?: any) => {
-      if (isTauri) {
+      // Supabase使用時はDataSourceアダプターを使用
+      if (useSupabase && dataSourceAdapter) {
+        try {
+          await dataSourceAdapter.setDocViaDataSource(collectionName, docId, data);
+          return { id: docId };
+        } catch (error: any) {
+          console.error('❌ [doc.set] DataSourceエラー:', {
+            collectionName,
+            docId,
+            errorMessage: error?.message,
+            error: error,
+          });
+          throw error;
+        }
+      } else if (isTauri) {
         console.log('💾 [doc.set] Tauriコマンドを呼び出します:', {
           command: 'doc_set',
           collectionName,
@@ -344,7 +401,21 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
       }
     },
     update: async (data: any) => {
-      if (isTauri) {
+      // Supabase使用時はDataSourceアダプターを使用
+      if (useSupabase && dataSourceAdapter) {
+        try {
+          await dataSourceAdapter.updateDocViaDataSource(collectionName, docId, data);
+          return { id: docId };
+        } catch (error: any) {
+          console.error('❌ [doc.update] DataSourceエラー:', {
+            collectionName,
+            docId,
+            errorMessage: error?.message,
+            error: error,
+          });
+          throw error;
+        }
+      } else if (isTauri) {
         return await callTauriCommand('doc_update', { collectionName: collectionName, docId: docId, data });
       } else if (isElectron) {
         return await window.electronAPI!.db.collection(collectionName).doc(docId!).update(data);
@@ -353,7 +424,21 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
       }
     },
     delete: async () => {
-      if (isTauri) {
+      // Supabase使用時はDataSourceアダプターを使用
+      if (useSupabase && dataSourceAdapter) {
+        try {
+          await dataSourceAdapter.deleteDocViaDataSource(collectionName, docId);
+          return { id: docId };
+        } catch (error: any) {
+          console.error('❌ [doc.delete] DataSourceエラー:', {
+            collectionName,
+            docId,
+            errorMessage: error?.message,
+            error: error,
+          });
+          throw error;
+        }
+      } else if (isTauri) {
         console.log('🗑️ [doc.delete] Tauriコマンドを呼び出します:', {
           command: 'doc_delete',
           collectionName,
@@ -396,7 +481,24 @@ export const collection = (db: any, collectionName: string) => {
           isElectron
         });
         
-        if (isTauri) {
+        // Supabase使用時はDataSourceアダプターを使用
+        if (useSupabase && dataSourceAdapter) {
+          try {
+            const docId = await dataSourceAdapter.addDocViaDataSource(collectionName, data);
+            return {
+              id: docId,
+              path: `${collectionName}/${docId}`,
+            };
+          } catch (error: any) {
+            console.error(`[collection.add] ❌ DataSourceエラー:`, {
+              errorMessage: error?.message,
+              error: error,
+              collectionName,
+              dataKeys: Object.keys(data || {})
+            });
+            throw error;
+          }
+        } else if (isTauri) {
           console.log(`[collection.add] Tauriコマンドを呼び出します`, {
             command: 'collection_add',
             collectionName,
@@ -516,7 +618,33 @@ export const collection = (db: any, collectionName: string) => {
       }
     },
     get: async () => {
-      if (isTauri) {
+      // Supabase使用時はDataSourceアダプターを使用
+      if (useSupabase && dataSourceAdapter) {
+        try {
+          const results = await dataSourceAdapter.getCollectionViaDataSource(collectionName);
+          const docs = (results || []).map((r: any) => ({
+            id: r.id,
+            data: () => enhanceTimestampsInData(r),
+            exists: () => true,
+          }));
+          
+          return {
+            docs: docs,
+            empty: docs.length === 0,
+            size: docs.length,
+            forEach: (callback: (doc: any) => void) => {
+              docs.forEach(callback);
+            },
+          };
+        } catch (error: any) {
+          console.error('❌ [collection.get] DataSourceエラー:', {
+            collectionName,
+            errorMessage: error?.message,
+            error: error,
+          });
+          throw error;
+        }
+      } else if (isTauri) {
         const results = await callTauriCommand('collection_get', { collectionName: collectionName });
         const docs = (results || []).map((r: any) => ({
           id: r.id,

@@ -96,6 +96,147 @@ async function loadInitiativeFromJson(initiativeId: string): Promise<FocusInitia
  * データベースから組織データを取得してOrgNodeData形式に変換
  */
 export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | null> {
+  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  
+  // Supabase使用時はDataSource経由で取得
+  if (useSupabase) {
+    try {
+      console.log('🔍 [getOrgTreeFromDb] Supabase経由で組織ツリーを取得します');
+      const { getDataSourceInstance } = await import('./dataSource');
+      const dataSource = getDataSourceInstance();
+      
+      // すべての組織を取得
+      const allOrgs = await dataSource.collection_get('organizations');
+      
+      if (!allOrgs || allOrgs.length === 0) {
+        return null;
+      }
+      
+      // 組織メンバーを取得（PostgreSQLでは引用符なしのテーブル名は小文字になる）
+      let allMembers: any[] = [];
+      try {
+        const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+        // PostgreSQLではorganizationMembersはorganizationmembers（小文字）として作成される
+        allMembers = await getCollectionViaDataSource('organizationmembers');
+      } catch (error: any) {
+        // organizationmembersが見つからない場合は、organizationMembers（キャメルケース）を試す
+        if (error?.message?.includes('Could not find the table') || error?.message?.includes('schema cache')) {
+          console.warn('⚠️ [getOrgTreeFromDb] organizationmembersテーブルが見つかりません。organizationMembers（キャメルケース）を試します。');
+          try {
+            const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+            allMembers = await getCollectionViaDataSource('organizationMembers');
+          } catch (fallbackError) {
+            console.warn('⚠️ [getOrgTreeFromDb] organizationMembersテーブルも見つかりません。メンバーなしで続行します。', fallbackError);
+            allMembers = [];
+          }
+        } else {
+          throw error;
+        }
+      }
+      
+      // メンバーを組織IDでグループ化
+      const membersByOrgId = new Map<string, any[]>();
+      for (const member of allMembers) {
+        const orgId = member.organizationId;
+        if (!membersByOrgId.has(orgId)) {
+          membersByOrgId.set(orgId, []);
+        }
+        membersByOrgId.get(orgId)!.push(member);
+      }
+      
+      // 階層構造を構築
+      const orgMap = new Map<string, any>();
+      const rootOrgs: any[] = [];
+      
+      // まずすべての組織をマップに追加
+      for (const org of allOrgs) {
+        const orgId = org.id;
+        const parentId = org.parentId || org.parent_id || null;
+        
+        // Supabaseから取得したデータをTauriコマンド形式に変換
+        const orgWithMembers = {
+          organization: {
+            id: orgId,
+            name: org.name,
+            title: org.title,
+            description: org.description,
+            level: org.level || 0,
+            levelName: org.levelName || org.level_name || '組織',
+            position: org.position || 0,
+            type: org.type || 'organization',
+            parent_id: parentId,
+            parentId: parentId,
+          },
+          members: membersByOrgId.get(orgId) || [],
+          children: [],
+        };
+        
+        orgMap.set(orgId, orgWithMembers);
+        
+        // ルート組織を特定
+        if (!parentId) {
+          rootOrgs.push(orgWithMembers);
+        }
+      }
+      
+      // 親子関係を構築
+      for (const org of allOrgs) {
+        const orgId = org.id;
+        const parentId = org.parentId || org.parent_id || null;
+        
+        if (parentId) {
+          const parent = orgMap.get(parentId);
+          const child = orgMap.get(orgId);
+          if (parent && child) {
+            parent.children.push(child);
+          }
+        }
+      }
+      
+      // rootIdが指定されている場合は、該当する組織を返す
+      if (rootId) {
+        const found = orgMap.get(rootId);
+        if (found) {
+          return convertToOrgNodeData(found);
+        }
+        // 見つからない場合は最初のルート組織を返す
+        if (rootOrgs.length > 0) {
+          return convertToOrgNodeData(rootOrgs[0]);
+        }
+        return null;
+      }
+      
+      // 複数のルート組織がある場合、全てを子ノードとして持つ仮想的なルートノードを作成
+      if (rootOrgs.length > 1) {
+        console.log(`⚠️ [getOrgTreeFromDb] 複数のルート組織が見つかりました (${rootOrgs.length}件)。全て表示します。`);
+        const convertedRoots = rootOrgs.map((org: any) => convertToOrgNodeData(org));
+        
+        const virtualRoot: OrgNodeData = {
+          id: 'virtual-root',
+          name: `全組織 (${rootOrgs.length}件のルート組織)`,
+          title: `All Organizations (${rootOrgs.length} root organizations)`,
+          description: '複数のルート組織が存在します。重複している可能性があります。',
+          children: convertedRoots,
+          members: [],
+        };
+        
+        return virtualRoot;
+      }
+      
+      // 1つだけの場合はそのまま返す
+      if (rootOrgs.length === 1) {
+        return convertToOrgNodeData(rootOrgs[0]);
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Supabase経由の組織データ取得に失敗:', error);
+      // フォールバック: Tauriコマンド経由
+      console.warn('Supabase経由の取得に失敗、Tauriコマンドにフォールバック:', error);
+    }
+  }
+  
+  // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
   try {
     // Tauriコマンド経由で直接取得（APIサーバー経由ではなく）
     console.log('🔍 [getOrgTreeFromDb] Tauriコマンド経由で組織ツリーを取得します');

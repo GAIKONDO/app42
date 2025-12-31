@@ -7,8 +7,63 @@ import { generateUniqueStartupId } from './utils';
  */
 export async function getStartups(organizationId: string): Promise<Startup[]> {
   try {
-    console.log('📖 [getStartups] 開始:', { organizationId });
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getStartups] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）:`, { organizationId });
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        const result = await getCollectionViaDataSource('startups');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const allStartups = Array.isArray(result) ? result : [];
+        console.log('📖 [getStartups] Supabaseから取得:', allStartups.length, '件');
+        
+        const filtered = allStartups
+          .filter((item: any) => {
+            // Supabaseから取得したデータは直接オブジェクト形式
+            const data = item;
+            const matches = data.organizationId === organizationId;
+            return matches;
+          })
+          .map((item: any) => {
+            const data = item;
+            return {
+              id: data.id,
+              organizationId: data.organizationId,
+              title: data.title || '',
+              description: data.description || '',
+              content: data.content || '',
+              createdAt: data.createdAt,
+              updatedAt: data.updatedAt,
+            } as Startup;
+          });
+      
+      console.log('📖 [getStartups] フィルタ後:', {
+        filteredCount: filtered.length,
+        filteredIds: filtered.map(s => s.id),
+      });
+      
+      const sorted = filtered.sort((a, b) => {
+        const aTime = a.createdAt ? (typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : (a.createdAt.toMillis ? a.createdAt.toMillis() : 0)) : 0;
+        const bTime = b.createdAt ? (typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : (b.createdAt.toMillis ? b.createdAt.toMillis() : 0)) : 0;
+        return bTime - aTime;
+      });
+      
+        console.log('📖 [getStartups] 最終結果（Supabaseから取得）:', {
+          count: sorted.length,
+          startups: sorted.map(s => ({ id: s.id, title: s.title, organizationId: s.organizationId })),
+        });
+        return sorted;
+      } catch (error: any) {
+        console.error('❌ [getStartups] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getStartups] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
@@ -772,8 +827,156 @@ export async function deleteStartup(startupId: string): Promise<void> {
  */
 export async function getAllStartups(): Promise<Startup[]> {
   try {
-    console.log('📖 [getAllStartups] 開始');
+    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    console.log(`📖 [getAllStartups] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
     
+    // Supabase使用時はDataSource経由で取得
+    if (useSupabase) {
+      try {
+        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+        const result = await getCollectionViaDataSource('startups');
+        
+        // Supabaseから取得したデータは既に配列形式
+        const resultArray = Array.isArray(result) ? result : [];
+        
+        const parseJsonArray = (value: any): string[] => {
+          if (Array.isArray(value)) return value;
+          if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+              return [];
+            }
+          }
+          return [];
+        };
+        
+        const startups = resultArray.map((item: any) => {
+          // Supabaseから取得したデータは直接オブジェクト形式
+          const data = item;
+          const itemId = data.id;
+          
+          let createdAt: any = null;
+          let updatedAt: any = null;
+          
+          if (data.createdAt) {
+            if (data.createdAt.seconds) {
+              createdAt = new Date(data.createdAt.seconds * 1000).toISOString();
+            } else if (typeof data.createdAt === 'string') {
+              createdAt = data.createdAt;
+            }
+          }
+          
+          if (data.updatedAt) {
+            if (data.updatedAt.seconds) {
+              updatedAt = new Date(data.updatedAt.seconds * 1000).toISOString();
+            } else if (typeof data.updatedAt === 'string') {
+              updatedAt = data.updatedAt;
+            }
+          }
+          
+          return {
+          id: itemId,
+          organizationId: data.organizationId,
+          companyId: data.companyId,
+          title: data.title || '',
+          description: data.description || '',
+          content: data.content || '',
+          assignee: parseJsonArray(data.assignee),
+          categoryIds: parseJsonArray(data.categoryIds),
+          status: data.status,
+          agencyContractMonth: data.agencyContractMonth,
+          engagementLevel: data.engagementLevel,
+          bizDevPhase: data.bizDevPhase,
+          relatedVCS: parseJsonArray(data.relatedVCS),
+          responsibleDepartments: parseJsonArray(data.responsibleDepartments),
+          hpUrl: data.hpUrl,
+          asanaUrl: data.asanaUrl,
+          boxUrl: data.boxUrl,
+          objective: data.objective,
+          evaluation: data.evaluation,
+          evaluationChart: data.evaluationChart,
+          evaluationChartSnapshots: data.evaluationChartSnapshots,
+          considerationPeriod: data.considerationPeriod,
+          executionPeriod: data.executionPeriod,
+          monetizationPeriod: data.monetizationPeriod,
+          monetizationRenewalNotRequired: (() => {
+            const value = data.monetizationRenewalNotRequired;
+            // データベースから読み込んだ値が1の場合はtrue、0の場合はfalseに変換
+            if (value === 1) {
+              return true;
+            } else if (value === 0) {
+              return false;
+            } else if (value === true) {
+              return true;
+            } else if (value === false) {
+              return false;
+            } else {
+              return false;
+            }
+          })(),
+          relatedOrganizations: parseJsonArray(data.relatedOrganizations),
+          relatedGroupCompanies: parseJsonArray(data.relatedGroupCompanies),
+          monetizationDiagram: data.monetizationDiagram,
+          monetizationDiagramId: data.monetizationDiagramId,
+          relationDiagram: data.relationDiagram,
+          relationDiagramId: data.relationDiagramId,
+          causeEffectDiagramId: data.causeEffectDiagramId,
+          themeId: data.themeId,
+          themeIds: parseJsonArray(data.themeIds),
+          topicIds: parseJsonArray(data.topicIds),
+          competitorComparison: (() => {
+            if (!data.competitorComparison) return undefined;
+            if (typeof data.competitorComparison === 'object' && !Array.isArray(data.competitorComparison)) {
+              return data.competitorComparison as any;
+            }
+            if (typeof data.competitorComparison === 'string') {
+              try {
+                return JSON.parse(data.competitorComparison);
+              } catch (e) {
+                console.warn('⚠️ [getAllStartups] competitorComparison JSONパースエラー:', e);
+                return undefined;
+              }
+            }
+            return undefined;
+          })(),
+          deepSearch: (() => {
+            if (!data.deepSearch) return undefined;
+            if (typeof data.deepSearch === 'object' && !Array.isArray(data.deepSearch)) {
+              return data.deepSearch as any;
+            }
+            if (typeof data.deepSearch === 'string') {
+              try {
+                return JSON.parse(data.deepSearch);
+              } catch (e) {
+                console.warn('⚠️ [getAllStartups] deepSearch JSONパースエラー:', e);
+                return undefined;
+              }
+            }
+            return undefined;
+          })(),
+          createdAt: createdAt,
+          updatedAt: updatedAt,
+        } as Startup;
+      });
+      
+      const sorted = startups.sort((a, b) => {
+        const aTime = a.createdAt ? (typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : 0) : 0;
+        const bTime = b.createdAt ? (typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : 0) : 0;
+        return bTime - aTime;
+      });
+      
+        console.log('✅ [getAllStartups] 取得成功（Supabaseから取得）:', sorted.length, '件');
+        return sorted;
+      } catch (error: any) {
+        console.error('❌ [getAllStartups] Supabase取得エラー:', error);
+        // フォールバック: Tauriコマンド経由
+        console.warn('⚠️ [getAllStartups] Supabase取得に失敗、Tauriコマンドにフォールバック:', error);
+      }
+    }
+    
+    // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
     const { callTauriCommand } = await import('../localFirebase');
     
     try {
@@ -918,7 +1121,7 @@ export async function getAllStartups(): Promise<Startup[]> {
         return bTime - aTime;
       });
       
-      console.log('✅ [getAllStartups] 取得成功:', sorted.length, '件');
+      console.log('✅ [getAllStartups] 取得成功（SQLiteから取得）:', sorted.length, '件');
       return sorted;
     } catch (collectionError: any) {
       console.error('📖 [getAllStartups] collection_getエラー:', collectionError);

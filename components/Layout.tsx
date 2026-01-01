@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { onAuthStateChanged, signOut, type User } from '@/lib/localFirebase';
 import { callTauriCommand } from '@/lib/localFirebase';
 import { usePathname } from 'next/navigation';
@@ -14,7 +13,6 @@ import { TabProvider, useTabs } from './TabProvider';
 import TabBar from './TabBar';
 import UrlBar from './UrlBar';
 import { FiMessageSquare } from 'react-icons/fi';
-import { useEmbeddingRegeneration } from './EmbeddingRegenerationContext';
 
 const ADMIN_UID = 'PktGlRBWVZc9E0Y3OLSQ4TeRg0P2';
 
@@ -660,9 +658,6 @@ function LayoutContent({
   const { tabs, activeTabId, loading: tabsLoading } = useTabs();
   const activeTab = tabs.find(tab => tab.id === activeTabId);
   
-  // 埋め込み再生成の状態を取得
-  const { isRegenerating, progress, openModal } = useEmbeddingRegeneration();
-  
   // BrowserViewのタブがアクティブな場合を判定
   const isBrowserViewTab = activeTab?.isMainWindow === false;
   
@@ -748,58 +743,6 @@ function LayoutContent({
           </ErrorBoundary>
         </div>
       )}
-      {/* 埋め込み再生成中のポップアップ（右上）- Portalでbody直下に配置 */}
-      {shouldShowContent && !isPresentationMode && user && isRegenerating && progress.status === 'processing' && typeof window !== 'undefined' 
-        ? createPortal(
-            <div
-              onClick={openModal}
-              style={{
-                position: 'fixed',
-                top: `${totalTopOffset + 16}px`,
-                right: '24px',
-                backgroundColor: '#3B82F6',
-                color: '#FFFFFF',
-                padding: '12px 20px',
-                borderRadius: '8px',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2)',
-                zIndex: 1000, // z-indexを下げる（モーダルより低く、通常のコンテンツより高く）
-                display: 'inline-flex', // inline-flexに変更してサイズを最小限に
-                alignItems: 'center',
-                gap: '12px',
-                width: 'fit-content', // コンテンツに合わせたサイズ
-                maxWidth: '400px', // 最大幅を制限
-                animation: 'pulse 2s ease-in-out infinite',
-                pointerEvents: 'auto', // クリック可能にする
-                cursor: 'pointer', // カーソルをポインターに
-                userSelect: 'none', // テキスト選択を無効化
-                isolation: 'isolate', // 新しいスタッキングコンテキストを作成
-              }}
-            >
-              <div
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  backgroundColor: '#FFFFFF',
-                  animation: 'spin 1s linear infinite',
-                }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
-                  埋め込み再生成中
-                </div>
-                {progress.total > 0 && (
-                  <div style={{ fontSize: '12px', opacity: 0.9 }}>
-                    {progress.current} / {progress.total} 件処理中
-                    {progress.stats.success > 0 && ` (成功: ${progress.stats.success})`}
-                    {progress.stats.errors > 0 && ` (エラー: ${progress.stats.errors})`}
-                  </div>
-                )}
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
       {shouldShowContent && !isPresentationMode && user && (
         <>
 

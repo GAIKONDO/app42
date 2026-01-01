@@ -5,12 +5,7 @@ interface ViewModeSwitcherProps {
   setViewMode: (mode: 'list' | 'graph2d' | 'graph3d') => void;
   isCheckingVersion: boolean;
   onCheckVersion: () => void;
-  isRegeneratingEmbeddings: boolean;
-  regenerationProgress: {
-    current: number;
-    total: number;
-  };
-  onOpenRegenerationModal: () => void;
+  onOpenEmbeddingModal?: () => void;
 }
 
 export default function ViewModeSwitcher({
@@ -18,9 +13,7 @@ export default function ViewModeSwitcher({
   setViewMode,
   isCheckingVersion,
   onCheckVersion,
-  isRegeneratingEmbeddings,
-  regenerationProgress,
-  onOpenRegenerationModal,
+  onOpenEmbeddingModal,
 }: ViewModeSwitcherProps) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
@@ -89,34 +82,26 @@ export default function ViewModeSwitcher({
         >
           {isCheckingVersion ? 'チェック中...' : '🔍 バージョンチェック'}
         </button>
-        <button
-          onClick={onOpenRegenerationModal}
-          disabled={isRegeneratingEmbeddings}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: isRegeneratingEmbeddings ? '#D1D5DB' : '#10B981',
-            color: '#FFFFFF',
-            border: 'none',
-            borderRadius: '6px',
-            fontSize: '14px',
-            cursor: isRegeneratingEmbeddings ? 'not-allowed' : 'pointer',
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}
-        >
-          {isRegeneratingEmbeddings ? (
-            <>
-              <span>再生成中...</span>
-              <span style={{ fontSize: '12px' }}>
-                ({regenerationProgress.current}/{regenerationProgress.total})
-              </span>
-            </>
-          ) : (
-            '🔧 埋め込み再生成'
-          )}
-        </button>
+        {onOpenEmbeddingModal && (
+          <button
+            onClick={onOpenEmbeddingModal}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#10B981',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            🔧 埋め込み実行
+          </button>
+        )}
       </div>
     </div>
   );

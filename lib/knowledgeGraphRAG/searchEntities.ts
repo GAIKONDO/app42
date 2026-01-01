@@ -5,6 +5,8 @@
 import type { Entity } from '@/types/entity';
 import type { KnowledgeGraphSearchResult, SearchFilters } from './types';
 import { findSimilarEntitiesChroma } from '../entityEmbeddingsChroma';
+import { findSimilarEntities as findSimilarEntitiesAdapter } from '../vectorSearchAdapter';
+import { getVectorSearchBackend } from '../vectorSearchConfig';
 import { getEntitiesByIds } from '../entityApi';
 import { normalizeSimilarity, calculateEntityScore, adjustWeightsForQuery, DEFAULT_WEIGHTS, type ScoringWeights } from '../ragSearchScoring';
 import { searchEntitiesBM25 } from './bm25Search';
@@ -29,14 +31,54 @@ export async function searchEntities(
     // 並列でベクトル検索とBM25検索を実行
     const [vectorResults, bm25Results] = await Promise.all([
       config.useVector
-        ? findSimilarEntitiesChroma(
-            queryText,
-            limit * 2,
-            filters?.organizationId
-          ).catch(error => {
-            console.warn('[searchEntities] ベクトル検索エラー:', error);
-            return [];
-          })
+        ? (async () => {
+            const backend = getVectorSearchBackend();
+            if (backend === 'supabase') {
+              // Supabaseを使用（新しい抽象化レイヤー）
+              try {
+                const { generateEmbedding } = await import('../embeddings');
+                const queryEmbedding = await generateEmbedding(queryText);
+                const results = await findSimilarEntitiesAdapter(
+                  queryEmbedding,
+                  limit * 2,
+                  filters?.organizationId,
+                  undefined // companyId
+                );
+                
+                // VectorSearchResult形式をfindSimilarEntitiesChromaの戻り値形式に変換
+                const entities = await getEntitiesByIds(results.map(r => r.id)).catch(error => {
+                  console.error('[searchEntities] エンティティ取得エラー:', error);
+                  return [];
+                });
+                
+                const entityMap = new Map(entities.map(e => [e.id, e]));
+                return results
+                  .map(result => {
+                    const entity = entityMap.get(result.id);
+                    if (!entity) return null;
+                    return {
+                      entityId: result.id,
+                      similarity: result.similarity,
+                      entity,
+                    };
+                  })
+                  .filter((r): r is NonNullable<typeof r> => r !== null);
+              } catch (error: any) {
+                console.warn('[searchEntities] Supabaseベクトル検索エラー:', error);
+                return [];
+              }
+            } else {
+              // ChromaDBを使用（既存の実装）
+              return findSimilarEntitiesChroma(
+                queryText,
+                limit * 2,
+                filters?.organizationId
+              ).catch(error => {
+                console.warn('[searchEntities] ベクトル検索エラー:', error);
+                return [];
+              });
+            }
+          })()
         : Promise.resolve([]),
       config.useBM25
         ? searchEntitiesBM25(

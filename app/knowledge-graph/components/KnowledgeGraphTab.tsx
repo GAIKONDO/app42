@@ -7,20 +7,20 @@
 import { useState } from 'react';
 // import KnowledgeGraph2D from '@/components/KnowledgeGraph2D';
 import KnowledgeGraph3D from '@/components/KnowledgeGraph3D';
-import { useEmbeddingRegeneration } from '@/components/EmbeddingRegenerationContext';
 import VersionCheckModal from '@/components/knowledge-graph/modals/VersionCheckModal';
 import EntityDetailModal from '@/components/knowledge-graph/modals/EntityDetailModal';
 import RelationDetailModal from '@/components/knowledge-graph/modals/RelationDetailModal';
 import DeleteEntityModal from '@/components/knowledge-graph/modals/DeleteEntityModal';
+import DeleteRelationModal from '@/components/knowledge-graph/modals/DeleteRelationModal';
 import BulkDeleteModal from '@/components/knowledge-graph/modals/BulkDeleteModal';
-import EmbeddingRegenerationModal from '@/components/knowledge-graph/modals/EmbeddingRegenerationModal';
+import EmbeddingExecutionModal from '@/components/knowledge-graph/modals/EmbeddingExecutionModal';
 import KnowledgeGraphFilters from '@/components/knowledge-graph/filters/KnowledgeGraphFilters';
 import EntityRelationList from '@/components/knowledge-graph/EntityRelationList';
 import ViewModeSwitcher from '@/components/knowledge-graph/ViewModeSwitcher';
 import { useKnowledgeGraphData } from '@/components/knowledge-graph/hooks/useKnowledgeGraphData';
 import { useKnowledgeGraphFilters } from '@/components/knowledge-graph/hooks/useKnowledgeGraphFilters';
 import { useEntityDeletion } from '@/components/knowledge-graph/hooks/useEntityDeletion';
-import { useEmbeddingRegenerationState } from '@/components/knowledge-graph/hooks/useEmbeddingRegenerationState';
+import { useRelationDeletion } from '@/components/knowledge-graph/hooks/useRelationDeletion';
 import { useVersionCheck } from '@/components/knowledge-graph/hooks/useVersionCheck';
 import { useDevConsoleCommands } from '@/components/knowledge-graph/hooks/useDevConsoleCommands';
 import { entityTypeLabels, relationTypeLabels } from '@/components/knowledge-graph/constants/typeLabels';
@@ -79,33 +79,9 @@ export function KnowledgeGraphTab() {
   const [showMemberFilter, setShowMemberFilter] = useState(false);
   const [showImportanceFilter, setShowImportanceFilter] = useState(false);
   
-  // 埋め込み再生成のグローバル状態管理
-  const { startRegeneration, completeRegeneration, cancelRegeneration } = useEmbeddingRegeneration();
+  // 埋め込み実行モーダルの状態
+  const [showEmbeddingModal, setShowEmbeddingModal] = useState(false);
   
-  // 埋め込み再生成関連の状態をカスタムフックに抽出
-  const {
-    showRegenerationModal,
-    setShowRegenerationModal,
-    selectedTypeFilter,
-    setSelectedTypeFilter,
-    regenerationType,
-    setRegenerationType,
-    missingCounts,
-    setMissingCounts,
-    isCountingMissing,
-    setIsCountingMissing,
-    isRegeneratingEmbeddings,
-    setIsRegeneratingEmbeddings,
-    regenerationProgress,
-    setRegenerationProgress,
-    isCancelledRef,
-    updateMissingCountsOrganization,
-  } = useEmbeddingRegenerationState({
-    entities,
-    relations,
-    topics,
-    organizations,
-  });
   // バージョンチェック関連のロジックをカスタムフックに抽出
   const {
     showVersionCheck,
@@ -118,6 +94,7 @@ export function KnowledgeGraphTab() {
   
   // 一括削除の状態
   const [selectedEntityIds, setSelectedEntityIds] = useState<Set<string>>(new Set());
+  const [selectedRelationIds, setSelectedRelationIds] = useState<Set<string>>(new Set());
   
   // エンティティ削除処理をカスタムフックに抽出
   const {
@@ -137,6 +114,19 @@ export function KnowledgeGraphTab() {
     setRelations,
     selectedEntityIds,
     setSelectedEntityIds,
+  });
+
+  // リレーション削除処理をカスタムフックに抽出
+  const {
+    deleteTargetRelationId,
+    setDeleteTargetRelationId,
+    showDeleteRelationModal,
+    setShowDeleteRelationModal,
+    isDeletingRelation,
+    handleDeleteRelation,
+  } = useRelationDeletion({
+    relations,
+    setRelations,
   });
   
   // 開発用コンソールコマンドを登録
@@ -223,17 +213,14 @@ export function KnowledgeGraphTab() {
           setShowImportanceFilter={setShowImportanceFilter}
         />
 
-        {/* ビューモード切り替えと埋め込み再生成 */}
+        {/* ビューモード切り替え */}
         <ViewModeSwitcher
           viewMode={viewMode}
           setViewMode={setViewMode}
           isCheckingVersion={isCheckingVersion}
           onCheckVersion={handleCheckVersion}
-          isRegeneratingEmbeddings={isRegeneratingEmbeddings}
-          regenerationProgress={regenerationProgress}
-          onOpenRegenerationModal={() => {
-            setRegenerationType('missing');
-            setShowRegenerationModal(true);
+          onOpenEmbeddingModal={() => {
+            setShowEmbeddingModal(true);
           }}
         />
 
@@ -276,6 +263,8 @@ export function KnowledgeGraphTab() {
                 setRelationTypeFilter={setRelationTypeFilter}
                 selectedEntityIds={selectedEntityIds}
                 setSelectedEntityIds={setSelectedEntityIds}
+                selectedRelationIds={selectedRelationIds}
+                setSelectedRelationIds={setSelectedRelationIds}
                 entityTypeLabels={entityTypeLabels}
                 relationTypeLabels={relationTypeLabels}
                 isDeletingEntity={isDeletingEntity}
@@ -283,6 +272,10 @@ export function KnowledgeGraphTab() {
                 setDeleteTargetEntityId={setDeleteTargetEntityId}
                 setShowDeleteEntityModal={setShowDeleteEntityModal}
                 setShowBulkDeleteModal={setShowBulkDeleteModal}
+                setRelations={setRelations}
+                setDeleteTargetRelationId={setDeleteTargetRelationId}
+                setShowDeleteRelationModal={setShowDeleteRelationModal}
+                isDeletingRelation={isDeletingRelation}
               />
             )}
 
@@ -306,29 +299,10 @@ export function KnowledgeGraphTab() {
         )}
       </div>
 
-      {/* 埋め込み再生成モーダル（処理中でも表示可能） */}
-      <EmbeddingRegenerationModal
-        isOpen={showRegenerationModal}
-        onClose={() => setShowRegenerationModal(false)}
-        regenerationProgress={regenerationProgress}
-        setRegenerationProgress={setRegenerationProgress}
-        regenerationType={regenerationType}
-        setRegenerationType={setRegenerationType}
-        missingCounts={missingCounts}
-        setMissingCounts={setMissingCounts}
-        isCountingMissing={isCountingMissing}
-        setIsCountingMissing={setIsCountingMissing}
-        isRegeneratingEmbeddings={isRegeneratingEmbeddings}
-        setIsRegeneratingEmbeddings={setIsRegeneratingEmbeddings}
-        isCancelledRef={isCancelledRef}
-        organizations={organizations}
-        entities={entities}
-        relations={relations}
-        topics={topics}
-        updateMissingCountsOrganization={updateMissingCountsOrganization}
-        startRegeneration={startRegeneration}
-        completeRegeneration={completeRegeneration}
-        cancelRegeneration={cancelRegeneration}
+      {/* 埋め込み実行モーダル */}
+      <EmbeddingExecutionModal
+        isOpen={showEmbeddingModal}
+        onClose={() => setShowEmbeddingModal(false)}
       />
 
       {/* バージョンチェックモーダル */}
@@ -337,7 +311,6 @@ export function KnowledgeGraphTab() {
         onClose={() => setShowVersionCheck(false)}
         outdatedEntities={outdatedEntities}
         outdatedRelations={outdatedRelations}
-        onOpenRegenerationModal={() => setShowRegenerationModal(true)}
       />
 
       {/* エンティティ/リレーション詳細表示モーダル */}
@@ -364,6 +337,20 @@ export function KnowledgeGraphTab() {
           setDeleteTargetEntityId(null);
         }}
         onConfirm={handleDeleteEntity}
+      />
+
+      {/* リレーション削除確認モーダル */}
+      <DeleteRelationModal
+        isOpen={showDeleteRelationModal}
+        relationId={deleteTargetRelationId}
+        relations={relations}
+        isDeleting={isDeletingRelation}
+        onClose={() => {
+          setShowDeleteRelationModal(false);
+          setDeleteTargetRelationId(null);
+        }}
+        onConfirm={handleDeleteRelation}
+        relationTypeLabels={relationTypeLabels}
       />
 
       {/* 一括削除確認モーダル */}

@@ -7,6 +7,10 @@ import type { KnowledgeGraphSearchResult, SearchFilters } from './types';
 import { searchEntities } from './searchEntities';
 import { searchRelations } from './searchRelations';
 import { searchTopics } from './searchTopics';
+import { searchStartups } from './searchStartups';
+import { searchFocusInitiatives } from './searchFocusInitiatives';
+import { searchMeetingNotes } from './searchMeetingNotes';
+import { searchRegulations } from './searchRegulations';
 import { adjustWeightsForQuery, DEFAULT_WEIGHTS } from '../ragSearchScoring';
 import { type HybridSearchConfig, DEFAULT_HYBRID_CONFIG } from './hybridSearch';
 import { analyzeQuery, getSearchStrategy, logQueryAnalysis, type QueryAnalysis } from './queryRouter';
@@ -86,8 +90,8 @@ export async function searchKnowledgeGraph(
     // クエリに基づいて重みを調整
     const weights = adjustWeightsForQuery(normalizedQuery, DEFAULT_WEIGHTS);
 
-    // 各タイプごとの検索数を計算（limitを3等分）
-    const perTypeLimit = Math.max(1, Math.ceil(limit / 3));
+    // 各タイプごとの検索数を計算（limitを7等分：entities, relations, topics, startups, focusInitiatives, meetingNotes, regulations）
+    const perTypeLimit = Math.max(1, Math.ceil(limit / 7));
 
     // クエリルーターを使用する場合、クエリを分析して検索戦略を決定
     let entityHybridConfig: HybridSearchConfig | undefined;
@@ -138,7 +142,7 @@ export async function searchKnowledgeGraph(
       topicHybridConfig: finalTopicHybridConfig,
     });
     
-    const [entityResults, relationResults, topicResults] = await Promise.all([
+    const [entityResults, relationResults, topicResults, startupResults, focusInitiativeResults, meetingNoteResults, regulationResults] = await Promise.all([
       // エンティティ検索
       searchEntities(normalizedQuery, perTypeLimit, filters, weights, finalEntityHybridConfig).catch(error => {
         console.error('[searchKnowledgeGraph] エンティティ検索エラー:', error);
@@ -155,6 +159,30 @@ export async function searchKnowledgeGraph(
       searchTopics(normalizedQuery, perTypeLimit, filters, weights, finalTopicHybridConfig).catch(error => {
         console.error('[searchKnowledgeGraph] トピック検索エラー:', error);
         return [] as KnowledgeGraphSearchResult[];
+      }),
+      
+      // スタートアップ検索
+      searchStartups(normalizedQuery, perTypeLimit, filters, weights).catch(error => {
+        console.error('[searchKnowledgeGraph] スタートアップ検索エラー:', error);
+        return [] as KnowledgeGraphSearchResult[];
+      }),
+      
+      // 注力施策検索
+      searchFocusInitiatives(normalizedQuery, perTypeLimit, filters, weights).catch(error => {
+        console.error('[searchKnowledgeGraph] 注力施策検索エラー:', error);
+        return [] as KnowledgeGraphSearchResult[];
+      }),
+      
+      // 議事録検索
+      searchMeetingNotes(normalizedQuery, perTypeLimit, filters, weights).catch(error => {
+        console.error('[searchKnowledgeGraph] 議事録検索エラー:', error);
+        return [] as KnowledgeGraphSearchResult[];
+      }),
+      
+      // 制度検索
+      searchRegulations(normalizedQuery, perTypeLimit, filters, weights).catch(error => {
+        console.error('[searchKnowledgeGraph] 制度検索エラー:', error);
+        return [] as KnowledgeGraphSearchResult[];
       })
     ]);
     
@@ -162,6 +190,10 @@ export async function searchKnowledgeGraph(
       entityCount: entityResults.length,
       relationCount: relationResults.length,
       topicCount: topicResults.length,
+      startupCount: startupResults.length,
+      focusInitiativeCount: focusInitiativeResults.length,
+      meetingNoteCount: meetingNoteResults.length,
+      regulationCount: regulationResults.length,
     });
 
     // 結果を統合
@@ -169,11 +201,20 @@ export async function searchKnowledgeGraph(
       ...entityResults,
       ...relationResults,
       ...topicResults,
+      ...startupResults,
+      ...focusInitiativeResults,
+      ...meetingNoteResults,
+      ...regulationResults,
     ];
 
     console.log('[searchKnowledgeGraph] 検索結果:', {
       entityCount: entityResults.length,
       relationCount: relationResults.length,
+      topicCount: topicResults.length,
+      startupCount: startupResults.length,
+      focusInitiativeCount: focusInitiativeResults.length,
+      meetingNoteCount: meetingNoteResults.length,
+      regulationCount: regulationResults.length,
       totalCount: allResults.length,
     });
 

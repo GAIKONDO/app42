@@ -308,6 +308,108 @@ export async function getKnowledgeGraphContextWithResults(
       console.warn(`[getKnowledgeGraphContextWithResults] トピック検索結果が0件です。クエリ: "${queryText}"`);
     }
 
+    // スタートアップ情報
+    const startups = results.filter(r => r.type === 'startup' && r.startup);
+    if (startups.length > 0) {
+      contextParts.push('\n## 関連スタートアップ\n');
+      for (const result of startups.slice(0, limit)) {
+        const startup = result.startup!;
+        const scoreText = typeof result.score === 'number' && !isNaN(result.score)
+          ? ` (関連度: ${(result.score * 100).toFixed(1)}%)`
+          : '';
+        contextParts.push(`- **${startup.title}**${scoreText}`);
+        
+        sources.push({
+          type: 'startup',
+          id: startup.id,
+          name: startup.title,
+          score: typeof result.score === 'number' && !isNaN(result.score) ? result.score : 0,
+        });
+        
+        if (startup.description) {
+          contextParts.push(`  説明: ${startup.description.substring(0, 200)}${startup.description.length > 200 ? '...' : ''}`);
+        }
+        if (startup.objective) {
+          contextParts.push(`  目的: ${startup.objective.substring(0, 200)}${startup.objective.length > 200 ? '...' : ''}`);
+        }
+        if (startup.evaluation) {
+          contextParts.push(`  評価: ${startup.evaluation.substring(0, 200)}${startup.evaluation.length > 200 ? '...' : ''}`);
+        }
+      }
+    }
+
+    // 注力施策情報
+    const focusInitiatives = results.filter(r => r.type === 'focusInitiative' && r.focusInitiative);
+    if (focusInitiatives.length > 0) {
+      contextParts.push('\n## 関連注力施策\n');
+      for (const result of focusInitiatives.slice(0, limit)) {
+        const focusInitiative = result.focusInitiative!;
+        const scoreText = typeof result.score === 'number' && !isNaN(result.score)
+          ? ` (関連度: ${(result.score * 100).toFixed(1)}%)`
+          : '';
+        contextParts.push(`- **${focusInitiative.title}**${scoreText}`);
+        
+        sources.push({
+          type: 'focusInitiative',
+          id: focusInitiative.id,
+          name: focusInitiative.title,
+          score: typeof result.score === 'number' && !isNaN(result.score) ? result.score : 0,
+        });
+        
+        if (focusInitiative.description) {
+          contextParts.push(`  説明: ${focusInitiative.description.substring(0, 200)}${focusInitiative.description.length > 200 ? '...' : ''}`);
+        }
+      }
+    }
+
+    // 議事録情報
+    const meetingNotes = results.filter(r => r.type === 'meetingNote' && r.meetingNote);
+    if (meetingNotes.length > 0) {
+      contextParts.push('\n## 関連議事録\n');
+      for (const result of meetingNotes.slice(0, limit)) {
+        const meetingNote = result.meetingNote!;
+        const scoreText = typeof result.score === 'number' && !isNaN(result.score)
+          ? ` (関連度: ${(result.score * 100).toFixed(1)}%)`
+          : '';
+        contextParts.push(`- **${meetingNote.title}**${scoreText}`);
+        
+        sources.push({
+          type: 'meetingNote',
+          id: meetingNote.id,
+          name: meetingNote.title,
+          score: typeof result.score === 'number' && !isNaN(result.score) ? result.score : 0,
+        });
+        
+        if (meetingNote.description) {
+          contextParts.push(`  説明: ${meetingNote.description.substring(0, 200)}${meetingNote.description.length > 200 ? '...' : ''}`);
+        }
+      }
+    }
+
+    // 制度情報
+    const regulations = results.filter(r => r.type === 'regulation' && r.regulation);
+    if (regulations.length > 0) {
+      contextParts.push('\n## 関連制度\n');
+      for (const result of regulations.slice(0, limit)) {
+        const regulation = result.regulation!;
+        const scoreText = typeof result.score === 'number' && !isNaN(result.score)
+          ? ` (関連度: ${(result.score * 100).toFixed(1)}%)`
+          : '';
+        contextParts.push(`- **${regulation.title}**${scoreText}`);
+        
+        sources.push({
+          type: 'regulation',
+          id: regulation.id,
+          name: regulation.title,
+          score: typeof result.score === 'number' && !isNaN(result.score) ? result.score : 0,
+        });
+        
+        if (regulation.description) {
+          contextParts.push(`  説明: ${regulation.description.substring(0, 200)}${regulation.description.length > 200 ? '...' : ''}`);
+        }
+      }
+    }
+
     const context = contextParts.join('\n');
 
     // トークン数の簡易チェック（概算: 1文字 ≈ 0.25トークン）

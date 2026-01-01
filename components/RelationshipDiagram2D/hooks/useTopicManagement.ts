@@ -5,7 +5,7 @@ import type { Entity } from '@/types/entity';
 import type { Relation } from '@/types/relation';
 import { generateTopicMetadata, extractEntities, extractRelations } from '@/lib/topicMetadataGeneration';
 import { getMeetingNoteById, saveMeetingNote } from '@/lib/orgApi';
-import { getRelationsByTopicId, createRelation } from '@/lib/relationApi';
+import { getRelationsByTopicId, createRelation, updateRelation } from '@/lib/relationApi';
 import { getEntityById, createEntity, getEntitiesByOrganizationId, getEntitiesByCompanyId } from '@/lib/entityApi';
 import { callTauriCommand } from '@/lib/localFirebase';
 import { saveTopicEmbeddingAsync } from '@/lib/topicEmbeddings';
@@ -653,6 +653,44 @@ export function useTopicManagement({
         
         // 重複しないリレーションのみを作成（同じトピック内で重複しないもの）
         const relationsToCreate = relationsToSave.filter(relation => {
+          // 既にidが付与されているリレーション（個別追加で既に保存済み）は、変更がない限りスキップ
+          if (relation.id) {
+            // 既存のリレーションを取得して、変更があるかチェック
+            const existingRelation = existingRelations.find(r => r.id === relation.id);
+            if (existingRelation) {
+              // 変更があるかチェック（sourceEntityId, targetEntityId, relationType, description）
+              const hasChanges = 
+                existingRelation.sourceEntityId !== relation.sourceEntityId ||
+                existingRelation.targetEntityId !== relation.targetEntityId ||
+                existingRelation.relationType !== relation.relationType ||
+                (existingRelation.description || '') !== (relation.description || '');
+              
+              if (!hasChanges) {
+                console.log(`⏭️ [handleSaveMetadata] リレーションをスキップ（変更なし）: ${relation.id}`, {
+                  relationId: relation.id,
+                  relationType: relation.relationType,
+                  reason: '既に保存済みで変更なし',
+                });
+                return false; // 変更がない場合はスキップ
+              } else {
+                console.log(`🔄 [handleSaveMetadata] リレーションに変更あり（更新が必要）: ${relation.id}`, {
+                  relationId: relation.id,
+                  changes: {
+                    sourceEntityId: existingRelation.sourceEntityId !== relation.sourceEntityId,
+                    targetEntityId: existingRelation.targetEntityId !== relation.targetEntityId,
+                    relationType: existingRelation.relationType !== relation.relationType,
+                    description: (existingRelation.description || '') !== (relation.description || ''),
+                  },
+                });
+                // 変更がある場合は更新処理を続行（後でupdateRelationを呼び出す）
+              }
+            } else {
+              // idはあるが既存リレーションが見つからない場合（削除された可能性など）
+              console.warn(`⚠️ [handleSaveMetadata] リレーションIDが存在するが既存レコードが見つかりません: ${relation.id}`);
+              // 新規作成として処理を続行
+            }
+          }
+          
           // IDマッピングを使用して実際のIDに変換
           // まずpendingIdToCreatedIdMapから取得、なければ元のIDを使用
           let sourceId = pendingIdToCreatedIdMap.get(relation.sourceEntityId || '') || relation.sourceEntityId || '';
@@ -715,6 +753,63 @@ export function useTopicManagement({
         const relationResults = await Promise.allSettled(
           relationsToCreate.map(relation =>
             relationLimit(async () => {
+              // 既にidが付与されているリレーション（個別追加で既に保存済み）の処理
+              if (relation.id) {
+                const existingRelation = existingRelations.find(r => r.id === relation.id);
+                if (existingRelation) {
+                  // 変更があるかチェック（sourceEntityId, targetEntityId, relationType, description）
+                  const hasChanges = 
+                    existingRelation.sourceEntityId !== relation.sourceEntityId ||
+                    existingRelation.targetEntityId !== relation.targetEntityId ||
+                    existingRelation.relationType !== relation.relationType ||
+                    (existingRelation.description || '') !== (relation.description || '');
+                  
+                  if (!hasChanges) {
+                    console.log(`⏭️ [handleSaveMetadata] リレーションをスキップ（変更なし、既に保存済み）: ${relation.id}`, {
+                      relationId: relation.id,
+                      relationType: relation.relationType,
+                      reason: '既に保存済みで変更なし',
+                    });
+                    return { success: true, skipped: true, relationId: relation.id, reason: 'already saved, no changes' };
+                  } else {
+                    // 変更がある場合は更新
+                    console.log(`🔄 [handleSaveMetadata] リレーションに変更あり（更新）: ${relation.id}`, {
+                      relationId: relation.id,
+                      changes: {
+                        sourceEntityId: existingRelation.sourceEntityId !== relation.sourceEntityId,
+                        targetEntityId: existingRelation.targetEntityId !== relation.targetEntityId,
+                        relationType: existingRelation.relationType !== relation.relationType,
+                        description: (existingRelation.description || '') !== (relation.description || ''),
+                      },
+                    });
+                    
+                    // IDマッピングを使用して実際のIDに変換
+                    const sourceId = pendingIdToCreatedIdMap.get(relation.sourceEntityId || '') || relation.sourceEntityId || '';
+                    const targetId = pendingIdToCreatedIdMap.get(relation.targetEntityId || '') || relation.targetEntityId || '';
+                    
+                    const updated = await updateRelation(relation.id, {
+                      sourceEntityId: sourceId,
+                      targetEntityId: targetId,
+                      relationType: relation.relationType,
+                      description: relation.description,
+                      confidence: relation.confidence,
+                      metadata: relation.metadata,
+                    });
+                    
+                    if (updated) {
+                      console.log(`✅ [handleSaveMetadata] リレーション更新成功: ${relation.id}`);
+                      return { success: true, relationId: relation.id, relationType: relation.relationType };
+                    } else {
+                      throw new Error(`リレーションの更新に失敗しました: ${relation.id}`);
+                    }
+                  }
+                } else {
+                  // idはあるが既存リレーションが見つからない場合（削除された可能性など）
+                  console.warn(`⚠️ [handleSaveMetadata] リレーションIDが存在するが既存レコードが見つかりません: ${relation.id}`);
+                  // 新規作成として処理を続行
+                }
+              }
+              
               // リレーションのエンティティIDを取得
               // extractRelationsが返すリレーションには、pendingEntitiesのエンティティIDが含まれている
               // このIDは一時的なものなので、実際に作成されたIDに変換する必要がある

@@ -18,21 +18,92 @@ import { saveRelationEmbeddingAsync } from './relationEmbeddings';
 /**
  * リレーションを作成
  */
+// 重複チェック用：最近作成されたリレーションを追跡（5秒以内）
+const recentlyCreatedRelations = new Map<string, { timestamp: number; relation: CreateRelationInput }>();
+
 export async function createRelation(relation: CreateRelationInput): Promise<Relation> {
   try {
     const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    
+    // 重複チェック：既存のリレーションを確認（常に実行）
+    const relationKey = `${relation.topicId || ''}_${relation.sourceEntityId}_${relation.targetEntityId}_${relation.relationType}`;
+    const recentRelation = recentlyCreatedRelations.get(relationKey);
+    const now = Date.now();
+    
+    // 既存のリレーションをデータベースから確認
+    if (relation.topicId) {
+      try {
+        const { getRelationsByTopicId } = await import('./relationApi');
+        const existingRelations = await getRelationsByTopicId(relation.topicId);
+        const duplicate = existingRelations.find(r => 
+          r.sourceEntityId === relation.sourceEntityId &&
+          r.targetEntityId === relation.targetEntityId &&
+          r.relationType === relation.relationType
+        );
+        if (duplicate) {
+          console.log(`✅ [createRelation] 既存のリレーションを返します（重複防止）:`, {
+            existingId: duplicate.id,
+            topicId: relation.topicId,
+            sourceEntityId: relation.sourceEntityId,
+            targetEntityId: relation.targetEntityId,
+            relationType: relation.relationType,
+          });
+          return duplicate;
+        }
+      } catch (error) {
+        console.warn(`⚠️ [createRelation] 既存リレーションの確認に失敗しました（続行）:`, error);
+      }
+    }
+    
+    // 最近作成されたリレーションのチェック（5秒以内）
+    if (recentRelation && (now - recentRelation.timestamp) < 5000) {
+      console.warn(`⚠️ [createRelation] 重複リレーション作成を検出（最近作成）:`, {
+        relationKey,
+        recentTimestamp: new Date(recentRelation.timestamp).toISOString(),
+        currentTimestamp: new Date(now).toISOString(),
+        timeDiff: now - recentRelation.timestamp,
+      });
+      // 既存のリレーションを再度確認
+      if (relation.topicId) {
+        try {
+          const { getRelationsByTopicId } = await import('./relationApi');
+          const existingRelations = await getRelationsByTopicId(relation.topicId);
+          const duplicate = existingRelations.find(r => 
+            r.sourceEntityId === relation.sourceEntityId &&
+            r.targetEntityId === relation.targetEntityId &&
+            r.relationType === relation.relationType
+          );
+          if (duplicate) {
+            console.log(`✅ [createRelation] 既存のリレーションを返します（重複防止）: ${duplicate.id}`);
+            return duplicate;
+          }
+        } catch (error) {
+          console.warn(`⚠️ [createRelation] 既存リレーションの確認に失敗しました（続行）:`, error);
+        }
+      }
+      // 既存のリレーションが見つからない場合は新規作成を続行
+      console.log(`⚠️ [createRelation] 既存のリレーションが見つからないため、新規作成を続行します`);
+    }
+    
     const id = `relation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
+    const createdAt = new Date().toISOString();
 
     const relationData: Relation = {
       ...relation,
       id,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: createdAt,
+      updatedAt: createdAt,
       // topicIdとyamlFileIdがundefinedの場合、明示的にnullを設定（CHECK制約対応）
       topicId: relation.topicId === undefined ? null : relation.topicId,
       yamlFileId: relation.yamlFileId === undefined ? null : relation.yamlFileId,
     };
+    
+    // 重複チェック用のマップに追加
+    recentlyCreatedRelations.set(relationKey, { timestamp: now, relation });
+    // 5秒後に削除（メモリリーク防止）
+    setTimeout(() => {
+      recentlyCreatedRelations.delete(relationKey);
+    }, 5000);
 
     // バリデーション
     const validation = await validateRelation(relationData);
@@ -79,19 +150,30 @@ export async function createRelation(relation: CreateRelationInput): Promise<Rel
         
         // 埋め込みを非同期で生成（エラーは無視）
         // Graphvizのリレーションの場合、topicIdはnullになるが、空文字列として扱う
+        console.log(`[createRelation] 埋め込み生成チェック: organizationId=${relation.organizationId}, companyId=${relation.companyId}`);
         if (relation.organizationId) {
           const topicIdForEmbedding = relation.topicId || '';
-          saveRelationEmbeddingAsync(id, topicIdForEmbedding, relation.organizationId).catch(error => {
-            console.error('❌ [createRelation] リレーション埋め込みの生成に失敗しました（続行します）:', {
-              relationId: id,
-              relationType: relation.relationType,
-              topicId: relation.topicId,
-              topicIdForEmbedding,
-              yamlFileId: relation.yamlFileId,
-              organizationId: relation.organizationId,
-              error: error?.message || String(error),
+          console.log(`[createRelation] リレーション埋め込み生成を開始: ${id}, organizationId=${relation.organizationId}, topicId=${topicIdForEmbedding}`);
+          saveRelationEmbeddingAsync(id, topicIdForEmbedding, relation.organizationId)
+            .then((success) => {
+              if (success) {
+                console.log(`✅ [createRelation] リレーション埋め込み生成成功: ${id}`);
+              } else {
+                console.warn(`⚠️ [createRelation] リレーション埋め込み生成が失敗しました（続行します）: ${id}`);
+              }
+            })
+            .catch(error => {
+              console.error('❌ [createRelation] リレーション埋め込みの生成に失敗しました（続行します）:', {
+                relationId: id,
+                relationType: relation.relationType,
+                topicId: relation.topicId,
+                topicIdForEmbedding,
+                yamlFileId: relation.yamlFileId,
+                organizationId: relation.organizationId,
+                error: error?.message || String(error),
+                stack: error?.stack,
+              });
             });
-          });
         } else if (relation.companyId) {
           console.log(`ℹ️ [createRelation] companyIdが設定されていますが、事業会社用の埋め込み生成は未実装です: ${relation.relationType} (${id})`);
         } else {

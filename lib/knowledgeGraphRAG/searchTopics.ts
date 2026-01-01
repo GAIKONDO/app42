@@ -4,6 +4,8 @@
 
 import type { KnowledgeGraphSearchResult, SearchFilters, TopicSummary } from './types';
 import { findSimilarTopicsChroma } from '../topicEmbeddingsChroma';
+import { findSimilarTopics as findSimilarTopicsAdapter } from '../vectorSearchAdapter';
+import { getVectorSearchBackend } from '../vectorSearchConfig';
 import { getTopicsByIds, getTopicFilesByTopicIds } from '../topicApi';
 import { normalizeSimilarity, calculateTopicScore, adjustWeightsForQuery, DEFAULT_WEIGHTS, type ScoringWeights } from '../ragSearchScoring';
 import { searchTopicsBM25 } from './bm25Search';
@@ -28,21 +30,76 @@ export async function searchTopics(
     // 並列でベクトル検索とBM25検索を実行
     const [vectorResults, bm25Results] = await Promise.all([
       config.useVector
-        ? findSimilarTopicsChroma(
-            queryText,
-            limit * 2,
-            filters?.organizationId,
-            filters?.topicSemanticCategory
-          ).catch(error => {
-            const errorMessage = error?.message || String(error || '');
-            // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
-            if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-                !errorMessage.includes('no such table') &&
-                !errorMessage.includes('Database error')) {
-              console.warn('[searchTopics] ベクトル検索エラー:', error);
+        ? (async () => {
+            const backend = getVectorSearchBackend();
+            if (backend === 'supabase') {
+              // Supabaseを使用（新しい抽象化レイヤー）
+              try {
+                const { generateEmbedding } = await import('../embeddings');
+                const queryEmbedding = await generateEmbedding(queryText);
+                const results = await findSimilarTopicsAdapter(
+                  queryEmbedding,
+                  limit * 2,
+                  filters?.organizationId,
+                  undefined // companyId
+                );
+                
+                // VectorSearchResult形式をfindSimilarTopicsChromaの戻り値形式に変換
+                // result.idは実際のトピックID（init_mjsp5876_l384y39dn形式）
+                // result.meetingNoteIdはtopic_embeddingsテーブルから取得したmeeting_note_id
+                const topicResults = await Promise.all(
+                  results.map(async (result) => {
+                    try {
+                      // getTopicsByIdsは { topicId, meetingNoteId?, regulationId? } 形式の配列を期待
+                      const topics = await getTopicsByIds([{
+                        topicId: result.id,
+                        meetingNoteId: result.meetingNoteId || undefined,
+                        regulationId: undefined, // regulationIdは後で取得
+                      }]);
+                      const topic = topics[0];
+                      if (!topic) return null;
+                      
+                      return {
+                        topicId: result.id,
+                        meetingNoteId: topic.meetingNoteId || result.meetingNoteId || undefined,
+                        regulationId: topic.regulationId,
+                        title: topic.title,
+                        similarity: result.similarity,
+                        contentSummary: topic.contentSummary,
+                        organizationId: topic.organizationId,
+                      };
+                    } catch (error) {
+                      console.warn(`[searchTopics] トピック ${result.id} の取得エラー:`, error);
+                      return null;
+                    }
+                  })
+                );
+                
+                return topicResults.filter((r): r is NonNullable<typeof r> => r !== null);
+              } catch (error: any) {
+                const errorMessage = error?.message || String(error || '');
+                console.warn('[searchTopics] Supabaseベクトル検索エラー:', error);
+                return [];
+              }
+            } else {
+              // ChromaDBを使用（既存の実装）
+              return findSimilarTopicsChroma(
+                queryText,
+                limit * 2,
+                filters?.organizationId,
+                filters?.topicSemanticCategory
+              ).catch(error => {
+                const errorMessage = error?.message || String(error || '');
+                // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
+                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                    !errorMessage.includes('no such table') &&
+                    !errorMessage.includes('Database error')) {
+                  console.warn('[searchTopics] ベクトル検索エラー:', error);
+                }
+                return [];
+              });
             }
-            return [];
-          })
+          })()
         : Promise.resolve([]),
       config.useBM25
         ? searchTopicsBM25(

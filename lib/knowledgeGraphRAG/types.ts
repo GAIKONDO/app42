@@ -8,7 +8,7 @@ import type { Relation } from '@/types/relation';
 /**
  * 検索結果の種類
  */
-export type SearchResultType = 'entity' | 'relation' | 'topic';
+export type SearchResultType = 'entity' | 'relation' | 'topic' | 'startup' | 'focusInitiative' | 'meetingNote' | 'regulation';
 
 /**
  * トピックファイル情報
@@ -54,6 +54,39 @@ export interface KnowledgeGraphSearchResult {
   topicId?: string;
   meetingNoteId?: string;
   topic?: TopicSummary; // トピックの詳細情報（title, contentSummaryなど）
+  // スタートアップの場合
+  startupId?: string;
+  startup?: {
+    id: string;
+    title: string;
+    description?: string;
+    content?: string;
+    objective?: string;
+    evaluation?: string;
+  };
+  // 注力施策の場合
+  focusInitiativeId?: string;
+  focusInitiative?: {
+    id: string;
+    title: string;
+    description?: string;
+    content?: string;
+  };
+  // 議事録の場合
+  meetingNote?: {
+    id: string;
+    title: string;
+    description?: string;
+    content?: string;
+  };
+  // 制度の場合
+  regulationId?: string;
+  regulation?: {
+    id: string;
+    title: string;
+    description?: string;
+    content?: string;
+  };
 }
 
 /**
@@ -78,7 +111,7 @@ export interface KnowledgeGraphContextResult {
   context: string;
   results: KnowledgeGraphSearchResult[];
   sources: Array<{
-    type: 'entity' | 'relation' | 'topic';
+    type: 'entity' | 'relation' | 'topic' | 'startup' | 'focusInitiative' | 'meetingNote' | 'regulation';
     id: string;
     name: string;
     score: number;

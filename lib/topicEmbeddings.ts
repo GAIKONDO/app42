@@ -13,6 +13,9 @@ import {
 } from './embeddings';
 import type { TopicEmbedding, TopicMetadata, TopicSemanticCategory } from '@/types/topicMetadata';
 import { shouldUseChroma } from './chromaConfig';
+import { getVectorSearchBackend } from './vectorSearchConfig';
+import { saveTopicEmbedding as saveTopicEmbeddingAdapter } from './vectorSearchAdapter';
+import { getTopicsByIds } from './topicApi';
 import { calculateTopicScore, adjustWeightsForQuery } from './ragSearchScoring';
 import { handleRAGSearchError, safeHandleRAGSearchError } from './ragSearchErrors';
 import pLimit from 'p-limit';
@@ -170,11 +173,91 @@ export async function saveTopicEmbedding(
       descriptionValue: topicData.description,
     });
 
-    // ChromaDBに保存
-    if (shouldUseChroma()) {
+    // ベクトル検索バックエンドに保存（ChromaDBまたはSupabase）
+    const backend = getVectorSearchBackend();
+    if (backend === 'supabase' || shouldUseChroma()) {
       try {
-        const { saveTopicEmbeddingToChroma } = await import('./topicEmbeddingsChroma');
-        await saveTopicEmbeddingToChroma(topicId, meetingNoteId, organizationId, title, content, metadata, regulationId);
+        if (backend === 'supabase') {
+          // Supabaseを使用（新しい抽象化レイヤー）
+          // 埋め込みを生成
+          const { generateCombinedEmbedding, generateEnhancedEmbedding } = await import('./embeddings');
+          let combinedEmbedding: number[];
+          
+          if (metadata && (metadata.keywords || metadata.semanticCategory || metadata.tags)) {
+            // メタデータがある場合: 拡張埋め込みを生成
+            combinedEmbedding = await generateEnhancedEmbedding(
+              title,
+              content,
+              {
+                keywords: metadata.keywords,
+                semanticCategory: metadata.semanticCategory,
+                tags: metadata.tags,
+                summary: metadata.summary,
+              }
+            );
+          } else {
+            // メタデータがない場合: 従来の方法
+            combinedEmbedding = await generateCombinedEmbedding(title, content);
+          }
+          
+          // 組織IDと会社IDを取得
+          let companyId: string | null = null;
+          let orgId: string = organizationId;
+          
+          try {
+            const orgData = await getTopicsByIds([embeddingId]).then(topics => topics[0]);
+            companyId = orgData?.companyId || null;
+            orgId = orgData?.organizationId || organizationId;
+          } catch (error: any) {
+            console.warn(`[saveTopicEmbedding] getTopicsByIdsエラー（続行）:`, error);
+            // エラーが発生しても続行（organizationIdは既に設定されている）
+          }
+          
+          // Supabaseに保存
+          console.log('💾 [saveTopicEmbedding] topic_embeddingsテーブルに保存開始:', {
+            embeddingId,
+            orgId,
+            companyId,
+            embeddingDimension: combinedEmbedding.length,
+            hasMeetingNoteId: !!meetingNoteId,
+          });
+          
+          try {
+            // embeddingIdはidカラムに、topicIdはtopic_idカラムに保存する必要がある
+            // saveTopicEmbeddingAdapterの第1引数はidとして使用されるため、embeddingIdを渡す
+            // しかし、topic_idには実際のトピックIDを保存する必要がある
+            // そのため、saveTopicEmbeddingAdapterを直接呼び出すのではなく、saveTopicEmbeddingToSupabaseを直接呼び出す
+            const { saveTopicEmbeddingToSupabase } = await import('./vectorSearchSupabase');
+            await saveTopicEmbeddingToSupabase(
+              embeddingId, // idカラムに保存
+              orgId || '',
+              companyId,
+              combinedEmbedding,
+              {
+                topicId: topicId, // 実際のトピックIDをmetadataに含める
+                meetingNoteId,
+                title,
+                content,
+                semanticCategory: metadata?.semanticCategory,
+                keywords: metadata?.keywords,
+                tags: metadata?.tags,
+                embeddingModel: 'text-embedding-3-small',
+                embeddingVersion: '1.0',
+              }
+            );
+            console.log('✅ [saveTopicEmbedding] topic_embeddingsテーブルへの保存成功:', embeddingId);
+          } catch (error: any) {
+            console.error(`❌ [saveTopicEmbedding] topic_embeddingsテーブルへの保存エラー: ${embeddingId}`, {
+              error: error?.message || String(error),
+              stack: error?.stack,
+            });
+            throw error;
+          }
+        } else {
+          // ChromaDBを使用（既存の実装）
+          const { saveTopicEmbeddingToChroma } = await import('./topicEmbeddingsChroma');
+          await saveTopicEmbeddingToChroma(topicId, meetingNoteId, organizationId, title, content, metadata, regulationId);
+        }
         
         // topicsテーブルにメタデータを保存
         try {
@@ -202,28 +285,32 @@ export async function saveTopicEmbedding(
           throw new Error(`topicsテーブルへの保存に失敗しました: ${topicSaveError?.message || '不明なエラー'}`);
         }
         
-        // 同期状態を更新
-        try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'topic',
-            entityId: embeddingId,
-            synced: true,
-            error: null,
-          });
-        } catch (syncStatusError: any) {
-          console.warn(`同期状態の更新に失敗しました: ${embeddingId}`, syncStatusError?.message);
+        // 同期状態を更新（ChromaDBの場合のみ）
+        if (backend === 'chromadb') {
+          try {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'topic',
+              entityId: embeddingId,
+              synced: true,
+              error: null,
+            });
+          } catch (syncStatusError: any) {
+            console.warn(`同期状態の更新に失敗しました: ${embeddingId}`, syncStatusError?.message);
+          }
         }
-      } catch (chromaError: any) {
-        // 同期状態を失敗として更新
-        try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'topic',
-            entityId: embeddingId,
-            synced: false,
-            error: chromaError?.message || String(chromaError),
-          });
-        } catch (syncStatusError: any) {
-          console.warn(`同期状態の更新に失敗しました: ${embeddingId}`, syncStatusError?.message);
+      } catch (error: any) {
+        // 同期状態を失敗として更新（ChromaDBの場合のみ）
+        if (backend === 'chromadb') {
+          try {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'topic',
+              entityId: embeddingId,
+              synced: false,
+              error: error?.message || String(error),
+            });
+          } catch (syncStatusError: any) {
+            console.warn(`同期状態の更新に失敗しました: ${embeddingId}`, syncStatusError?.message);
+          }
         }
         
         // フォールバック: SQLiteに保存

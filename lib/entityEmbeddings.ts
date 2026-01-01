@@ -9,6 +9,7 @@ import type { EntityEmbedding } from '@/types/entityEmbedding';
 import type { Entity, EntityMetadata } from '@/types/entity';
 import { getEntityById, getAllEntities, getEntitiesByIds } from './entityApi';
 import { shouldUseChroma } from './chromaConfig';
+import { shouldUseChroma as shouldUseChromaNew, getVectorSearchBackend } from './vectorSearchConfig';
 import { calculateEntityScore, adjustWeightsForQuery } from './ragSearchScoring';
 import { handleRAGSearchError, safeHandleRAGSearchError } from './ragSearchErrors';
 import pLimit from 'p-limit';
@@ -79,39 +80,64 @@ export async function saveEntityEmbedding(
       }
     }
     
-    // ChromaDBに保存
-    if (shouldUseChroma()) {
+    // ベクトル検索バックエンドに保存（ChromaDBまたはSupabase）
+    const backend = getVectorSearchBackend();
+    if (backend === 'supabase' || shouldUseChroma()) {
       try {
-        const { saveEntityEmbeddingToChroma } = await import('./entityEmbeddingsChroma');
-        await saveEntityEmbeddingToChroma(entityId, orgOrCompanyId, entity);
+        if (backend === 'supabase') {
+          // Supabaseを使用（新しい抽象化レイヤー）
+          const { saveEntityEmbedding } = await import('./vectorSearchAdapter');
+          await saveEntityEmbedding(
+            entityId,
+            orgOrCompanyId,
+            entity.companyId || null,
+            combinedEmbedding,
+            {
+              name: entity.name,
+              type: entity.type,
+              aliases: entity.aliases,
+              metadata: entity.metadata,
+              embeddingModel: CURRENT_EMBEDDING_MODEL,
+              embeddingVersion: CURRENT_EMBEDDING_VERSION,
+            }
+          );
+        } else {
+          // ChromaDBを使用（既存の実装）
+          const { saveEntityEmbeddingToChroma } = await import('./entityEmbeddingsChroma');
+          await saveEntityEmbeddingToChroma(entityId, orgOrCompanyId, entity);
+        }
         
-        // 同期状態を更新
-        try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'entity',
-            entityId: entityId,
-            synced: true,
-            error: null,
-          });
-        } catch (syncError: any) {
-          console.warn(`同期状態の更新に失敗しました: ${entityId}`, syncError?.message);
+        // 同期状態を更新（ChromaDBの場合のみ）
+        if (backend === 'chromadb') {
+          try {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'entity',
+              entityId: entityId,
+              synced: true,
+              error: null,
+            });
+          } catch (syncError: any) {
+            console.warn(`同期状態の更新に失敗しました: ${entityId}`, syncError?.message);
+          }
         }
-      } catch (chromaError: any) {
-        // 同期状態を失敗として更新
-        try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'entity',
-            entityId: entityId,
-            synced: false,
-            error: chromaError?.message || String(chromaError),
-          });
-        } catch (syncError: any) {
-          console.warn(`同期状態の更新に失敗しました: ${entityId}`, syncError?.message);
+      } catch (error: any) {
+        // 同期状態を失敗として更新（ChromaDBの場合のみ）
+        if (backend === 'chromadb') {
+          try {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'entity',
+              entityId: entityId,
+              synced: false,
+              error: error?.message || String(error),
+            });
+          } catch (syncError: any) {
+            console.warn(`同期状態の更新に失敗しました: ${entityId}`, syncError?.message);
+          }
         }
-        throw new Error(`エンティティ埋め込みの保存に失敗しました: ${chromaError?.message || String(chromaError)}`);
+        throw new Error(`エンティティ埋め込みの保存に失敗しました: ${error?.message || String(error)}`);
       }
     } else {
-      throw new Error('エンティティ埋め込みの保存にはChromaDBが必要です');
+      throw new Error('エンティティ埋め込みの保存にはベクトル検索バックエンド（ChromaDBまたはSupabase）が必要です');
     }
   } catch (error) {
     console.error('エンティティ埋め込みの保存エラー:', error);

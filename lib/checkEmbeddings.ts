@@ -11,7 +11,9 @@ import { getAllEntities } from './entityApi';
 import { getAllRelations } from './relationApi';
 import { getAllTopicsBatch } from './orgApi';
 import { shouldUseChroma } from './chromaConfig';
+import { getVectorSearchBackend } from './vectorSearchConfig';
 import { getRelationEmbedding } from './relationEmbeddings';
+import { getSupabaseClient } from './utils/supabaseClient';
 
 /**
  * エンティティ埋め込みの統計情報を取得
@@ -31,8 +33,7 @@ export async function checkEntityEmbeddings(organizationId?: string): Promise<{
   }>;
   actualTotal?: number; // 実際のエンティティ総数（ChromaDBが使用可能な場合）
 }> {
-  // 注意: 埋め込みデータはChromaDBにのみ保存されるため、SQLiteのentityEmbeddingsテーブルは使用しない
-  // entitiesテーブルからエンティティを取得し、chromaSyncedカラムで埋め込みの存在を確認
+  const backend = getVectorSearchBackend();
   const entitiesConditions: any = {};
   if (organizationId) {
     entitiesConditions.organizationId = organizationId;
@@ -45,10 +46,42 @@ export async function checkEntityEmbeddings(organizationId?: string): Promise<{
 
   const entities = (entitiesResult || []) as Array<{id: string; data: any}>;
   
-  // ChromaDBから埋め込みを取得するためのアイテムリストを作成
+  // 埋め込みを取得するためのアイテムリストを作成
   const items: Array<{id: string; data: any}> = [];
   
-  if (shouldUseChroma()) {
+  if (backend === 'supabase') {
+    // Supabase経由で埋め込みを確認
+    try {
+      const supabase = getSupabaseClient();
+      let query = supabase.from('entity_embeddings').select('id, entity_id, embedding_dimension, embedding_model, name');
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      const { data: embeddings, error } = await query;
+      
+      if (error) {
+        console.warn('Supabaseからの埋め込み取得エラー:', error);
+      } else if (embeddings) {
+        // Supabaseの埋め込みデータをitemsに追加
+        for (const embedding of embeddings) {
+          items.push({
+            id: embedding.entity_id || embedding.id,
+            data: {
+              entityId: embedding.entity_id || embedding.id,
+              combinedEmbedding: embedding.embedding ? [1] : [], // 埋め込みが存在するかどうかのみ確認
+              embeddingModel: embedding.embedding_model || 'text-embedding-3-small',
+              embeddingVersion: '1.0',
+              dimension: embedding.embedding_dimension || 1536,
+              name: embedding.name,
+              storedInSupabase: true,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Supabaseからの埋め込み確認エラー:', error);
+    }
+  } else if (shouldUseChroma()) {
     // ChromaDBが有効な場合、各エンティティについて埋め込みを取得
     for (const entity of entities) {
       const entityId = entity.data?.id || entity.id;
@@ -83,9 +116,9 @@ export async function checkEntityEmbeddings(organizationId?: string): Promise<{
     console.warn('⚠️ ChromaDBが無効です。エンティティ埋め込みの確認はできません。設定ページ（/settings）でChromaDBを有効化してください。');
   }
   
-  // ChromaDBが使用可能な場合、実際のエンティティ総数も取得
+  // バックエンドが使用可能な場合、実際のエンティティ総数も取得
   let actualTotal: number | undefined;
-  if (shouldUseChroma()) {
+  if (backend === 'supabase' || shouldUseChroma()) {
     try {
       const allEntities = await getAllEntities();
       const filteredEntities = organizationId 
@@ -117,21 +150,27 @@ export async function checkEntityEmbeddings(organizationId?: string): Promise<{
     const embeddingData = item.data;
     const entityId = embeddingData.entityId || item.id;
     
-    // ChromaDBから取得したデータなので、埋め込みは既に配列形式
+    // 埋め込みデータの確認（ChromaDBまたはSupabase）
     const combinedEmbedding: number[] | undefined = embeddingData.combinedEmbedding;
+    const storedInSupabase = embeddingData.storedInSupabase || false;
+    const storedInChromaDB = !storedInSupabase; // Supabaseでない場合はChromaDB
     
-    // ChromaDBから取得したデータなので、埋め込みは存在する
-    const hasEmbedding = !!(combinedEmbedding && combinedEmbedding.length > 0);
-    const dimension = combinedEmbedding?.length || 0;
+    // 埋め込みが存在するか確認
+    // Supabaseの場合は、embedding_dimensionが存在すれば埋め込みがあるとみなす
+    const hasEmbedding = storedInSupabase 
+      ? !!(embeddingData.dimension && embeddingData.dimension > 0)
+      : !!(combinedEmbedding && combinedEmbedding.length > 0);
+    const dimension = embeddingData.dimension || combinedEmbedding?.length || 0;
     const model = embeddingData.embeddingModel || 'text-embedding-3-small';
-    const storedInChromaDB = true; // ChromaDBから取得したデータであることを示す
 
     // デバッグログ（開発時のみ）
     if (process.env.NODE_ENV === 'development') {
       console.log(`[checkEntityEmbeddings] エンティティ ${entityId}:`, {
         storedInChromaDB,
+        storedInSupabase,
         hasCombinedEmbedding: !!(combinedEmbedding && combinedEmbedding.length > 0),
         hasEmbedding,
+        dimension,
         model,
       });
     }
@@ -260,9 +299,9 @@ export async function checkRelationEmbeddings(organizationId?: string): Promise<
     console.warn('⚠️ ChromaDBが無効です。リレーション埋め込みの確認はできません。設定ページ（/settings）でChromaDBを有効化してください。');
   }
   
-  // ChromaDBが使用可能な場合、実際のリレーション総数も取得
+  // バックエンドが使用可能な場合、実際のリレーション総数も取得
   let actualTotal: number | undefined;
-  if (shouldUseChroma()) {
+  if (backend === 'supabase' || shouldUseChroma()) {
     try {
       const allRelations = await getAllRelations();
       // リレーションのorganizationIdは、関連するエンティティから取得する必要がある
@@ -299,12 +338,16 @@ export async function checkRelationEmbeddings(organizationId?: string): Promise<
     const embeddingData = item.data;
     const relationId = embeddingData.relationId || item.id;
     
-    // ChromaDBから取得したデータなので、埋め込みは既に配列形式
+    // 埋め込みデータの確認（ChromaDBまたはSupabase）
     const combinedEmbedding: number[] | undefined = embeddingData.combinedEmbedding;
+    const storedInSupabase = embeddingData.storedInSupabase || false;
     
-    // ChromaDBから取得したデータなので、埋め込みは存在する
-    const hasEmbedding = !!(combinedEmbedding && combinedEmbedding.length > 0);
-    const dimension = combinedEmbedding?.length || 0;
+    // 埋め込みが存在するか確認
+    // Supabaseの場合は、embedding_dimensionが存在すれば埋め込みがあるとみなす
+    const hasEmbedding = storedInSupabase 
+      ? !!(embeddingData.dimension && embeddingData.dimension > 0)
+      : !!(combinedEmbedding && combinedEmbedding.length > 0);
+    const dimension = embeddingData.dimension || combinedEmbedding?.length || 0;
     const model = embeddingData.embeddingModel || 'text-embedding-3-small';
 
     if (hasEmbedding) {
@@ -392,9 +435,11 @@ export async function checkTopicEmbeddings(organizationId?: string): Promise<{
 
     const items = (result || []) as Array<{id: string; data: any}>;
   
-    // ChromaDBが使用可能な場合、実際のトピック総数も取得
+    const backend = getVectorSearchBackend();
+    
+    // バックエンドが使用可能な場合、実際のトピック総数も取得
     let actualTotal: number | undefined;
-    if (shouldUseChroma()) {
+    if (backend === 'supabase' || shouldUseChroma()) {
       try {
         const allTopics = await getAllTopicsBatch();
         const filteredTopics = organizationId 

@@ -1,12 +1,17 @@
 /**
- * エンティティ埋め込みのChromaDB管理
- * ChromaDBを使用した高速ベクトル検索
+ * エンティティ埋め込みの管理
+ * ChromaDBまたはSupabase（pgvector）を使用した高速ベクトル検索
+ * 
+ * 注意: このファイルは後方互換性のため残されていますが、
+ * 新しいコードでは `lib/vectorSearchAdapter.ts` を使用してください
  */
 
 import { callTauriCommand } from './localFirebase';
 import { generateEmbedding, generateMetadataEmbedding } from './embeddings';
 import type { EntityEmbedding } from '@/types/entityEmbedding';
 import type { Entity } from '@/types/entity';
+import { getVectorSearchBackend } from './vectorSearchConfig';
+import { saveEntityEmbedding as saveEntityEmbeddingAdapter } from './vectorSearchAdapter';
 
 /**
  * エンティティ埋め込みをChromaDBに保存
@@ -74,18 +79,38 @@ export async function saveEntityEmbeddingToChroma(
       updatedAt: now,
     };
 
-    // Rust側のTauriコマンドを呼び出し
-    await Promise.race([
-      callTauriCommand('chromadb_save_entity_embedding', {
+    // 新しい抽象化レイヤーを使用（環境変数でChromaDB/Supabaseを自動切り替え）
+    const backend = getVectorSearchBackend();
+    if (backend === 'supabase') {
+      // Supabaseを使用
+      await saveEntityEmbeddingAdapter(
         entityId,
         organizationId,
+        entity.companyId || null,
         combinedEmbedding,
-        metadata,
-      }),
-      new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('ChromaDBへの埋め込み保存がタイムアウトしました（60秒）')), 60000)
-      )
-    ]);
+        {
+          name: entity.name,
+          type: entity.type,
+          aliases: entity.aliases,
+          metadata: entity.metadata,
+          embeddingModel: 'text-embedding-3-small',
+          embeddingVersion: '1.0',
+        }
+      );
+    } else {
+      // ChromaDBを使用（既存の実装）
+      await Promise.race([
+        callTauriCommand('chromadb_save_entity_embedding', {
+          entityId,
+          organizationId,
+          combinedEmbedding,
+          metadata,
+        }),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('ChromaDBへの埋め込み保存がタイムアウトしました（60秒）')), 60000)
+        )
+      ]);
+    }
   } catch (error) {
     console.error('ChromaDBへのエンティティ埋め込み保存エラー:', error);
     throw error;

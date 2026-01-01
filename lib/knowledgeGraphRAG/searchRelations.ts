@@ -5,6 +5,8 @@
 import type { Relation } from '@/types/relation';
 import type { KnowledgeGraphSearchResult, SearchFilters } from './types';
 import { findSimilarRelationsChroma } from '../relationEmbeddingsChroma';
+import { findSimilarRelations as findSimilarRelationsAdapter } from '../vectorSearchAdapter';
+import { getVectorSearchBackend } from '../vectorSearchConfig';
 import { getRelationsByIds } from '../relationApi';
 import { normalizeSimilarity, calculateRelationScore, adjustWeightsForQuery, DEFAULT_WEIGHTS, type ScoringWeights } from '../ragSearchScoring';
 import { searchRelationsBM25 } from './bm25Search';
@@ -29,21 +31,61 @@ export async function searchRelations(
     // 並列でベクトル検索とBM25検索を実行
     const [vectorResults, bm25Results] = await Promise.all([
       config.useVector
-        ? findSimilarRelationsChroma(
-            queryText,
-            limit * 2,
-            filters?.organizationId,
-            filters?.relationType
-          ).catch(error => {
-            const errorMessage = error?.message || String(error || '');
-            // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
-            if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-                !errorMessage.includes('no such table') &&
-                !errorMessage.includes('Database error')) {
-              console.warn('[searchRelations] ベクトル検索エラー:', error);
+        ? (async () => {
+            const backend = getVectorSearchBackend();
+            if (backend === 'supabase') {
+              // Supabaseを使用（新しい抽象化レイヤー）
+              try {
+                const { generateEmbedding } = await import('../embeddings');
+                const queryEmbedding = await generateEmbedding(queryText);
+                const results = await findSimilarRelationsAdapter(
+                  queryEmbedding,
+                  limit * 2,
+                  filters?.organizationId,
+                  undefined // companyId
+                );
+                
+                // VectorSearchResult形式をfindSimilarRelationsChromaの戻り値形式に変換
+                const relations = await getRelationsByIds(results.map(r => r.id)).catch(error => {
+                  console.error('[searchRelations] リレーション取得エラー:', error);
+                  return [];
+                });
+                
+                const relationMap = new Map(relations.map(r => [r.id, r]));
+                return results
+                  .map(result => {
+                    const relation = relationMap.get(result.id);
+                    if (!relation) return null;
+                    return {
+                      relationId: result.id,
+                      similarity: result.similarity,
+                      relation,
+                    };
+                  })
+                  .filter((r): r is NonNullable<typeof r> => r !== null);
+              } catch (error: any) {
+                console.warn('[searchRelations] Supabaseベクトル検索エラー:', error);
+                return [];
+              }
+            } else {
+              // ChromaDBを使用（既存の実装）
+              return findSimilarRelationsChroma(
+                queryText,
+                limit * 2,
+                filters?.organizationId,
+                filters?.relationType
+              ).catch(error => {
+                const errorMessage = error?.message || String(error || '');
+                // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
+                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
+                    !errorMessage.includes('no such table') &&
+                    !errorMessage.includes('Database error')) {
+                  console.warn('[searchRelations] ベクトル検索エラー:', error);
+                }
+                return [];
+              });
             }
-            return [];
-          })
+          })()
         : Promise.resolve([]),
       config.useBM25
         ? searchRelationsBM25(

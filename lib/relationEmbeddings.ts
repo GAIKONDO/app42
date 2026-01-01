@@ -9,6 +9,8 @@ import type { RelationEmbedding } from '@/types/relationEmbedding';
 import type { Relation } from '@/types/relation';
 import { getRelationById, getAllRelations, getRelationsByIds } from './relationApi';
 import { shouldUseChroma } from './chromaConfig';
+import { getVectorSearchBackend } from './vectorSearchConfig';
+// saveRelationEmbeddingAdapterは動的インポートで使用
 import { calculateRelationScore, adjustWeightsForQuery } from './ragSearchScoring';
 import { handleRAGSearchError, safeHandleRAGSearchError } from './ragSearchErrors';
 import pLimit from 'p-limit';
@@ -41,39 +43,138 @@ export async function saveRelationEmbedding(
   const orgOrCompanyId = relation.companyId || organizationId || relation.organizationId || '';
   
   try {
-    // ChromaDBに保存
-    if (shouldUseChroma()) {
+    // ベクトル検索バックエンドに保存（ChromaDBまたはSupabase）
+    const backend = getVectorSearchBackend();
+    if (backend === 'supabase' || shouldUseChroma()) {
       try {
-        const { saveRelationEmbeddingToChroma } = await import('./relationEmbeddingsChroma');
-        await saveRelationEmbeddingToChroma(relationId, topicId, orgOrCompanyId, relation);
+        if (backend === 'supabase') {
+          // Supabaseを使用（新しい抽象化レイヤー）
+          // 埋め込みを生成（relationEmbeddingsChromaと同じロジック）
+          const { saveRelationEmbeddingToChroma } = await import('./relationEmbeddingsChroma');
+          // 一時的にChromaDBの埋め込み生成ロジックを使用して埋め込みを生成
+          // 注意: これは後で最適化できますが、互換性のために同じロジックを使用
+          const { generateEmbedding } = await import('./embeddings');
+          const { getEntityById } = await import('./entityApi');
+          
+          // 関連エンティティ名を取得
+          let sourceEntityName = '';
+          let targetEntityName = '';
+          
+          if (relation.sourceEntityId) {
+            try {
+              const sourceEntity = await getEntityById(relation.sourceEntityId);
+              sourceEntityName = sourceEntity?.name || relation.sourceEntityId;
+            } catch (error) {
+              sourceEntityName = relation.sourceEntityId;
+            }
+          }
+          
+          if (relation.targetEntityId) {
+            try {
+              const targetEntity = await getEntityById(relation.targetEntityId);
+              targetEntityName = targetEntity?.name || relation.targetEntityId;
+            } catch (error) {
+              targetEntityName = relation.targetEntityId;
+            }
+          }
+          
+          // メタデータからテキストを構築
+          const metadataParts: string[] = [];
+          if (relation.metadata) {
+            const metadata = relation.metadata;
+            if (metadata.date) metadataParts.push(`日付: ${metadata.date}`);
+            if (metadata.amount) metadataParts.push(`金額: ${metadata.amount}`);
+            if (metadata.percentage) metadataParts.push(`割合: ${metadata.percentage}%`);
+            if (metadata.description) metadataParts.push(`詳細: ${metadata.description}`);
+            if (metadata.source) metadataParts.push(`情報源: ${metadata.source}`);
+          }
+          const metadataText = metadataParts.join(', ');
+          
+          // 統合埋め込みを生成
+          const descriptionText = relation.description || '';
+          const relationTypeText = relation.relationType;
+          
+          const combinedParts: string[] = [];
+          combinedParts.push(relationTypeText);
+          combinedParts.push(relationTypeText);
+          combinedParts.push(relationTypeText);
+          
+          if (sourceEntityName && targetEntityName) {
+            combinedParts.push(`${sourceEntityName} と ${targetEntityName} の関係`);
+          } else if (sourceEntityName) {
+            combinedParts.push(`${sourceEntityName} に関連`);
+          } else if (targetEntityName) {
+            combinedParts.push(`${targetEntityName} に関連`);
+          }
+          
+          if (descriptionText) {
+            combinedParts.push(descriptionText);
+          }
+          
+          if (metadataText) {
+            combinedParts.push(metadataText);
+          }
+          
+          const combinedText = combinedParts.join('\n\n');
+          const combinedEmbedding = await generateEmbedding(combinedText);
+          
+          // Supabaseに保存（抽象化レイヤーを使用）
+          const { saveRelationEmbedding: saveRelationEmbeddingAdapter } = await import('./vectorSearchAdapter');
+          await saveRelationEmbeddingAdapter(
+            relationId,
+            orgOrCompanyId,
+            relation.companyId || null,
+            combinedEmbedding,
+            {
+              topicId,
+              sourceEntityId: relation.sourceEntityId,
+              targetEntityId: relation.targetEntityId,
+              relationType: relation.relationType,
+              description: relation.description,
+              confidence: relation.confidence,
+              metadata: relation.metadata,
+              embeddingModel: 'text-embedding-3-small',
+              embeddingVersion: '2.0',
+            }
+          );
+          console.log(`✅ [saveRelationEmbedding] Supabaseにリレーション埋め込みを保存しました: ${relationId}`);
+        } else {
+          // ChromaDBを使用（既存の実装）
+          const { saveRelationEmbeddingToChroma } = await import('./relationEmbeddingsChroma');
+          await saveRelationEmbeddingToChroma(relationId, topicId, orgOrCompanyId, relation);
+        }
         
-        // 同期状態を更新
-        try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'relation',
-            entityId: relationId,
-            synced: true,
-            error: null,
-          });
-        } catch (syncError: any) {
-          console.warn(`同期状態の更新に失敗しました: ${relationId}`, syncError?.message);
+        // 同期状態を更新（ChromaDBの場合のみ）
+        if (backend === 'chromadb') {
+          try {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'relation',
+              entityId: relationId,
+              synced: true,
+              error: null,
+            });
+          } catch (syncError: any) {
+            console.warn(`同期状態の更新に失敗しました: ${relationId}`, syncError?.message);
+          }
         }
-      } catch (chromaError: any) {
-        // 同期状態を失敗として更新
-        try {
-          await callTauriCommand('update_chroma_sync_status', {
-            entityType: 'relation',
-            entityId: relationId,
-            synced: false,
-            error: chromaError?.message || String(chromaError),
-          });
-        } catch (syncError: any) {
-          console.warn(`同期状態の更新に失敗しました: ${relationId}`, syncError?.message);
+      } catch (error: any) {
+        // 同期状態を失敗として更新（ChromaDBの場合のみ）
+        if (backend === 'chromadb') {
+          try {
+            await callTauriCommand('update_chroma_sync_status', {
+              entityType: 'relation',
+              entityId: relationId,
+              synced: false,
+              error: error?.message || String(error),
+            });
+          } catch (syncError: any) {
+            console.warn(`同期状態の更新に失敗しました: ${relationId}`, syncError?.message);
+          }
         }
-        throw new Error(`リレーション埋め込みの保存に失敗しました: ${chromaError?.message || String(chromaError)}`);
+        throw new Error(`リレーション埋め込みの保存に失敗しました: ${error?.message || String(error)}`);
       }
     } else {
-      throw new Error('リレーション埋め込みの保存にはChromaDBが必要です');
+      throw new Error('リレーション埋め込みの保存にはベクトル検索バックエンド（ChromaDBまたはSupabase）が必要です');
     }
   } catch (error) {
     console.error('リレーション埋め込みの保存エラー:', error);
@@ -97,24 +198,42 @@ export async function saveRelationEmbeddingAsync(
   }
 
   if (relationEmbeddingGenerationInProgress.has(relationId)) {
+    console.warn(`[saveRelationEmbeddingAsync] 既に埋め込み生成中のためスキップ: ${relationId}`);
     return false;
   }
 
   relationEmbeddingGenerationInProgress.add(relationId);
+  console.log(`[saveRelationEmbeddingAsync] 埋め込み生成を開始（重複チェック通過）: ${relationId}`);
   
   try {
+    console.log(`[saveRelationEmbeddingAsync] リレーション埋め込み生成開始: ${relationId}, organizationId: ${organizationId}`);
     const relation = await getRelationById(relationId);
     if (!relation) {
+      console.warn(`[saveRelationEmbeddingAsync] リレーションが見つかりません: ${relationId}`);
       return false;
     }
     
     // Graphvizのリレーションの場合、topicIdはnullになるが、空文字列として扱う
     const topicIdForEmbedding = topicId || '';
     const orgOrCompanyId = relation.companyId || organizationId || relation.organizationId || '';
+    
+    if (!orgOrCompanyId) {
+      console.warn(`[saveRelationEmbeddingAsync] organizationIdもcompanyIdも設定されていません: ${relationId}`);
+      return false;
+    }
+    
+    console.log(`[saveRelationEmbeddingAsync] 埋め込み保存開始: ${relationId}, orgOrCompanyId: ${orgOrCompanyId}`);
     await saveRelationEmbedding(relationId, topicIdForEmbedding, orgOrCompanyId, relation);
+    console.log(`✅ [saveRelationEmbeddingAsync] リレーション埋め込み生成完了: ${relationId}`);
     return true;
   } catch (error: any) {
-    console.error(`リレーション ${relationId} の埋め込み生成エラー:`, error?.message || error);
+    console.error(`❌ [saveRelationEmbeddingAsync] リレーション ${relationId} の埋め込み生成エラー:`, {
+      relationId,
+      organizationId,
+      topicId,
+      error: error?.message || String(error),
+      stack: error?.stack,
+    });
     return false;
   } finally {
     relationEmbeddingGenerationInProgress.delete(relationId);

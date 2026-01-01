@@ -21,6 +21,10 @@ export { searchKnowledgeGraph } from './searchKnowledgeGraph';
 export { searchEntities } from './searchEntities';
 export { searchRelations } from './searchRelations';
 export { searchTopics } from './searchTopics';
+export { searchStartups } from './searchStartups';
+export { searchFocusInitiatives } from './searchFocusInitiatives';
+export { searchMeetingNotes } from './searchMeetingNotes';
+export { searchRegulations } from './searchRegulations';
 
 // コンテキスト生成関数をエクスポート
 export {

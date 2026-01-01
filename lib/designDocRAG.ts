@@ -1,12 +1,14 @@
 /**
  * システム設計ドキュメント用のRAG検索
- * ChromaDBを使用した高速ベクトル検索
+ * ChromaDBまたはSupabase（pgvector）を使用した高速ベクトル検索
  * 
- * Rust側のChromaDB Serverを使用（Tauriコマンド経由）
+ * 環境変数でChromaDB/Supabaseを自動切り替え
  */
 
 import { callTauriCommand } from './localFirebase';
 import { generateEmbedding } from './embeddings';
+import { getVectorSearchBackend } from './vectorSearchConfig';
+import { saveDesignDocEmbedding as saveDesignDocEmbeddingAdapter, findSimilarDesignDocs as findSimilarDesignDocsAdapter } from './vectorSearchAdapter';
 
 /**
  * ChromaDBに保存されているシステム設計ドキュメントのセクションID一覧を取得（デバッグ用）
@@ -52,7 +54,7 @@ function removeMermaidCode(content: string): string {
 }
 
 /**
- * システム設計ドキュメントのEmbeddingをChromaDBに保存
+ * システム設計ドキュメントのEmbeddingを保存（ChromaDBまたはSupabase）
  */
 export async function saveDesignDocEmbeddingToChroma(
   sectionId: string,
@@ -100,14 +102,31 @@ export async function saveDesignDocEmbeddingToChroma(
       updatedAt: now,
     };
 
-    // 3. Rust側のTauriコマンドを呼び出し（パラメータ名はcamelCase）
-    await callTauriCommand('chromadb_save_design_doc_embedding', {
-      sectionId,
-      combinedEmbedding,
-      metadata: chromaMetadata,
-    });
-
-    console.log(`✅ ChromaDBにシステム設計ドキュメント埋め込みを保存しました: ${sectionId}`);
+    // 3. ベクトル検索バックエンドに保存（ChromaDBまたはSupabase）
+    const backend = getVectorSearchBackend();
+    if (backend === 'supabase') {
+      // Supabaseを使用（新しい抽象化レイヤー）
+      await saveDesignDocEmbeddingAdapter(
+        sectionId,
+        combinedEmbedding,
+        {
+          title: sectionTitle,
+          content,
+          tags: metadata.tags,
+          embeddingModel: 'text-embedding-3-small',
+          embeddingVersion: '1.0',
+        }
+      );
+      console.log(`✅ Supabaseにシステム設計ドキュメント埋め込みを保存しました: ${sectionId}`);
+    } else {
+      // ChromaDBを使用（既存の実装）
+      await callTauriCommand('chromadb_save_design_doc_embedding', {
+        sectionId,
+        combinedEmbedding,
+        metadata: chromaMetadata,
+      });
+      console.log(`✅ ChromaDBにシステム設計ドキュメント埋め込みを保存しました: ${sectionId}`);
+    }
   } catch (error) {
     console.error('ChromaDBへのシステム設計ドキュメント埋め込み保存エラー:', error);
     throw error;
@@ -115,7 +134,7 @@ export async function saveDesignDocEmbeddingToChroma(
 }
 
 /**
- * ChromaDBを使用した類似システム設計ドキュメント検索（Rust側経由）
+ * 類似システム設計ドキュメント検索（ChromaDBまたはSupabase）
  */
 export async function searchDesignDocs(
   queryText: string,
@@ -137,24 +156,65 @@ export async function searchDesignDocs(
       model: 'text-embedding-3-small',
     });
 
-    // 2. Rust側のTauriコマンドを呼び出し（類似度検索）
-    // フィルターは検索後に適用するため、limitを多めに取得
-    const searchLimit = filters && (filters.tags || filters.semanticCategory) ? limit * 3 : limit;
-    const results = await callTauriCommand('chromadb_find_similar_design_docs', {
-      queryEmbedding,
-      limit: searchLimit,
-      sectionId: filters?.sectionId || null,
-      tags: null, // タグフィルターは検索後に適用
-    }) as Array<[string, number]>;  // [sectionId, similarity]
+    // 2. ベクトル検索バックエンドで検索（ChromaDBまたはSupabase）
+    const backend = getVectorSearchBackend();
+    let results: Array<[string, number]> = []; // [sectionId, similarity]
+    
+    if (backend === 'supabase') {
+      // Supabaseを使用（新しい抽象化レイヤー）
+      const searchLimit = filters && (filters.tags || filters.semanticCategory) ? limit * 3 : limit;
+      const supabaseResults = await findSimilarDesignDocsAdapter(
+        queryEmbedding,
+        searchLimit
+      );
+      results = supabaseResults.map(r => [r.id, r.similarity]);
+    } else {
+      // ChromaDBを使用（既存の実装）
+      const searchLimit = filters && (filters.tags || filters.semanticCategory) ? limit * 3 : limit;
+      results = await callTauriCommand('chromadb_find_similar_design_docs', {
+        queryEmbedding,
+        limit: searchLimit,
+        sectionId: filters?.sectionId || null,
+        tags: null, // タグフィルターは検索後に適用
+      }) as Array<[string, number]>;  // [sectionId, similarity]
+    }
 
-    // 3. メタデータを取得（ChromaDBから取得）
+    // 3. メタデータを取得（ChromaDBまたはSupabaseから取得）
     const designDocs: DesignDocResult[] = [];
     for (const [sectionId, similarity] of results) {
       try {
-        // メタデータを取得（ChromaDBのメタデータから）
-        const metadata = await callTauriCommand('chromadb_get_design_doc_metadata', {
-          sectionId,
-        }) as Record<string, any>;
+        let metadata: Record<string, any> | null = null;
+        
+        if (backend === 'supabase') {
+          // Supabaseからメタデータを取得
+          const { getSupabaseClient } = await import('./utils/supabaseClient');
+          const supabase = getSupabaseClient();
+          const { data, error } = await supabase
+            .from('design_doc_embeddings')
+            .select('title, content, tags, metadata')
+            .eq('section_id', sectionId)
+            .single();
+          
+          if (error || !data) {
+            console.warn(`システム設計ドキュメント ${sectionId} のメタデータ取得エラー:`, error);
+            continue;
+          }
+          
+          metadata = {
+            sectionTitle: data.title || sectionId,
+            content: data.content || '',
+            tags: data.tags ? (typeof data.tags === 'string' ? JSON.parse(data.tags) : data.tags) : undefined,
+            pageUrl: '/design',
+            hierarchy: undefined,
+            relatedSections: undefined,
+            semanticCategory: undefined,
+          };
+        } else {
+          // ChromaDBからメタデータを取得
+          metadata = await callTauriCommand('chromadb_get_design_doc_metadata', {
+            sectionId,
+          }) as Record<string, any>;
+        }
 
         if (metadata) {
           const tags = metadata.tags ? JSON.parse(metadata.tags) : undefined;

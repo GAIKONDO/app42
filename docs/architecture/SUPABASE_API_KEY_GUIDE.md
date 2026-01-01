@@ -37,11 +37,28 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...  ← anon 
 
 **注意**: `service_role secret key`は`.env.local`には設定しません。Rustバックエンドで使用する場合は、別の環境変数ファイル（`local.env`など）に設定してください。
 
-## 現在の状況
+## 現在の設定
 
-提供されたキー: `sb_secret_tF4P7sviHo3TG6t1Ai3bXQ_FP2iKZIt`
+### プロジェクト情報
 
-これは`service_role secret key`です。クライアントサイドでは使用できません。
+- **Project URL**: `https://uxuevczwmirlipcbptsx.supabase.co`
+- **anon public key**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4dWV2Y3p3bWlybGlwY2JwdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxMjE2MDUsImV4cCI6MjA4MjY5NzYwNX0.Su-XuXMykMChwW4W6b6BtDGruJUhfh70KPqn91MLKQM`
 
-**次のステップ**: Supabaseダッシュボードで`anon public key`を取得してください。
+### `.env.local`ファイルの設定例
+
+プロジェクトルートに`.env.local`ファイルを作成（または更新）し、以下を設定：
+
+```env
+# Supabase設定（データベース用）
+NEXT_PUBLIC_USE_SUPABASE=true
+NEXT_PUBLIC_SUPABASE_URL=https://uxuevczwmirlipcbptsx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4dWV2Y3p3bWlybGlwY2JwdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxMjE2MDUsImV4cCI6MjA4MjY5NzYwNX0.Su-XuXMykMChwW4W6b6BtDGruJUhfh70KPqn91MLKQM
+
+# ベクトル検索にSupabaseを使用する場合（明示的に指定）
+NEXT_PUBLIC_USE_SUPABASE_VECTOR_SEARCH=true
+```
+
+**注意**: 
+- `.env.local`ファイルは`.gitignore`に含まれているため、Gitにコミットされません
+- 環境変数を変更した後は、アプリケーションを再起動してください
 

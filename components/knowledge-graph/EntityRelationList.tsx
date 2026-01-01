@@ -37,6 +37,8 @@ interface EntityRelationListProps {
   setRelationTypeFilter: (filter: string) => void;
   selectedEntityIds: Set<string>;
   setSelectedEntityIds: (ids: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
+  selectedRelationIds: Set<string>;
+  setSelectedRelationIds: (ids: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   entityTypeLabels: Record<string, string>;
   relationTypeLabels: Record<string, string>;
   isDeletingEntity: boolean;
@@ -44,6 +46,10 @@ interface EntityRelationListProps {
   setDeleteTargetEntityId: (id: string | null) => void;
   setShowDeleteEntityModal: (show: boolean) => void;
   setShowBulkDeleteModal: (show: boolean) => void;
+  setRelations: (relations: Relation[] | ((prev: Relation[]) => Relation[])) => void;
+  setDeleteTargetRelationId: (id: string | null) => void;
+  setShowDeleteRelationModal: (show: boolean) => void;
+  isDeletingRelation?: boolean;
 }
 
 export default function EntityRelationList({
@@ -77,6 +83,8 @@ export default function EntityRelationList({
   setRelationTypeFilter,
   selectedEntityIds,
   setSelectedEntityIds,
+  selectedRelationIds,
+  setSelectedRelationIds,
   entityTypeLabels,
   relationTypeLabels,
   isDeletingEntity,
@@ -84,6 +92,10 @@ export default function EntityRelationList({
   setDeleteTargetEntityId,
   setShowDeleteEntityModal,
   setShowBulkDeleteModal,
+  setRelations,
+  setDeleteTargetRelationId,
+  setShowDeleteRelationModal,
+  isDeletingRelation = false,
 }: EntityRelationListProps) {
   // トピックのファイル件数を管理
   const [topicFileCounts, setTopicFileCounts] = useState<Map<string, number>>(new Map());
@@ -328,19 +340,32 @@ export default function EntityRelationList({
                     }}
                     disabled={isDeletingEntity || isBulkDeleting}
                     style={{
-                      padding: '6px 12px',
-                      backgroundColor: '#EF4444',
-                      color: '#FFFFFF',
-                      border: 'none',
-                      borderRadius: '6px',
-                      fontSize: '12px',
+                      padding: '4px 8px',
+                      backgroundColor: 'transparent',
+                      color: '#9CA3AF',
+                      border: '1px solid #E5E7EB',
+                      borderRadius: '4px',
+                      fontSize: '11px',
                       cursor: (isDeletingEntity || isBulkDeleting) ? 'not-allowed' : 'pointer',
-                      fontWeight: 500,
+                      fontWeight: 400,
                       opacity: (isDeletingEntity || isBulkDeleting) ? 0.5 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isDeletingEntity && !isBulkDeleting) {
+                        e.currentTarget.style.backgroundColor = '#FEE2E2';
+                        e.currentTarget.style.color = '#DC2626';
+                        e.currentTarget.style.borderColor = '#FCA5A5';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#9CA3AF';
+                      e.currentTarget.style.borderColor = '#E5E7EB';
                     }}
                     title="エンティティを削除"
                   >
-                    🗑️ 削除
+                    🗑️
                   </button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
@@ -460,6 +485,38 @@ export default function EntityRelationList({
               </span>
             )}
           </h2>
+          {filteredRelations.length > 0 && (
+            <>
+              {selectedRelationIds.size > 0 && (
+                <span style={{ fontSize: '12px', color: '#6B7280', marginRight: '8px' }}>
+                  ({selectedRelationIds.size}件選択中)
+                </span>
+              )}
+              <button
+                onClick={() => {
+                  if (selectedRelationIds.size === filteredRelations.length) {
+                    // 全解除
+                    setSelectedRelationIds(new Set());
+                  } else {
+                    // 全選択
+                    setSelectedRelationIds(new Set(filteredRelations.map(r => r.id)));
+                  }
+                }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: selectedRelationIds.size === filteredRelations.length ? '#F3F4F6' : '#3B82F6',
+                  color: selectedRelationIds.size === filteredRelations.length ? '#6B7280' : '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                {selectedRelationIds.size === filteredRelations.length ? '全解除' : '全選択'}
+              </button>
+            </>
+          )}
         </div>
         
         {/* 検索・フィルタ */}
@@ -517,21 +574,79 @@ export default function EntityRelationList({
             // リレーションに関連するトピックを取得
             const relatedTopic = topics.find(t => t.id === relation.topicId) || null;
             
+            const isSelected = selectedRelationIds.has(relation.id);
+            
             return (
               <div
                 key={relation.id}
                 style={{
                   padding: '12px',
-                  backgroundColor: '#F9FAFB',
+                  backgroundColor: isSelected ? '#FEF3C7' : '#F9FAFB',
                   borderRadius: '8px',
-                  border: '1px solid #E5E7EB',
+                  border: isSelected ? '2px solid #F59E0B' : '1px solid #E5E7EB',
                   fontSize: '14px',
                 }}
               >
-                <div style={{ color: '#1a1a1a', fontWeight: 500 }}>
-                  <span style={{ color: '#0066CC', fontWeight: 600 }}>{sourceName}</span>{' '}
-                  <span style={{ color: '#6B7280' }}>→ [{relationTypeLabel}]</span>{' '}
-                  <span style={{ color: '#0066CC', fontWeight: 600 }}>{targetName}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, flexWrap: 'wrap' }}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedRelationIds);
+                        if (e.target.checked) {
+                          newSet.add(relation.id);
+                        } else {
+                          newSet.delete(relation.id);
+                        }
+                        setSelectedRelationIds(newSet);
+                      }}
+                      style={{
+                        width: '18px',
+                        height: '18px',
+                        cursor: 'pointer',
+                      }}
+                    />
+                    <div style={{ color: '#1a1a1a', fontWeight: 500 }}>
+                      <span style={{ color: '#0066CC', fontWeight: 600 }}>{sourceName}</span>{' '}
+                      <span style={{ color: '#6B7280' }}>→ [{relationTypeLabel}]</span>{' '}
+                      <span style={{ color: '#0066CC', fontWeight: 600 }}>{targetName}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setDeleteTargetRelationId(relation.id);
+                      setShowDeleteRelationModal(true);
+                    }}
+                    disabled={isDeletingRelation || isDeletingEntity || isBulkDeleting}
+                    style={{
+                      padding: '4px 8px',
+                      backgroundColor: 'transparent',
+                      color: '#9CA3AF',
+                      border: '1px solid #E5E7EB',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      cursor: (isDeletingRelation || isDeletingEntity || isBulkDeleting) ? 'not-allowed' : 'pointer',
+                      fontWeight: 400,
+                      opacity: (isDeletingRelation || isDeletingEntity || isBulkDeleting) ? 0.5 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isDeletingRelation && !isDeletingEntity && !isBulkDeleting) {
+                        e.currentTarget.style.backgroundColor = '#FEE2E2';
+                        e.currentTarget.style.color = '#DC2626';
+                        e.currentTarget.style.borderColor = '#FCA5A5';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#9CA3AF';
+                      e.currentTarget.style.borderColor = '#E5E7EB';
+                    }}
+                    title="リレーションを削除"
+                  >
+                    🗑️
+                  </button>
                 </div>
                 {relation.description && (
                   <div style={{ color: '#6B7280', fontSize: '12px', marginTop: '4px' }}>

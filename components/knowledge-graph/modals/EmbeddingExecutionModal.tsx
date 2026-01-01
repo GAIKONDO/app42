@@ -621,9 +621,20 @@ export default function EmbeddingExecutionModal({
         (async () => {
           try {
             const result = await supabase.from('regulation_embeddings').select('regulation_id');
+            // regulationsテーブルが存在しない場合は空データを返す
+            if (result.error && (result.error.code === 'PGRST205' || result.error.message?.includes('Could not find the table') || result.error.message?.includes('does not exist'))) {
+              return { data: [], error: null };
+            }
             return result.error ? { data: [], error: result.error } : result;
           } catch (error: any) {
             return { data: [], error: null };
+          }
+        })(),
+        (async () => {
+          try {
+            return await supabase.from('regulation_item_embeddings').select('regulation_id, item_id');
+          } catch (error: any) {
+            return { data: [], error: error };
           }
         })(),
       ]);
@@ -644,11 +655,12 @@ export default function EmbeddingExecutionModal({
         meetingNoteEmbeddingsResultFinal,
         focusInitiativeEmbeddingsResultFinal,
         regulationEmbeddingsResultFinal,
+        regulationItemEmbeddingsResultFinal,
       ] = results.map((result: any, index: number) => {
         if (result.status === 'fulfilled') {
           return result.value;
         } else {
-          const tableNames = ['entities', 'relations', 'topics', 'startups', 'meetingnotes', 'focusinitiatives', 'regulations', 'entity_embeddings', 'relation_embeddings', 'topic_embeddings', 'startup_embeddings', 'meeting_note_embeddings', 'focus_initiative_embeddings', 'regulation_embeddings'];
+          const tableNames = ['entities', 'relations', 'topics', 'startups', 'meetingnotes', 'focusinitiatives', 'regulations', 'entity_embeddings', 'relation_embeddings', 'topic_embeddings', 'startup_embeddings', 'meeting_note_embeddings', 'focus_initiative_embeddings', 'regulation_embeddings', 'regulation_item_embeddings'];
           console.error(`❌ [埋め込み実行] ${tableNames[index]}取得エラー:`, result.reason);
           return { data: [], error: result.reason };
         }
@@ -671,7 +683,18 @@ export default function EmbeddingExecutionModal({
         console.error('❌ [埋め込み実行] focusinitiatives取得エラー:', focusInitiativesResultFinal.error);
       }
       if (regulationsResultFinal.error) {
-        console.error('❌ [埋め込み実行] regulations取得エラー:', regulationsResultFinal.error);
+        // regulationsテーブルが存在しない場合はエラーを無視
+        if (!regulationsResultFinal.error.message?.includes('Could not find the table') && 
+            !regulationsResultFinal.error.message?.includes('does not exist') &&
+            regulationsResultFinal.error.code !== 'PGRST205') {
+          console.error('❌ [埋め込み実行] regulations取得エラー:', regulationsResultFinal.error);
+        }
+      }
+      if (regulationEmbeddingsResultFinal.error && !regulationEmbeddingsResultFinal.error.message?.includes('does not exist') && regulationEmbeddingsResultFinal.error.code !== 'PGRST205') {
+        console.error('❌ [埋め込み実行] regulation_embeddings取得エラー:', regulationEmbeddingsResultFinal.error);
+      }
+      if (regulationItemEmbeddingsResultFinal.error && !regulationItemEmbeddingsResultFinal.error.message?.includes('does not exist') && regulationItemEmbeddingsResultFinal.error.code !== 'PGRST205') {
+        console.error('❌ [埋め込み実行] regulation_item_embeddings取得エラー:', regulationItemEmbeddingsResultFinal.error);
       }
 
       // 埋め込み済みIDのセット
@@ -740,9 +763,15 @@ export default function EmbeddingExecutionModal({
         .filter((f: any) => !embeddedFocusInitiativeIds.has(f.id))
         .map((f: any) => ({ id: f.id, organizationId: f.organizationId || f.organizationid || '', companyId: f.companyId || f.companyid || null }));
       
-      const missingRegulationIds = (regulationsResultFinal.data || [])
-        .filter((r: any) => !embeddedRegulationIds.has(r.id))
-        .map((r: any) => ({ id: r.id, organizationId: r.organizationid || r.organizationId || '' }));
+      // regulationsテーブルが存在しない場合は空配列を返す
+      const missingRegulationIds = (regulationsResultFinal.error && 
+        (regulationsResultFinal.error.message?.includes('Could not find the table') || 
+         regulationsResultFinal.error.message?.includes('does not exist') ||
+         regulationsResultFinal.error.code === 'PGRST205'))
+        ? []
+        : (regulationsResultFinal.data || [])
+            .filter((r: any) => !embeddedRegulationIds.has(r.id))
+            .map((r: any) => ({ id: r.id, organizationId: r.organizationid || r.organizationId || '' }));
 
       // デバッグログ
       console.log('🔍 [埋め込み実行] 未生成IDの抽出結果:', {
@@ -932,37 +961,64 @@ export default function EmbeddingExecutionModal({
           if (organizationId) {
             console.log('🔍 [埋め込み実行] 制度埋め込み開始:', { id, organizationId });
             // RegulationID単位の埋め込み生成
-            await saveRegulationEmbeddingAsync(id, organizationId);
-            console.log('✅ [埋め込み実行] 制度埋め込み成功:', id);
+            try {
+              await saveRegulationEmbeddingAsync(id, organizationId);
+              console.log('✅ [埋め込み実行] 制度埋め込み成功:', id);
+            } catch (regError: any) {
+              // regulationsテーブルが存在しない場合はスキップして続行
+              if (regError?.message?.includes('Could not find the table') || 
+                  regError?.message?.includes('does not exist') ||
+                  regError?.code === 'PGRST205' ||
+                  regError?.status === 404) {
+                console.warn(`⚠️ [埋め込み実行] 制度埋め込みスキップ（regulationsテーブルが存在しない）:`, id);
+                processedCount++;
+                setExecutionProgress({ current: processedCount, total: totalMissing, category: '制度', status: 'processing' });
+                continue;
+              }
+              throw regError;
+            }
             
             // ItemID単位の埋め込み生成
-            const regulation = await getRegulationById(id);
-            if (regulation && regulation.content) {
-              try {
-                const contentData = JSON.parse(regulation.content) as Record<string, MonthContent>;
-                for (const [tabId, tabData] of Object.entries(contentData)) {
-                  if (tabData.items && Array.isArray(tabData.items)) {
-                    for (const item of tabData.items) {
-                      if (item.id && item.title && item.content) {
-                        try {
-                          await saveRegulationItemEmbeddingAsync(
-                            id,
-                            item.id,
-                            organizationId,
-                            {
-                              title: item.title,
-                              content: item.content,
-                            }
-                          );
-                        } catch (itemError) {
-                          console.error(`制度アイテム ${id}, ${item.id} の埋め込み生成エラー:`, itemError);
+            try {
+              const regulation = await getRegulationById(id);
+              if (regulation && regulation.content) {
+                try {
+                  const contentData = JSON.parse(regulation.content) as Record<string, MonthContent>;
+                  for (const [tabId, tabData] of Object.entries(contentData)) {
+                    if (tabData.items && Array.isArray(tabData.items)) {
+                      for (const item of tabData.items) {
+                        if (item.id && item.title && item.content) {
+                          try {
+                            await saveRegulationItemEmbeddingAsync(
+                              id,
+                              item.id,
+                              organizationId,
+                              {
+                                title: item.title,
+                                content: item.content,
+                              }
+                            );
+                          } catch (itemError) {
+                            console.error(`制度アイテム ${id}, ${item.id} の埋め込み生成エラー:`, itemError);
+                          }
                         }
                       }
                     }
                   }
+                } catch (parseError) {
+                  console.warn(`制度 ${id} のcontentパースエラー（続行）:`, parseError);
                 }
-              } catch (parseError) {
-                console.warn(`制度 ${id} のcontentパースエラー（続行）:`, parseError);
+              }
+            } catch (getError: any) {
+              // regulationsテーブルが存在しない場合はスキップして続行
+              if (getError?.message?.includes('Could not find the table') || 
+                  getError?.message?.includes('does not exist') ||
+                  getError?.code === 'PGRST205' ||
+                  getError?.status === 404) {
+                console.warn(`⚠️ [埋め込み実行] 制度取得スキップ（regulationsテーブルが存在しない）:`, id);
+                // エラーを無視して続行
+              } else {
+                throw getError;
               }
             }
           } else {
@@ -1108,17 +1164,22 @@ export default function EmbeddingExecutionModal({
 
                 {/* スタートアップ */}
                 <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 1fr 1fr',
-                  gap: '16px',
-                  padding: '16px 20px',
                   borderBottom: '1px solid #F3F4F6',
-                  fontSize: '14px',
                 }}>
-                  <div style={{ fontWeight: 500, color: '#1F2937' }}>スタートアップ</div>
-                  <div style={{ textAlign: 'right', color: '#374151' }}>{stats.startups.total}</div>
-                  <div style={{ textAlign: 'right', color: '#10B981', fontWeight: 600 }}>{stats.startups.embedded}</div>
-                  <div style={{ textAlign: 'right', color: '#EF4444', fontWeight: 600 }}>{stats.startups.missing}</div>
+                  {/* スタートアップ（StartupID単位） */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1fr 1fr 1fr',
+                    gap: '16px',
+                    padding: '16px 20px',
+                    fontSize: '14px',
+                    backgroundColor: '#FFFFFF',
+                  }}>
+                    <div style={{ fontWeight: 500, color: '#1F2937' }}>スタートアップ</div>
+                    <div style={{ textAlign: 'right', color: '#374151' }}>{stats.startups.total}</div>
+                    <div style={{ textAlign: 'right', color: '#10B981', fontWeight: 600 }}>{stats.startups.embedded}</div>
+                    <div style={{ textAlign: 'right', color: '#EF4444', fontWeight: 600 }}>{stats.startups.missing}</div>
+                  </div>
                 </div>
 
                 {/* 注力施策 */}

@@ -513,6 +513,62 @@ export async function saveRegulationItemEmbeddingToSupabase(
 }
 
 /**
+ * スタートアップアイテム埋め込みベクトルを保存
+ */
+export async function saveStartupItemEmbeddingToSupabase(
+  startupId: string,
+  sectionType: string,
+  itemId: string | null,
+  organizationId: string | null,
+  companyId: string | null,
+  embedding: number[],
+  metadata: {
+    title?: string;
+    content?: string;
+    metadata?: any;
+    embeddingModel?: string;
+    embeddingVersion?: string;
+  }
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  
+  const embeddingDimension = embedding.length;
+  if (embeddingDimension !== 768 && embeddingDimension !== 1536) {
+    throw new Error(`サポートされていない埋め込み次元数: ${embeddingDimension}`);
+  }
+
+  // IDの生成: {startupId}-section-{sectionType} または {startupId}-section-{sectionType}-{itemId}
+  const id = itemId 
+    ? `${startupId}-section-${sectionType}-${itemId}`
+    : `${startupId}-section-${sectionType}`;
+
+  const { error } = await supabase
+    .from('startup_item_embeddings')
+    .upsert({
+      id: id,
+      startup_id: startupId,
+      section_type: sectionType,
+      item_id: itemId,
+      organization_id: organizationId,
+      company_id: companyId,
+      embedding: embedding,
+      embedding_dimension: embeddingDimension,
+      title: metadata.title,
+      content: metadata.content,
+      metadata: metadata.metadata ? JSON.stringify(metadata.metadata) : null,
+      embedding_model: metadata.embeddingModel || 'text-embedding-3-small',
+      embedding_version: metadata.embeddingVersion || '1.0',
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'id',
+    });
+
+  if (error) {
+    throw new Error(`スタートアップアイテム埋め込みの保存に失敗しました: ${error.message}`);
+  }
+}
+
+/**
  * システム設計ドキュメント埋め込みベクトルを保存
  */
 export async function saveDesignDocEmbeddingToSupabase(

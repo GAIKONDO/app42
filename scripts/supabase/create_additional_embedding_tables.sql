@@ -378,3 +378,77 @@ CREATE TRIGGER trigger_update_regulation_item_embeddings_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_regulation_item_embeddings_updated_at();
 
+-- ============================================
+-- スタートアップアイテム埋め込みテーブル
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS startup_item_embeddings (
+    id TEXT PRIMARY KEY,
+    startup_id TEXT NOT NULL,
+    section_type TEXT NOT NULL,  -- 'description', 'content', 'nda', 'objective', 'evaluation', 'methodDetail', 'competitorComparison', 'deepSearch'
+    item_id TEXT,  -- セクション内の個別アイテムID（methodDetails、competitorComparison、deepSearchの場合）
+    organization_id TEXT,
+    company_id TEXT,
+    embedding vector(1536),  -- 1536次元または768次元
+    embedding_dimension INTEGER NOT NULL DEFAULT 1536,
+    
+    -- メタデータ
+    title TEXT,
+    content TEXT,
+    metadata JSONB,
+    
+    -- 埋め込み設定
+    embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+    embedding_version TEXT NOT NULL DEFAULT '1.0',
+    
+    -- タイムスタンプ
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    
+    -- 外部キー制約
+    CONSTRAINT fk_startup_item_embeddings_startup FOREIGN KEY (startup_id) REFERENCES startups(id) ON DELETE CASCADE,
+    CONSTRAINT fk_startup_item_embeddings_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_startup_item_embeddings_company FOREIGN KEY (company_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    
+    -- チェック制約
+    CONSTRAINT chk_startup_item_embeddings_dimension CHECK (embedding_dimension IN (768, 1536)),
+    CONSTRAINT chk_startup_item_embeddings_org_company CHECK (
+        (organization_id IS NOT NULL AND company_id IS NULL) OR 
+        (organization_id IS NULL AND company_id IS NOT NULL) OR
+        (organization_id IS NULL AND company_id IS NULL)
+    ),
+    CONSTRAINT chk_startup_item_embeddings_section_type CHECK (
+        section_type IN ('description', 'content', 'nda', 'objective', 'evaluation', 'methodDetail', 'competitorComparison', 'deepSearch')
+    ),
+    
+    -- ユニーク制約（同じstartup_id、section_type、item_idの組み合わせは1つだけ）
+    CONSTRAINT uq_startup_item_embeddings_startup_section_item UNIQUE (startup_id, section_type, item_id)
+);
+
+-- インデックス
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_startup_id ON startup_item_embeddings(startup_id);
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_section_type ON startup_item_embeddings(section_type);
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_item_id ON startup_item_embeddings(item_id);
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_organization_id ON startup_item_embeddings(organization_id);
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_company_id ON startup_item_embeddings(company_id);
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_embedding_model ON startup_item_embeddings(embedding_model);
+CREATE INDEX IF NOT EXISTS idx_startup_item_embeddings_created_at ON startup_item_embeddings(created_at);
+
+-- ============================================
+-- 更新日時の自動更新トリガー
+-- ============================================
+
+-- スタートアップアイテム埋め込み
+CREATE OR REPLACE FUNCTION update_startup_item_embeddings_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_startup_item_embeddings_updated_at
+    BEFORE UPDATE ON startup_item_embeddings
+    FOR EACH ROW
+    EXECUTE FUNCTION update_startup_item_embeddings_updated_at();
+

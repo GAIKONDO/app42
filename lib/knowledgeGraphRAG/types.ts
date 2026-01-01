@@ -4,6 +4,7 @@
 
 import type { Entity } from '@/types/entity';
 import type { Relation } from '@/types/relation';
+import type { EvaluationChartData } from '@/lib/orgApi';
 
 /**
  * 検索結果の種類
@@ -63,6 +64,7 @@ export interface KnowledgeGraphSearchResult {
     content?: string;
     objective?: string;
     evaluation?: string;
+    evaluationChart?: EvaluationChartData;
   };
   // 注力施策の場合
   focusInitiativeId?: string;

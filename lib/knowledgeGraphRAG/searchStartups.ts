@@ -73,6 +73,7 @@ export async function searchStartups(
             content: startup.content,
             objective: startup.objective,
             evaluation: startup.evaluation,
+            evaluationChart: startup.evaluationChart,
           },
         };
       })

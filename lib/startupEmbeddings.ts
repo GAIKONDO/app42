@@ -6,7 +6,7 @@
 import { generateEmbedding } from './embeddings';
 import type { Startup } from '@/lib/orgApi';
 import { getStartupById } from '@/lib/orgApi/startups';
-import { saveStartupEmbeddingToSupabase } from './vectorSearchSupabase';
+import { saveStartupEmbeddingToSupabase, saveStartupItemEmbeddingToSupabase } from './vectorSearchSupabase';
 
 /**
  * 現在の埋め込みバージョン
@@ -140,6 +140,145 @@ export async function saveStartupEmbeddingAsync(
     return true;
   } catch (error: any) {
     console.error(`❌ [saveStartupEmbeddingAsync] スタートアップ ${startupId} の埋め込み生成エラー:`, {
+      error: error?.message || String(error),
+      stack: error?.stack,
+      timestamp: new Date().toISOString(),
+    });
+    return false;
+  }
+}
+
+/**
+ * スタートアップアイテム埋め込みを保存（個別セクション用）
+ */
+export async function saveStartupItemEmbedding(
+  startupId: string,
+  sectionType: 'description' | 'content' | 'nda',
+  organizationId: string,
+  startup: Startup
+): Promise<void> {
+  if (typeof window === 'undefined') {
+    throw new Error('スタートアップアイテム埋め込みの保存はクライアント側でのみ実行可能です');
+  }
+  
+  const orgOrCompanyId = startup.companyId || organizationId || startup.organizationId || '';
+  
+  if (!orgOrCompanyId) {
+    console.warn(`[saveStartupItemEmbedding] organizationIdもcompanyIdも設定されていません: ${startupId}, ${sectionType}`);
+    return;
+  }
+  
+  try {
+    let text = '';
+    let title = '';
+    
+    switch (sectionType) {
+      case 'description':
+        if (!startup.description) {
+          console.warn(`[saveStartupItemEmbedding] descriptionが空です: ${startupId}`);
+          return;
+        }
+        text = startup.description;
+        title = `概要: ${startup.title}`;
+        break;
+        
+      case 'content':
+        if (!startup.content) {
+          console.warn(`[saveStartupItemEmbedding] contentが空です: ${startupId}`);
+          return;
+        }
+        text = startup.content;
+        title = `詳細: ${startup.title}`;
+        break;
+        
+      case 'nda':
+        // NDA情報をテキスト化
+        const ndaParts: string[] = [];
+        if (startup.considerationPeriod) {
+          ndaParts.push(`机上-NDA締結期間: ${startup.considerationPeriod}`);
+        }
+        if (startup.executionPeriod) {
+          ndaParts.push(`NDA締結期間: ${startup.executionPeriod}`);
+        }
+        if (startup.monetizationPeriod) {
+          ndaParts.push(`NDA更新予定日: ${startup.monetizationPeriod}`);
+        }
+        if (startup.monetizationRenewalNotRequired !== undefined) {
+          ndaParts.push(`NDA更新不要: ${startup.monetizationRenewalNotRequired ? 'はい' : 'いいえ'}`);
+        }
+        
+        if (ndaParts.length === 0) {
+          console.warn(`[saveStartupItemEmbedding] NDA情報が空です: ${startupId}`);
+          return;
+        }
+        
+        text = `NDA情報:\n${ndaParts.join('\n')}`;
+        title = `NDA情報: ${startup.title}`;
+        break;
+    }
+    
+    if (!text.trim()) {
+      console.warn(`[saveStartupItemEmbedding] 埋め込みテキストが空です: ${startupId}, ${sectionType}`);
+      return;
+    }
+    
+    // 埋め込みを生成
+    const embedding = await generateEmbedding(text);
+    
+    // Supabaseに保存
+    await saveStartupItemEmbeddingToSupabase(
+      startupId,
+      sectionType,
+      null, // itemIdは基本セクションではnull
+      startup.organizationId || null,
+      startup.companyId || null,
+      embedding,
+      {
+        title,
+        content: text,
+        metadata: {
+          sectionType,
+          startupTitle: startup.title,
+        },
+        embeddingModel: CURRENT_EMBEDDING_MODEL,
+        embeddingVersion: CURRENT_EMBEDDING_VERSION,
+      }
+    );
+    
+    console.log(`✅ [saveStartupItemEmbedding] スタートアップアイテム埋め込み保存完了: ${startupId}, ${sectionType}`);
+  } catch (error: any) {
+    console.error(`❌ [saveStartupItemEmbedding] スタートアップ ${startupId} の${sectionType}埋め込み保存エラー:`, {
+      error: error?.message || String(error),
+      stack: error?.stack,
+      timestamp: new Date().toISOString(),
+    });
+    throw error;
+  }
+}
+
+/**
+ * スタートアップアイテム埋め込みを非同期で保存
+ */
+export async function saveStartupItemEmbeddingAsync(
+  startupId: string,
+  sectionType: 'description' | 'content' | 'nda',
+  organizationId: string
+): Promise<boolean> {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    const startup = await getStartupById(startupId);
+    if (!startup) {
+      console.warn(`[saveStartupItemEmbeddingAsync] スタートアップが見つかりません: ${startupId}`);
+      return false;
+    }
+    
+    await saveStartupItemEmbedding(startupId, sectionType, organizationId, startup);
+    return true;
+  } catch (error: any) {
+    console.error(`❌ [saveStartupItemEmbeddingAsync] スタートアップ ${startupId} の${sectionType}埋め込み生成エラー:`, {
       error: error?.message || String(error),
       stack: error?.stack,
       timestamp: new Date().toISOString(),

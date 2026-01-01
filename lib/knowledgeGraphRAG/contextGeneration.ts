@@ -9,6 +9,8 @@ import type { KnowledgeGraphSearchResult, KnowledgeGraphContextResult, SearchFil
 import { searchKnowledgeGraph } from './searchKnowledgeGraph';
 import { getEntitiesByIds } from '../entityApi';
 import { getSearchConfig } from './searchConfig';
+import { analyzeQueryIntent, logQueryIntentAnalysis } from './queryIntentAnalyzer';
+import { ActionExecutor } from './actionExecutor';
 
 /**
  * RAG用のコンテキストを取得
@@ -62,6 +64,74 @@ export async function getKnowledgeGraphContextWithResults(
 ): Promise<KnowledgeGraphContextResult> {
   try {
     console.log('[getKnowledgeGraphContextWithResults] 検索開始:', { queryText, limit, filters });
+    
+    // クエリ意図を分析
+    const intentAnalysis = analyzeQueryIntent(queryText);
+    logQueryIntentAnalysis(intentAnalysis, queryText);
+    
+    // 件数クエリまたは一覧クエリの場合は、アクション実行エンジンを使用
+    if (intentAnalysis.intent === 'count' || intentAnalysis.intent === 'list') {
+      console.log('[getKnowledgeGraphContextWithResults] 件数/一覧クエリを検出、アクション実行エンジンを使用');
+      
+      const actionExecutor = new ActionExecutor();
+      const actionResult = await actionExecutor.execute(intentAnalysis, queryText, filters);
+      
+      // アクション結果をコンテキストに変換
+      let context = '';
+      const sources: Array<{
+        type: 'entity' | 'relation' | 'topic' | 'startup' | 'focusInitiative' | 'meetingNote' | 'regulation';
+        id: string;
+        name: string;
+        score: number;
+        files?: Array<{
+          id: string;
+          filePath: string;
+          fileName: string;
+          mimeType?: string;
+        }>;
+      }> = [];
+      
+      if (actionResult.type === 'count') {
+        if (actionResult.metadata?.targetType === 'all') {
+          // すべてのタイプの件数
+          const breakdown = actionResult.data.breakdown || {};
+          context = `## データ件数\n\n合計: ${actionResult.data.total}件\n\n`;
+          context += `内訳:\n`;
+          if (breakdown.startup !== undefined) context += `- スタートアップ: ${breakdown.startup}件\n`;
+          if (breakdown.entity !== undefined) context += `- エンティティ: ${breakdown.entity}件\n`;
+          if (breakdown.relation !== undefined) context += `- リレーション: ${breakdown.relation}件\n`;
+          if (breakdown.focusInitiative !== undefined) context += `- 注力施策: ${breakdown.focusInitiative}件\n`;
+          if (breakdown.meetingNote !== undefined) context += `- 議事録: ${breakdown.meetingNote}件\n`;
+          if (breakdown.regulation !== undefined) context += `- 制度: ${breakdown.regulation}件\n`;
+        } else {
+          // 特定のタイプの件数
+          const targetTypeName = getTargetTypeName(actionResult.metadata?.targetType);
+          context = `## ${targetTypeName}の件数\n\n${actionResult.data.count}件\n`;
+        }
+      } else if (actionResult.type === 'list') {
+        const targetTypeName = getTargetTypeName(actionResult.metadata?.targetType);
+        context = `## ${targetTypeName}の一覧\n\n`;
+        if (Array.isArray(actionResult.data) && actionResult.data.length > 0) {
+          actionResult.data.forEach((item: any, index: number) => {
+            context += `${index + 1}. ${item.title || item.name || item.id}\n`;
+            if (item.description) {
+              context += `   ${item.description}\n`;
+            }
+          });
+        } else {
+          context += 'データが見つかりませんでした。\n';
+        }
+      }
+      
+      return {
+        context,
+        results: [],
+        sources,
+      };
+    }
+    
+    // 通常の検索クエリの場合は、既存のフローを使用
+    console.log('[getKnowledgeGraphContextWithResults] 通常の検索クエリ、既存の検索フローを使用');
     
     // 検索設定を取得（AIアシスタントでも設定を反映）
     const searchConfig = typeof window !== 'undefined' ? getSearchConfig() : {
@@ -335,6 +405,13 @@ export async function getKnowledgeGraphContextWithResults(
         if (startup.evaluation) {
           contextParts.push(`  評価: ${startup.evaluation.substring(0, 200)}${startup.evaluation.length > 200 ? '...' : ''}`);
         }
+        if (startup.evaluationChart && startup.evaluationChart.axes && startup.evaluationChart.axes.length > 0) {
+          const chartInfo = startup.evaluationChart.axes.map(axis => {
+            const scoreText = axis.score !== undefined ? ` (スコア: ${axis.score}/${axis.maxValue || 5})` : '';
+            return `    - ${axis.label}: 優先度${axis.priority}${scoreText}${axis.basis ? ` (根拠: ${axis.basis})` : ''}`;
+          }).join('\n');
+          contextParts.push(`  レーダーチャート評価:\n${chartInfo}`);
+        }
       }
     }
 
@@ -537,5 +614,31 @@ export async function findRelatedRelations(
     .filter(r => r.type === 'relation' && r.relation)
     .map(r => r.relation!)
     .slice(0, limit);
+}
+
+/**
+ * ターゲットタイプ名を取得（日本語）
+ */
+function getTargetTypeName(targetType?: string): string {
+  switch (targetType) {
+    case 'startup':
+      return 'スタートアップ';
+    case 'entity':
+      return 'エンティティ';
+    case 'relation':
+      return 'リレーション';
+    case 'topic':
+      return 'トピック';
+    case 'focusInitiative':
+      return '注力施策';
+    case 'meetingNote':
+      return '議事録';
+    case 'regulation':
+      return '制度';
+    case 'all':
+      return 'すべて';
+    default:
+      return targetType || 'データ';
+  }
 }
 

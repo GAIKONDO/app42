@@ -4,7 +4,7 @@
 
 import type { Relation } from '@/types/relation';
 import type { KnowledgeGraphSearchResult, SearchFilters } from './types';
-import { findSimilarRelationsChroma } from '../relationEmbeddingsChroma';
+// Supabaseに移行済みのため、ChromaDB専用実装は不要
 import { findSimilarRelations as findSimilarRelationsAdapter } from '../vectorSearchAdapter';
 import { getVectorSearchBackend } from '../vectorSearchConfig';
 import { getRelationsByIds } from '../relationApi';
@@ -68,22 +68,9 @@ export async function searchRelations(
                 return [];
               }
             } else {
-              // ChromaDBを使用（既存の実装）
-              return findSimilarRelationsChroma(
-                queryText,
-                limit * 2,
-                filters?.organizationId,
-                filters?.relationType
-              ).catch(error => {
-                const errorMessage = error?.message || String(error || '');
-                // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
-                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-                    !errorMessage.includes('no such table') &&
-                    !errorMessage.includes('Database error')) {
-                  console.warn('[searchRelations] ベクトル検索エラー:', error);
-                }
-                return [];
-              });
+              // Supabaseに移行済みのため、ChromaDBは使用しない
+              console.warn('[searchRelations] ChromaDBは使用されていません。Supabaseを使用してください。');
+              return [];
             }
           })()
         : Promise.resolve([]),

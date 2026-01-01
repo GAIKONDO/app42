@@ -286,67 +286,52 @@ export default function Layout({ children }: LayoutProps) {
                 console.log('Layout: キャッシュから承認状態を取得:', { approved: isApproved });
               } else {
                 // キャッシュが無効または存在しない場合はデータベースから取得
-                const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+                // Supabase専用（環境変数チェック不要）
                 let userDoc: { exists: () => boolean; data: () => any };
                 
-                if (useSupabase) {
-                  // Supabase使用時はDataSource経由で取得
-                  // auth.usersのIDとpublic.usersのIDは一致しない可能性があるため、
-                  // emailでpublic.usersテーブルから検索する
-                  try {
-                    const { queryGetViaDataSource } = await import('../lib/dataSourceAdapter');
-                    const results = await queryGetViaDataSource('users', {
-                      filters: [{ field: 'email', operator: 'eq', value: user.email }]
+                // Supabase使用時はDataSource経由で取得
+                // auth.usersのIDとpublic.usersのIDは一致しない可能性があるため、
+                // emailでpublic.usersテーブルから検索する
+                try {
+                  const { queryGetViaDataSource } = await import('../lib/dataSourceAdapter');
+                  const results = await queryGetViaDataSource('users', {
+                    filters: [{ field: 'email', operator: 'eq', value: user.email }]
+                  });
+                  
+                  if (results && results.length > 0) {
+                    // emailで検索した結果の最初のレコードを使用
+                    const userData = results[0];
+                    
+                    // デバッグ: 取得したデータの全体をログ出力
+                    console.log('Layout: Supabaseから取得したユーザーデータ（全体）:', JSON.stringify(userData, null, 2));
+                    console.log('Layout: approvedの値（詳細）:', {
+                      approved: userData.approved,
+                      approvedType: typeof userData.approved,
+                      approvedString: String(userData.approved),
+                      approvedNumber: Number(userData.approved),
+                      allKeys: Object.keys(userData),
                     });
                     
-                    if (results && results.length > 0) {
-                      // emailで検索した結果の最初のレコードを使用
-                      const userData = results[0];
-                      
-                      // デバッグ: 取得したデータの全体をログ出力
-                      console.log('Layout: Supabaseから取得したユーザーデータ（全体）:', JSON.stringify(userData, null, 2));
-                      console.log('Layout: approvedの値（詳細）:', {
-                        approved: userData.approved,
-                        approvedType: typeof userData.approved,
-                        approvedString: String(userData.approved),
-                        approvedNumber: Number(userData.approved),
-                        allKeys: Object.keys(userData),
-                      });
-                      
-                      userDoc = {
-                        exists: () => true,
-                        data: () => userData
-                      };
-                    } else {
-                      // ユーザーが見つからない場合
-                      userDoc = {
-                        exists: () => false,
-                        data: () => undefined
-                      };
-                    }
-                  } catch (error: any) {
-                    // ユーザーが見つからない場合は存在しないとみなす
-                    const errorMessage = error?.message || String(error || '');
-                    const isNoRowsError = errorMessage.includes('no rows') || 
-                                          errorMessage.includes('Query returned no rows') ||
-                                          errorMessage.includes('PGRST116');
-                    userDoc = isNoRowsError ? {
-                      exists: () => false,
-                      data: () => undefined
-                    } : {
+                    userDoc = {
+                      exists: () => true,
+                      data: () => userData
+                    };
+                  } else {
+                    // ユーザーが見つからない場合
+                    userDoc = {
                       exists: () => false,
                       data: () => undefined
                     };
                   }
-                } else {
-                  // SQLite使用時はTauriコマンド経由で取得
-                  const userDocResult = await callTauriCommand('doc_get', {
-                    collectionName: 'users',
-                    docId: user.uid
-                  });
-                  userDoc = userDocResult && userDocResult.data ? {
-                    exists: () => true,
-                    data: () => userDocResult.data
+                } catch (error: any) {
+                  // ユーザーが見つからない場合は存在しないとみなす
+                  const errorMessage = error?.message || String(error || '');
+                  const isNoRowsError = errorMessage.includes('no rows') || 
+                                        errorMessage.includes('Query returned no rows') ||
+                                        errorMessage.includes('PGRST116');
+                  userDoc = isNoRowsError ? {
+                    exists: () => false,
+                    data: () => undefined
                   } : {
                     exists: () => false,
                     data: () => undefined
@@ -510,17 +495,9 @@ export default function Layout({ children }: LayoutProps) {
       }
 
       // Tauri環境でない場合（通常のWebブラウザ環境）
+      // Supabase専用（環境変数チェック不要）
       // Supabase使用時はFirebase設定チェックをスキップ
-      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-      if (!detectedTauri && !isElectron && !useSupabase) {
-        setFirebaseError('Firebaseが設定されていません。.env.localファイルにFirebase設定を追加してください。');
-        setLoading(false);
-        // 初回読み込み完了をマーク（エラー時も完了とみなす）
-        if (globalIsInitialLoad) {
-          globalIsInitialLoad = false;
-        }
-        return;
-      }
+      // 常にSupabaseを使用するため、Firebase設定チェックは不要
 
       // Electron環境の場合の処理（必要に応じて実装）
       // 現在はTauri環境のみをサポート

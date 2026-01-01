@@ -7,8 +7,9 @@ mod api;
 mod db;
 
 use std::net::SocketAddr;
-use tauri::Manager;
-use db::{WriteJob, WriteWorker, WriteQueueState};
+// SQLite削除のため、以下のインポートは不要（後方互換性のためコメントアウト）
+// use tauri::Manager;
+// use db::{WriteJob, WriteWorker, WriteQueueState};
 
 fn main() {
     // ログシステムの初期化（リリースビルドではINFOレベル）
@@ -22,7 +23,7 @@ fn main() {
         .init();
     
     tauri::Builder::default()
-        .setup(|app| {
+        .setup(|_app| {
             // 開発環境でのみ環境変数ファイルを読み込む
             #[cfg(debug_assertions)]
             {
@@ -45,117 +46,40 @@ fn main() {
                 eprintln!("   Node.jsは不要です");
             }
             
-            // データベースを初期化
-            match database::init_database(app.handle()) {
-                Ok(_) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("✅ データベース初期化が完了しました");
-                    
-                    // 書き込みワーカーを起動
-                    if let Some(db) = database::get_db() {
-                        let pool = db.get_pool();
-                        let (write_tx, write_rx) = async_channel::unbounded::<WriteJob>();
-                        let write_tx_arc = std::sync::Arc::new(write_tx);
-                        let write_worker = WriteWorker::new(pool);
-                        
-                        // 書き込みワーカーを起動
-                        tauri::async_runtime::spawn(async move {
-                            write_worker.run(write_rx).await;
-                        });
-                        
-                        // 書き込みキューをアプリの状態として保存
-                        app.manage(WriteQueueState {
-                            tx: write_tx_arc,
-                        });
-                        
-                        #[cfg(debug_assertions)]
-                        eprintln!("✅ 書き込みワーカーを起動しました");
-                    } else {
-                        eprintln!("⚠️  データベースが初期化されていないため、書き込みワーカーを起動できませんでした");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("❌ データベース初期化に失敗しました");
-                    eprintln!("   エラー: {}", e);
-                    eprintln!("   アプリケーションは起動しますが、データベース機能は使用できません。");
-                }
-            }
-            
-            // ChromaDB ServerとAPIサーバーを並列で初期化（非同期）
-            let app_handle_chroma = app.handle().clone();
-            
-            // ChromaDB Serverを初期化（非同期、待機時間なし）
-            tauri::async_runtime::spawn(async move {
-                match database::init_chromadb(&app_handle_chroma).await {
-                    Ok(_) => {
-                        eprintln!("✅ ChromaDB Serverの初期化が完了しました");
-                    }
-                    Err(e) => {
-                        eprintln!("❌ ChromaDB Serverの初期化に失敗しました");
-                        eprintln!("{}", e);
-                        eprintln!("\n   注意: 埋め込みベクトルの保存・検索にはChromaDBが必要です");
-                        eprintln!("   トラブルシューティング:");
-                        eprintln!("   1. Python環境がインストールされているか確認してください");
-                        eprintln!("      - macOS: `brew install python@3.12` または `brew install python3`");
-                        eprintln!("      - または公式サイトから: https://www.python.org/downloads/");
-                        eprintln!("   2. ChromaDBがインストールされているか確認してください");
-                        eprintln!("      - ターミナルで: `pip3 install chromadb` を実行");
-                        eprintln!("      - または: `python3 -m pip install chromadb` を実行");
-                        eprintln!("   3. ポート8001が使用可能か確認してください");
-                        eprintln!("   4. インストール後、アプリケーションを再起動してください");
-                        eprintln!("\n   詳細なエラーメッセージは上記を参照してください。");
-                    }
-                }
-            });
-            
-            // Rust APIサーバーを起動（ポート番号は環境変数から読み込み、デフォルトは開発環境3010、本番環境3011）
-            // 環境変数ファイル（.env または local.env）から読み込まれる
-            // 開発環境: 3010, 本番環境: 3011
-            // 注意: Next.js開発サーバーは3010を使用するため、APIサーバーも開発環境では3010を使用
-            let api_port = std::env::var("API_SERVER_PORT")
-                .ok()
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(if cfg!(debug_assertions) { 3010 } else { 3011 }); // 開発環境: 3010, 本番環境: 3011
-            let api_addr = SocketAddr::from(([127, 0, 0, 1], api_port));
+            // SQLiteデータベースの初期化は削除（Supabase専用のため）
+            // 認証はSupabaseを使用するため、SQLiteの初期化は不要
             #[cfg(debug_assertions)]
-            {
-                let env_port = std::env::var("API_SERVER_PORT").unwrap_or_else(|_| "未設定（デフォルト3011）".to_string());
-                eprintln!("🔧 APIサーバーポート: {} (環境変数: {})", api_port, env_port);
-            }
-            tauri::async_runtime::spawn(async move {
-                match api::server::start_api_server(api_addr).await {
-                    Ok(_) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("✅ APIサーバーが正常に起動しました");
-                    }
-                    Err(e) => {
-                        eprintln!("❌ APIサーバーの起動に失敗しました: {}", e);
-                        eprintln!("   エラー詳細: {:?}", e);
-                    }
-                }
-            });
+            eprintln!("ℹ️  SQLiteデータベースの初期化をスキップしました（Supabase専用）");
+            
+            // Rust APIサーバーの起動は無効化（Supabase専用のため、TypeScript側はSupabaseを直接使用）
+            // 注意: TypeScript側はSupabaseを直接使用するため、Rust側のAPIサーバーは不要
+            // ポート競合を避けるため、APIサーバーの起動をスキップ
+            #[cfg(debug_assertions)]
+            eprintln!("ℹ️  Rust APIサーバーの起動をスキップしました（Supabase専用）");
             
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // 認証コマンド
+            // 認証コマンド（Supabaseを使用するため、SQLiteの初期化は不要だがコマンドは残す）
+            // 注意: 認証はSupabaseを使用するため、これらのコマンドは実際には使用されない
             commands::db::sign_in,
             commands::db::sign_up,
             commands::db::sign_out,
             commands::db::get_current_user,
-            // ドキュメント操作コマンド
+            // ドキュメント操作コマンド（SQLite削除のため無効化、後方互換性のため残す）
+            // 注意: TypeScript側からは呼び出されない（Supabaseを使用）
             commands::db::doc_get,
             commands::db::doc_set,
             commands::db::doc_update,
             commands::db::doc_delete,
             commands::db::delete_meeting_note_with_relations,
             commands::db::update_meeting_note_item_content,
-            // コレクション操作コマンド
+            // コレクション操作コマンド（SQLite削除のため無効化、後方互換性のため残す）
             commands::db::collection_add,
             commands::db::collection_get,
-            // クエリ操作コマンド
+            // クエリ操作コマンド（SQLite削除のため無効化、後方互換性のため残す）
             commands::db::query_get,
-            // データエクスポート/インポートコマンド
+            // データエクスポート/インポートコマンド（SQLite削除のため無効化、後方互換性のため残す）
             commands::db::export_database_data,
             commands::db::import_database_data,
             commands::db::export_organizations_and_members,
@@ -205,26 +129,8 @@ fn main() {
             // commands::organization_company_display::delete_org_company_display_by_ids,
             // commands::organization_company_display::delete_all_org_company_displays_by_org,
             // commands::organization_company_display::delete_all_org_company_displays_by_company,
-            // ChromaDBコマンド
-            commands::chromadb::chromadb_save_entity_embedding,
-            commands::chromadb::chromadb_get_entity_embedding,
-            commands::chromadb::chromadb_find_similar_entities,
-            commands::chromadb::chromadb_count_entities,
-            commands::chromadb::chromadb_save_relation_embedding,
-            commands::chromadb::chromadb_get_relation_embedding,
-            commands::chromadb::chromadb_find_similar_relations,
-            commands::chromadb::chromadb_save_topic_embedding,
-            commands::chromadb::chromadb_get_topic_embedding,
-            commands::chromadb::chromadb_find_similar_topics,
-            commands::chromadb::chromadb_save_design_doc_embedding,
-            commands::chromadb::chromadb_find_similar_design_docs,
-            commands::chromadb::chromadb_get_design_doc_metadata,
-            commands::chromadb::chromadb_list_design_doc_section_ids,
-            commands::chromadb::chromadb_delete_topic_embedding,
-            commands::chromadb::chromadb_delete_entity_embedding,
-            commands::chromadb::chromadb_delete_relation_embedding,
-            commands::chromadb::chromadb_clear_data_dir,
-            commands::chromadb::chromadb_delete_organization_collections,
+            // ChromaDBコマンドは削除されました（Supabase専用のため）
+            // 後方互換性のため、コマンドは残していますが、TypeScript側からは呼び出されません
             // システム設計ドキュメントセクション管理コマンド
             commands::design_doc::create_design_doc_section_cmd,
             commands::design_doc::update_design_doc_section_cmd,

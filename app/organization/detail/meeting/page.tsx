@@ -16,7 +16,7 @@ import type { Relation, RelationType } from '@/types/relation';
 import { getRelationsByTopicId, createRelation, deleteRelation } from '@/lib/relationApi';
 import { createEntity, getEntitiesByOrganizationId, getEntitiesByCompanyId, deleteEntity } from '@/lib/entityApi';
 import { callTauriCommand } from '@/lib/localFirebase';
-import { deleteTopicFromChroma } from '@/lib/chromaSync';
+// Supabaseに移行済みのため、ChromaDB削除は不要
 import { EditIcon, AIIcon, DeleteIcon } from './components/Icons';
 import { devLog, devWarn, markdownComponents } from './utils';
 import type { TabType, MonthTab, SummaryTab, MonthContent, MeetingNoteData } from './types';
@@ -1429,19 +1429,17 @@ function MeetingNoteDetailPageContent() {
               });
             }
             
-            // topicsレコードを作成または確認
+            // topicsレコードを作成または確認（Supabase専用）
             const topicEmbeddingId = `${meetingId}-topic-${topicId}`;
             try {
-              const topicEmbeddingResult = await callTauriCommand('doc_get', {
-                collectionName: 'topics',
-                docId: topicEmbeddingId,
-              });
+              const { getDocViaDataSource, setDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+              const topicEmbeddingResult = await getDocViaDataSource('topics', topicEmbeddingId);
               
-              if (!topicEmbeddingResult || !topicEmbeddingResult.exists || !topicEmbeddingResult.data) {
+              if (!topicEmbeddingResult) {
                 // レコードが存在しない場合は作成
                 const now = new Date().toISOString();
-                await callTauriCommand('doc_set', {
-                  collectionName: 'topics',
+                await setDocViaDataSource('topics', topicEmbeddingId, {
+                  id: topicEmbeddingId,
                   docId: topicEmbeddingId,
                   data: {
                     id: topicEmbeddingId,
@@ -1463,22 +1461,19 @@ function MeetingNoteDetailPageContent() {
                                     errorMessage.includes('ドキュメント取得エラー');
               
               if (isNoRowsError) {
-                // レコードが存在しない場合は作成
+                // レコードが存在しない場合は作成（Supabase専用）
                 const now = new Date().toISOString();
                 try {
-                  await callTauriCommand('doc_set', {
-                    collectionName: 'topics',
-                    docId: topicEmbeddingId,
-                    data: {
-                      id: topicEmbeddingId,
-                      topicId: topicId,
-                      meetingNoteId: meetingId,
-                      organizationId: organizationId,
-                      title: topic.title || '',
-                      content: topic.content || '',
-                      createdAt: now,
-                      updatedAt: now,
-                    },
+                  const { setDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+                  await setDocViaDataSource('topics', topicEmbeddingId, {
+                    id: topicEmbeddingId,
+                    topicId: topicId,
+                    meetingNoteId: meetingId,
+                    organizationId: organizationId,
+                    title: topic.title || '',
+                    content: topic.content || '',
+                    createdAt: now,
+                    updatedAt: now,
                   });
                   devLog('✅ topicsレコードを作成しました:', topicEmbeddingId);
                 } catch (createError: any) {

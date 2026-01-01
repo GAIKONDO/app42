@@ -5,9 +5,7 @@
 import { getEntitiesByIds, getAllEntities } from './entityApi';
 import { getRelationsByIds, getAllRelations } from './relationApi';
 import { getTopicsByIds } from './topicApi';
-import { getEntityEmbeddingFromChroma } from './entityEmbeddingsChroma';
-import { getRelationEmbeddingFromChroma } from './relationEmbeddingsChroma';
-import { getTopicEmbeddingFromChroma } from './topicEmbeddingsChroma';
+// Supabaseに移行済みのため、ChromaDBからの取得は不要
 import { saveEntityEmbeddingAsync } from './entityEmbeddings';
 import { saveRelationEmbeddingAsync } from './relationEmbeddings';
 import { saveTopicEmbedding } from './topicEmbeddings';
@@ -134,23 +132,24 @@ export async function compareEntityEmbeddings(
         console.log(`[compareEntityEmbeddings] 進捗: ${checkedCount}/${supabaseEntityIds.size}件を確認中...`);
       }
       
+      // Supabaseに移行済みのため、ChromaDB確認は不要
+      // Supabaseから直接確認
       try {
-        const embedding = await getEntityEmbeddingFromChroma(entityId, organizationId);
-        if (embedding && embedding.combinedEmbedding && Array.isArray(embedding.combinedEmbedding) && embedding.combinedEmbedding.length > 0) {
+        const { getSupabaseClient } = await import('./utils/supabaseClient');
+        const supabase = getSupabaseClient();
+        const { data: existing } = await supabase
+          .from('entity_embeddings')
+          .select('id')
+          .eq('id', entityId)
+          .single();
+        
+        if (existing && existing.id) {
           chromaEntityIds.add(entityId);
         } else {
           missingInChromaDB.push(entityId);
         }
       } catch (error: any) {
         // エラーは埋め込みが存在しないとみなす
-        // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合はエラーをログに出力しない
-        const errorMessage = error?.message || String(error || '');
-        if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-            !errorMessage.includes('no such table') &&
-            !errorMessage.includes('Database error')) {
-          // 予期しないエラーのみログに出力
-          console.debug(`[compareEntityEmbeddings] エンティティ ${entityId} のChromaDB確認エラー:`, error);
-        }
         missingInChromaDB.push(entityId);
       }
     }
@@ -238,23 +237,24 @@ export async function compareRelationEmbeddings(
         console.log(`[compareRelationEmbeddings] 進捗: ${checkedCount}/${supabaseRelationIds.size}件を確認中...`);
       }
       
+      // Supabaseに移行済みのため、ChromaDB確認は不要
+      // Supabaseから直接確認
       try {
-        const embedding = await getRelationEmbeddingFromChroma(relationId, organizationId);
-        if (embedding && embedding.combinedEmbedding && Array.isArray(embedding.combinedEmbedding) && embedding.combinedEmbedding.length > 0) {
+        const { getSupabaseClient } = await import('./utils/supabaseClient');
+        const supabase = getSupabaseClient();
+        const { data: existing } = await supabase
+          .from('relation_embeddings')
+          .select('id')
+          .eq('id', relationId)
+          .single();
+        
+        if (existing && existing.id) {
           chromaRelationIds.add(relationId);
         } else {
           missingInChromaDB.push(relationId);
         }
       } catch (error: any) {
         // エラーは埋め込みが存在しないとみなす
-        // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合はエラーをログに出力しない
-        const errorMessage = error?.message || String(error || '');
-        if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-            !errorMessage.includes('no such table') &&
-            !errorMessage.includes('Database error')) {
-          // 予期しないエラーのみログに出力
-          console.debug(`[compareRelationEmbeddings] リレーション ${relationId} のChromaDB確認エラー:`, error);
-        }
         missingInChromaDB.push(relationId);
       }
     }
@@ -355,28 +355,31 @@ export async function compareTopicEmbeddings(
         console.log(`[compareTopicEmbeddings] 進捗: ${checkedCount}/${supabaseTopicMap.size}件を確認中...`);
       }
       
+      // Supabaseに移行済みのため、ChromaDB確認は不要
+      // Supabaseから直接確認
       try {
-        // トピック埋め込みの取得は、topicIdとorganizationIdのみで可能
-        // meetingNoteIdとregulationIdはメタデータから取得される
-        const embedding = await getTopicEmbeddingFromChroma(
-          topicInfo.topicId,
-          organizationId
-        );
-        if (embedding && embedding.combinedEmbedding && Array.isArray(embedding.combinedEmbedding) && embedding.combinedEmbedding.length > 0) {
+        const { getSupabaseClient } = await import('./utils/supabaseClient');
+        const supabase = getSupabaseClient();
+        // topic_embeddingsテーブルのidは {meetingNoteId}-topic-{topicId} または {regulationId}-topic-{topicId} 形式
+        const embeddingId = topicInfo.meetingNoteId 
+          ? `${topicInfo.meetingNoteId}-topic-${topicInfo.topicId}`
+          : topicInfo.regulationId
+          ? `${topicInfo.regulationId}-topic-${topicInfo.topicId}`
+          : `-topic-${topicInfo.topicId}`;
+        
+        const { data: existing } = await supabase
+          .from('topic_embeddings')
+          .select('id')
+          .eq('id', embeddingId)
+          .single();
+        
+        if (existing && existing.id) {
           chromaTopicMap.set(key, topicInfo);
         } else {
           missingInChromaDB.push(topicInfo);
         }
       } catch (error: any) {
         // エラーは埋め込みが存在しないとみなす
-        // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合はエラーをログに出力しない
-        const errorMessage = error?.message || String(error || '');
-        if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-            !errorMessage.includes('no such table') &&
-            !errorMessage.includes('Database error')) {
-          // 予期しないエラーのみログに出力
-          console.debug(`[compareTopicEmbeddings] トピック ${topicInfo.topicId} のChromaDB確認エラー:`, error);
-        }
         missingInChromaDB.push(topicInfo);
       }
     }

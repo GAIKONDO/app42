@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { callTauriCommand } from '@/lib/localFirebase';
+// callTauriCommandは削除（Supabase専用）
 import { PageMetadata } from '@/types/pageMetadata';
 import { SUB_MENU_ITEMS } from './ConceptSubMenu';
 
@@ -182,18 +182,15 @@ export default function ConceptForm({ concept, serviceId, onSave, onCancel }: Co
         data.customSubMenuLabels = customSubMenuLabels;
       }
 
+      // Supabase専用（環境変数チェック不要）
+      const { updateDocViaDataSource, setDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+      
       if (concept?.id) {
         // 編集時: 既存のpagesBySubMenuとpageOrderBySubMenuを維持
         // （これらのフィールドは編集フォームでは変更できないため、既存の値を維持）
         try {
-          const result = await callTauriCommand('doc_update', {
-            collectionName: 'concepts',
-            docId: concept.id,
-            data
-          });
-          if (!result || !result.id) {
-            throw new Error('更新に失敗しました。結果が返されませんでした。');
-          }
+          await updateDocViaDataSource('concepts', concept.id, data);
+          console.log('構想更新成功:', concept.id);
         } catch (updateError: any) {
           console.error('更新エラー:', updateError);
           const errorMessage = updateError?.message || '構想の更新に失敗しました';
@@ -204,14 +201,9 @@ export default function ConceptForm({ concept, serviceId, onSave, onCancel }: Co
         // 新規作成時: 固定ページ形式で作成（pagesBySubMenuを設定しない）
         // pagesBySubMenuが存在しない構想は固定ページ形式として扱われる
         try {
-          const result = await callTauriCommand('collection_add', {
-            collectionName: 'concepts',
-            data
-          });
-          if (!result || !result.id) {
-            throw new Error('作成に失敗しました。結果が返されませんでした。');
-          }
-          console.log('構想作成成功:', result.id);
+          const newId = data.id || `concept-${Date.now()}`;
+          await setDocViaDataSource('concepts', newId, { ...data, id: newId });
+          console.log('構想作成成功:', newId);
         } catch (createError: any) {
           console.error('作成エラー:', createError);
           const errorMessage = createError?.message || '構想の作成に失敗しました';

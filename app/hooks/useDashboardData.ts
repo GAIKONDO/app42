@@ -49,10 +49,9 @@ export function useDashboardData({
       }
       setError(null);
 
-      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
       devLog('📖 [ダッシュボード] データ読み込み開始', { 
         selectedTypeFilter,
-        useSupabase: useSupabase ? 'Supabase' : 'SQLite',
+        dataSource: 'Supabase',
         skipLoading,
       });
 

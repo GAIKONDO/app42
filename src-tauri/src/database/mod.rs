@@ -2382,10 +2382,11 @@ pub async fn init_chromadb(app: &AppHandle) -> Result<(), String> {
 pub fn get_db() -> Option<&'static Database> {
     unsafe {
         let db_ref = DB.as_ref();
-        if db_ref.is_none() {
-            #[cfg(debug_assertions)]
-            eprintln!("⚠️ get_db() called but database is not initialized");
-        }
+        // SQLite削除のため、警告を削除（Supabase専用のため、get_db()は使用されない）
+        // if db_ref.is_none() {
+        //     #[cfg(debug_assertions)]
+        //     eprintln!("⚠️ get_db() called but database is not initialized");
+        // }
         db_ref
     }
 }

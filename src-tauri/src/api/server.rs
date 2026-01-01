@@ -3,16 +3,14 @@ use std::net::SocketAddr;
 use tower_http::cors::{CorsLayer, Any};
 use tower::ServiceBuilder;
 
-use crate::database::get_db;
+// SQLite削除のため、get_dbのインポートは不要（Supabase専用）
+// use crate::database::get_db;
 
 pub async fn start_api_server(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("🚀 APIサーバーを起動中: http://{}", addr);
     
-    // データベース接続の確認
-    if get_db().is_none() {
-        eprintln!("❌ データベースが初期化されていません");
-        return Err("Database not initialized".into());
-    }
+    // SQLiteデータベースの初期化チェックは削除（Supabase専用のため）
+    // 注意: APIサーバーはSupabaseを使用するため、SQLiteの初期化は不要
     
     // CORS設定（プリフライトリクエストを適切に処理）
     let cors = CorsLayer::new()

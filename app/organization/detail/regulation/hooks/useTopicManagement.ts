@@ -5,7 +5,7 @@ import type { TabType, MonthContent, RegulationData } from '../types';
 import type { Topic, TopicSemanticCategory, TopicImportance } from '@/types/topicMetadata';
 import { getRelationsByTopicId, deleteRelation } from '@/lib/relationApi';
 import { callTauriCommand } from '@/lib/localFirebase';
-import { deleteTopicFromChroma } from '@/lib/chromaSync';
+// Supabaseに移行済みのため、ChromaDB削除は不要
 import { getAvailableOllamaModels } from '@/lib/pageGeneration';
 import { devLog, devWarn } from '../utils';
 
@@ -195,18 +195,7 @@ export function useTopicManagement({
           devWarn('⚠️ [confirmDeleteTopic] トピック削除エラー（続行します）:', error);
         }
         
-        // 3. ChromaDBからも削除（非同期、エラーは無視）
-        // organizationIdが存在する場合のみ実行（事業会社の場合はスキップ）
-        if (organizationId) {
-          try {
-            await deleteTopicFromChroma(topicId, regulationId, organizationId);
-            devLog(`✅ [confirmDeleteTopic] ChromaDBトピックエンベディング削除: ${topicId}`);
-          } catch (error: any) {
-            devWarn('⚠️ [confirmDeleteTopic] ChromaDBトピックエンベディング削除エラー（続行します）:', error);
-          }
-        } else {
-          devLog('⚠️ [confirmDeleteTopic] organizationIdが存在しないため、ChromaDB削除をスキップ');
-        }
+        // Supabaseに移行済みのため、ChromaDB削除は不要
         
         // 4. 制度を保存（最後に実行）
         const contentJson = JSON.stringify(updated, null, 2);

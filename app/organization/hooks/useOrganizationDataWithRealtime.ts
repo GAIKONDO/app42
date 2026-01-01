@@ -31,7 +31,7 @@ export function useOrganizationDataWithRealtime() {
   useOrganizationRealtimeSync({
     orgData: organizationData.orgData,
     setOrgData: organizationData.setOrgData,
-    enabled: process.env.NEXT_PUBLIC_USE_SUPABASE === 'true',
+    enabled: true, // Supabase専用
   });
 
   return organizationData;

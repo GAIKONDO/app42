@@ -1,5 +1,5 @@
 import { cleanupMissingTopicIds } from '@/lib/dataIntegrityCleanup';
-import { repairEntitySyncStatus, repairRelationSyncStatus, repairTopicSyncStatus } from '@/lib/chromaSyncRepair';
+// Supabaseに移行済みのため、ChromaDB同期状態修復は不要
 
 interface ConfirmDialogsProps {
   showCleanupConfirm: boolean;
@@ -185,9 +185,8 @@ export default function ConfirmDialogs({
                     
                     console.log('🔧 [同期状態修復] エンティティ修復開始...', { organizationId: selectedOrgId });
                     
-                    const result = await repairEntitySyncStatus(selectedOrgId);
-                    
-                    alert(`✅ エンティティ同期状態修復が完了しました。\n\n修復したエンティティ: ${result.repaired}件\nエラー: ${result.errors.length}件`);
+                    // Supabaseに移行済みのため、ChromaDB同期状態修復は不要
+                    alert(`ℹ️ Supabaseに移行済みのため、ChromaDB同期状態修復は不要です。`);
                     
                     console.log('✅ [同期状態修復] エンティティ修復完了:', result);
                     
@@ -281,9 +280,8 @@ export default function ConfirmDialogs({
                     
                     console.log('🔧 [同期状態修復] リレーション修復開始...', { organizationId: selectedOrgId });
                     
-                    const result = await repairRelationSyncStatus(selectedOrgId);
-                    
-                    alert(`✅ リレーション同期状態修復が完了しました。\n\n修復したリレーション: ${result.repaired}件\nエラー: ${result.errors.length}件`);
+                    // Supabaseに移行済みのため、ChromaDB同期状態修復は不要
+                    alert(`ℹ️ Supabaseに移行済みのため、ChromaDB同期状態修復は不要です。`);
                     
                     console.log('✅ [同期状態修復] リレーション修復完了:', result);
                     
@@ -377,9 +375,8 @@ export default function ConfirmDialogs({
                     
                     console.log('🔧 [同期状態修復] トピック修復開始...', { organizationId: selectedOrgId });
                     
-                    const result = await repairTopicSyncStatus(selectedOrgId);
-                    
-                    alert(`✅ トピック同期状態修復が完了しました。\n\n修復したトピック: ${result.repaired}件\nエラー: ${result.errors.length}件`);
+                    // Supabaseに移行済みのため、ChromaDB同期状態修復は不要
+                    alert(`ℹ️ Supabaseに移行済みのため、ChromaDB同期状態修復は不要です。`);
                     
                     console.log('✅ [同期状態修復] トピック修復完了:', result);
                     

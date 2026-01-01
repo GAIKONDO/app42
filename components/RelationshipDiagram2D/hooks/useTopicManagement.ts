@@ -7,7 +7,7 @@ import { generateTopicMetadata, extractEntities, extractRelations } from '@/lib/
 import { getMeetingNoteById, saveMeetingNote } from '@/lib/orgApi';
 import { getRelationsByTopicId, createRelation, updateRelation } from '@/lib/relationApi';
 import { getEntityById, createEntity, getEntitiesByOrganizationId, getEntitiesByCompanyId } from '@/lib/entityApi';
-import { callTauriCommand } from '@/lib/localFirebase';
+// callTauriCommandは削除（Supabase専用）
 import { saveTopicEmbeddingAsync } from '@/lib/topicEmbeddings';
 
 interface UseTopicManagementProps {
@@ -63,22 +63,19 @@ export function useTopicManagement({
   metadataMode,
   onTopicMetadataSaved,
 }: UseTopicManagementProps) {
-  // topicsレコード作成のヘルパー関数
+  // topicsレコード作成のヘルパー関数（Supabase専用）
   const createTopicEmbeddingRecord = useCallback(async (id: string, topic: TopicInfo) => {
     const now = new Date().toISOString();
-    await callTauriCommand('doc_set', {
-      collectionName: 'topics',
-      docId: id,
-      data: {
-        id: id,
-        topicId: topic.id,
-        meetingNoteId: topic.meetingNoteId,
-        organizationId: topic.organizationId,
-        title: topic.title || '',
-        content: topic.content || '',
-        createdAt: now,
-        updatedAt: now,
-      },
+    const { setDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+    await setDocViaDataSource('topics', id, {
+      id: id,
+      topicId: topic.id,
+      meetingNoteId: topic.meetingNoteId,
+      organizationId: topic.organizationId,
+      title: topic.title || '',
+      content: topic.content || '',
+      createdAt: now,
+      updatedAt: now,
     });
     console.log('✅ topicsレコードを作成しました:', id);
   }, []);
@@ -375,25 +372,16 @@ export function useTopicManagement({
       // topicsレコードが存在するか確認（存在しない場合は作成）
       let topicEmbeddingRecordId = topicEmbeddingId;
       try {
-        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+        // Supabase専用（環境変数チェック不要）
         let topicEmbeddingResult: any = null;
         
-        if (useSupabase) {
-          // Supabase経由で取得
-          const { getDocViaDataSource } = await import('@/lib/dataSourceAdapter');
-          const topicData = await getDocViaDataSource('topics', topicEmbeddingId);
-          if (topicData) {
-            topicEmbeddingResult = { exists: true, data: topicData };
-          } else {
-            topicEmbeddingResult = { exists: false, data: null };
-          }
+        // Supabase経由で取得
+        const { getDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+        const topicData = await getDocViaDataSource('topics', topicEmbeddingId);
+        if (topicData) {
+          topicEmbeddingResult = { exists: true, data: topicData };
         } else {
-          // SQLite経由で取得
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          topicEmbeddingResult = await callTauriCommand('doc_get', {
-            collectionName: 'topics',
-            docId: topicEmbeddingId,
-          });
+          topicEmbeddingResult = { exists: false, data: null };
         }
         
         // doc_getの結果を確認（{exists: bool, data: HashMap}形式）

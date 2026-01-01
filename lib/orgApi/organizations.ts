@@ -102,10 +102,8 @@ function convertToOrgNodeData(dbOrg: any): OrgNodeData {
  * Supabase対応版（最適化済み）
  */
 export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | null> {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  
-  // Supabase使用時はDataSource経由で取得（最適化）
-  if (useSupabase) {
+  // Supabase専用（環境変数チェック不要）
+  try {
     try {
       console.log('🔍 [getOrgTreeFromDb] Supabase経由で組織ツリーを取得します');
       const { getDataSourceInstance } = await import('../dataSource');
@@ -240,63 +238,11 @@ export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | n
     } catch (error) {
       // Supabase使用時はSQLiteにフォールバックしない
       console.error('❌ [getOrgTreeFromDb] Supabase経由の組織データ取得に失敗:', error);
-      return null;
+      throw error;
     }
-  }
-  
-  // ローカルSQLite使用時はTauriコマンド経由
-  try {
-    // Tauriコマンド経由で直接取得（APIサーバー経由ではなく）
-    console.log('🔍 [getOrgTreeFromDb] Tauriコマンド経由で組織ツリーを取得します');
-    const tree = await callTauriCommand('get_org_tree', { rootId: rootId || null });
-    
-    if (!tree || tree.length === 0) {
-      return null;
-    }
-
-    // rootIdが指定されている場合は、該当する組織を返す
-    if (rootId) {
-      const found = tree.find((org: any) => {
-        const orgData = org.organization || org;
-        return orgData.id === rootId;
-      });
-      if (found) {
-        return convertToOrgNodeData(found);
-      }
-      // 見つからない場合は最初の1つを返す
-      return convertToOrgNodeData(tree[0]);
-    }
-
-    // 複数のルート組織がある場合、全てを子ノードとして持つ仮想的なルートノードを作成
-    if (tree.length > 1) {
-      console.log(`⚠️ [getOrgTreeFromDb] 複数のルート組織が見つかりました (${tree.length}件)。全て表示します。`);
-      const convertedRoots = tree.map((org: any) => convertToOrgNodeData(org));
-      
-      // 仮想的なルートノードを作成（重複を識別しやすくするため）
-      const virtualRoot: OrgNodeData = {
-        id: 'virtual-root',
-        name: `全組織 (${tree.length}件のルート組織)`,
-        title: `All Organizations (${tree.length} root organizations)`,
-        description: '複数のルート組織が存在します。重複している可能性があります。',
-        children: convertedRoots,
-        members: [],
-      };
-      
-      // 重複している組織名をログに出力
-      const orgNames = convertedRoots.map((org: OrgNodeData) => org.name);
-      const duplicateNames = orgNames.filter((name: string, index: number) => orgNames.indexOf(name) !== index);
-      if (duplicateNames.length > 0) {
-        console.warn(`⚠️ [getOrgTreeFromDb] 重複している組織名:`, [...new Set(duplicateNames)]);
-      }
-      
-      return virtualRoot;
-    }
-
-    // 1つだけの場合はそのまま返す
-    return convertToOrgNodeData(tree[0]);
-  } catch (error) {
-    console.error('組織データの取得に失敗しました:', error);
-    return null;
+  } catch (error: any) {
+    console.error('❌ [getOrgTreeFromDb] エラー:', error);
+    throw error;
   }
 }
 
@@ -364,8 +310,8 @@ export async function createOrg(
   position: number,
   orgType?: string
 ): Promise<any> {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  console.log(`🔍 [createOrg] 組織を作成開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, {
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔍 [createOrg] 組織を作成開始（Supabase経由）:', {
     parentId,
     name,
     level,
@@ -374,9 +320,8 @@ export async function createOrg(
     orgType: orgType || 'organization',
   });
   
-  // Supabase使用時はSupabaseDataSource経由で作成
-  if (useSupabase) {
-    try {
+  // Supabase専用（環境変数チェック不要）
+  try {
       const { getDataSourceInstance } = await import('../dataSource');
       const dataSource = getDataSourceInstance();
       
@@ -479,38 +424,6 @@ export async function createOrg(
       console.error('❌ [createOrg] Supabase経由の作成に失敗:', error);
       throw error;
     }
-  }
-  
-  // ローカルSQLite使用時は従来の方法
-  try {
-    // Rust API経由で作成
-    const payload: any = {
-      parent_id: parentId,
-      name,
-      title: title || null,
-      description: description || null,
-      level,
-      level_name: levelName,
-      position,
-    };
-    if (orgType) {
-      payload.type = orgType;
-    }
-    return await apiPost<any>('/api/organizations', payload);
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の作成に失敗、Tauriコマンドにフォールバック:', error);
-    return callTauriCommand('create_org', {
-      parentId: parentId,
-      name,
-      title,
-      description,
-      level,
-      levelName,
-      position,
-      orgType: orgType || null,
-    });
-  }
 }
 
 /**
@@ -523,8 +436,8 @@ export async function updateOrg(
   description?: string,
   position?: number
 ): Promise<any> {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  console.log(`🔄 [updateOrg] 組織を更新開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, {
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔄 [updateOrg] 組織を更新開始（Supabase経由）:', {
     id,
     name,
     title,
@@ -532,137 +445,113 @@ export async function updateOrg(
     position,
   });
   
-  // Supabase使用時はSupabaseDataSource経由で更新
-  if (useSupabase) {
+  try {
+    const { getDataSourceInstance } = await import('../dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // 既存の組織データを取得（エラーが発生しても更新を試みる）
+    let existingOrg: any = null;
     try {
-      const { getDataSourceInstance } = await import('../dataSource');
-      const dataSource = getDataSourceInstance();
-      
-      // 既存の組織データを取得（エラーが発生しても更新を試みる）
-      let existingOrg: any = null;
+      existingOrg = await dataSource.doc_get('organizations', id);
+      if (existingOrg) {
+        console.log('📖 [updateOrg] 既存の組織データを取得:', existingOrg);
+      }
+    } catch (getError: any) {
+      const errorMessage = getError?.message || '';
+      // レコードが見つからないエラーの場合は警告のみ（更新を試みる）
+      if (errorMessage.includes('Query returned no rows') || 
+          errorMessage.includes('ドキュメント取得エラー') ||
+          getError?.code === 'PGRST116') {
+        console.warn(`⚠️ [updateOrg] 既存の組織データを取得できませんでしたが、更新を試みます: ${id}`);
+      } else {
+        // その他のエラーの場合は警告のみ（更新を試みる）
+        console.warn(`⚠️ [updateOrg] 既存の組織データの取得でエラーが発生しましたが、更新を試みます:`, getError);
+      }
+    }
+    
+    // 更新データを準備
+    const now = new Date().toISOString();
+    const updateData: any = {
+      id,
+      updatedAt: now,
+    };
+    
+    // 既存データがある場合はマージ、ない場合は新規作成として扱う
+    if (existingOrg) {
+      // 既存データを保持しつつ、指定されたフィールドのみ更新
+      Object.assign(updateData, existingOrg, { updatedAt: now });
+    } else {
+      // 既存データがない場合は、最低限のデータを設定
+      updateData.createdAt = now;
+    }
+    
+    // 指定されたフィールドのみ更新
+    if (name !== undefined) {
+      updateData.name = name;
+    }
+    if (title !== undefined) {
+      updateData.title = title;
+    }
+    if (description !== undefined) {
+      updateData.description = description;
+    }
+    if (position !== undefined) {
+      updateData.position = position;
+    }
+    
+    console.log('💾 [updateOrg] Supabaseに更新するデータ:', updateData);
+    
+    // SupabaseDataSource経由で更新（doc_setを使用して、存在しない場合は作成、存在する場合は更新）
+    try {
+      await dataSource.doc_set('organizations', id, updateData);
+      console.log('✅ [updateOrg] Supabase経由で組織を更新/作成成功:', id);
+    } catch (updateError: any) {
+      const updateErrorMessage = updateError?.message || '';
+      // レコードが見つからないエラーの場合は、doc_setで再試行（新規作成として扱う）
+      if (updateErrorMessage.includes('Query returned no rows') || 
+          updateErrorMessage.includes('No rows found') ||
+          updateError?.code === 'PGRST116') {
+        console.log('ℹ️ [updateOrg] 組織が見つからないため、新規作成として処理します:', id);
+        await dataSource.doc_set('organizations', id, updateData);
+      } else {
+        throw updateError;
+      }
+    }
+    
+    console.log('✅ [updateOrg] Supabase経由で組織を更新成功:', id);
+    
+    // 更新後の組織データを取得して返す
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    let updatedOrg: any = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries && !updatedOrg) {
       try {
-        existingOrg = await dataSource.doc_get('organizations', id);
-        if (existingOrg) {
-          console.log('📖 [updateOrg] 既存の組織データを取得:', existingOrg);
+        updatedOrg = await dataSource.doc_get('organizations', id);
+        if (updatedOrg) {
+          break;
         }
       } catch (getError: any) {
-        const errorMessage = getError?.message || '';
-        // レコードが見つからないエラーの場合は警告のみ（更新を試みる）
-        if (errorMessage.includes('Query returned no rows') || 
-            errorMessage.includes('ドキュメント取得エラー') ||
-            getError?.code === 'PGRST116') {
-          console.warn(`⚠️ [updateOrg] 既存の組織データを取得できませんでしたが、更新を試みます: ${id}`);
-        } else {
-          // その他のエラーの場合は警告のみ（更新を試みる）
-          console.warn(`⚠️ [updateOrg] 既存の組織データの取得でエラーが発生しましたが、更新を試みます:`, getError);
+        console.warn(`⚠️ [updateOrg] 更新後の組織取得に失敗（再試行 ${retryCount + 1}/${maxRetries}）:`, getError);
+        if (retryCount < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
-      
-      // 更新データを準備
-      const now = new Date().toISOString();
-      const updateData: any = {
-        id,
-        updatedAt: now,
-      };
-      
-      // 既存データがある場合はマージ、ない場合は新規作成として扱う
-      if (existingOrg) {
-        // 既存データを保持しつつ、指定されたフィールドのみ更新
-        Object.assign(updateData, existingOrg, { updatedAt: now });
-      } else {
-        // 既存データがない場合は、最低限のデータを設定
-        updateData.createdAt = now;
-      }
-      
-      // 指定されたフィールドのみ更新
-      if (name !== undefined) {
-        updateData.name = name;
-      }
-      if (title !== undefined) {
-        updateData.title = title;
-      }
-      if (description !== undefined) {
-        updateData.description = description;
-      }
-      if (position !== undefined) {
-        updateData.position = position;
-      }
-      
-      console.log('💾 [updateOrg] Supabaseに更新するデータ:', updateData);
-      
-      // SupabaseDataSource経由で更新（doc_setを使用して、存在しない場合は作成、存在する場合は更新）
-      try {
-        await dataSource.doc_set('organizations', id, updateData);
-        console.log('✅ [updateOrg] Supabase経由で組織を更新/作成成功:', id);
-      } catch (updateError: any) {
-        const updateErrorMessage = updateError?.message || '';
-        // レコードが見つからないエラーの場合は、doc_setで再試行（新規作成として扱う）
-        if (updateErrorMessage.includes('Query returned no rows') || 
-            updateErrorMessage.includes('No rows found') ||
-            updateError?.code === 'PGRST116') {
-          console.log('ℹ️ [updateOrg] 組織が見つからないため、新規作成として処理します:', id);
-          await dataSource.doc_set('organizations', id, updateData);
-        } else {
-          throw updateError;
-        }
-      }
-      
-      console.log('✅ [updateOrg] Supabase経由で組織を更新成功:', id);
-      
-      // 更新後の組織データを取得して返す
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      let updatedOrg: any = null;
-      let retryCount = 0;
-      const maxRetries = 3;
-      
-      while (retryCount < maxRetries && !updatedOrg) {
-        try {
-          updatedOrg = await dataSource.doc_get('organizations', id);
-          if (updatedOrg) {
-            break;
-          }
-        } catch (getError: any) {
-          console.warn(`⚠️ [updateOrg] 更新後の組織取得に失敗（再試行 ${retryCount + 1}/${maxRetries}）:`, getError);
-          if (retryCount < maxRetries - 1) {
-            await new Promise(resolve => setTimeout(resolve, 300));
-          }
-        }
-        retryCount++;
-      }
-      
-      if (!updatedOrg) {
-        // 取得に失敗した場合でも、更新データを返す
-        console.warn('⚠️ [updateOrg] 更新後の組織取得に失敗しましたが、更新データを返します:', id);
-        return updateData;
-      }
-      
-      return updatedOrg;
-    } catch (error: any) {
-      console.error('❌ [updateOrg] Supabase経由の更新に失敗:', error);
-      throw error;
+      retryCount++;
     }
-  }
-  
-  // ローカルSQLite使用時は従来の方法
-  try {
-    // Rust API経由で更新
-    return await apiPut<any>(`/api/organizations/${id}`, {
-      name: name || null,
-      title: title || null,
-      description: description || null,
-      position: position || null,
-    });
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の更新に失敗、Tauriコマンドにフォールバック:', error);
-    return callTauriCommand('update_org', {
-      id,
-      name: name || null,
-      title: title || null,
-      description: description || null,
-      position: position || null,
-    });
+    
+    if (!updatedOrg) {
+      // 取得に失敗した場合でも、更新データを返す
+      console.warn('⚠️ [updateOrg] 更新後の組織取得に失敗しましたが、更新データを返します:', id);
+      return updateData;
+    }
+    
+    return updatedOrg;
+  } catch (error: any) {
+    console.error('❌ [updateOrg] Supabase経由の更新に失敗:', error);
+    throw error;
   }
 }
 
@@ -702,12 +591,10 @@ export async function getDeletionTargets(organizationId: string): Promise<{
   childOrganizations: Array<{ id: string; name: string; title?: string; level: number; levelName: string; type?: string }>;
   members: Array<{ id: string; name: string; position?: string; organizationId: string }>;
 }> {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  console.log(`🔍 [getDeletionTargets] 削除対象を取得開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, organizationId);
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔍 [getDeletionTargets] 削除対象を取得開始（Supabase経由）:', organizationId);
   
-  // Supabase使用時はDataSource経由で取得
-  if (useSupabase) {
-    try {
+  try {
       const { getDataSourceInstance } = await import('../dataSource');
       const dataSource = getDataSourceInstance();
       
@@ -840,23 +727,8 @@ export async function getDeletionTargets(organizationId: string): Promise<{
         childOrganizations,
         members,
       };
-    } catch (error: any) {
-      console.error('❌ [getDeletionTargets] Supabase経由での取得に失敗しました:', error);
-      throw new Error(`削除対象の取得に失敗しました: ${error.message || error}`);
-    }
-  }
-  
-  // ローカルSQLite使用時はTauriコマンド経由
-  try {
-    const result = await callTauriCommand('get_deletion_targets_cmd', {
-      organizationId,
-    }) as {
-      childOrganizations: Array<{ id: string; name: string; title?: string; level: number; levelName: string; type?: string }>;
-      members: Array<{ id: string; name: string; position?: string; organizationId: string }>;
-    };
-    return result;
   } catch (error: any) {
-    console.error('❌ [getDeletionTargets] 削除対象の取得に失敗しました:', error);
+    console.error('❌ [getDeletionTargets] Supabase経由での取得に失敗しました:', error);
     throw new Error(`削除対象の取得に失敗しました: ${error.message || error}`);
   }
 }
@@ -865,16 +737,12 @@ export async function getDeletionTargets(organizationId: string): Promise<{
  * 組織を削除（Supabase対応）
  */
 export async function deleteOrg(id: string): Promise<void> {
-  // getOrgTreeFromDbと同じ方法でSupabaseが有効かどうかを判定
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  console.log(`🗑️ [deleteOrg] 削除開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, id);
-  console.log(`🔍 [deleteOrg] 環境変数確認: NEXT_PUBLIC_USE_SUPABASE=${process.env.NEXT_PUBLIC_USE_SUPABASE}, useSupabase=${useSupabase}`);
+  // Supabase専用（環境変数チェック不要）
+  console.log('🗑️ [deleteOrg] 削除開始（Supabase経由）:', id);
   
-  // Supabase使用時はDataSource経由で削除
-  if (useSupabase) {
-    try {
-      const { getDataSourceInstance } = await import('../dataSource');
-      const dataSource = getDataSourceInstance();
+  try {
+    const { getDataSourceInstance } = await import('../dataSource');
+    const dataSource = getDataSourceInstance();
       
       // 削除前に、該当する組織が存在するか確認（Supabase経由）
       // 注意: エラーが発生しても削除処理は続行する（組織が存在する可能性があるため）
@@ -1042,132 +910,10 @@ export async function deleteOrg(id: string): Promise<void> {
         console.warn('⚠️ [deleteOrg] メンバー取得エラー（無視します）:', memberError);
       }
       
-    } catch (error: any) {
-      console.error('❌ [deleteOrg] Supabase経由での削除が失敗しました:', error);
-      throw error;
-    }
-  } else {
-    // 環境変数ではSupabaseが無効だが、getOrgTreeFromDbがSupabaseから取得している可能性がある
-    // 念のため、DataSourceを確認してSupabaseが有効な場合はSupabaseから削除
-    try {
-      const { getDataSourceInstance } = await import('../dataSource');
-      const dataSource = getDataSourceInstance();
-      // DataSourceがSupabaseDataSourceかどうかを確認
-      const dataSourceType = dataSource.constructor.name;
-      const isSupabaseDataSource = dataSourceType === 'SupabaseDataSource';
-      
-      if (isSupabaseDataSource) {
-        console.log('🔍 [deleteOrg] 環境変数ではSupabaseが無効ですが、SupabaseDataSourceが検出されました。Supabaseから削除を試みます。');
-        try {
-          const { deleteDocViaDataSource } = await import('../dataSourceAdapter');
-          await deleteDocViaDataSource('organizations', id);
-          console.log('✅ [deleteOrg] Supabase経由で削除成功:', id);
-          // Supabaseから削除が成功した場合、SQLiteからの削除は不要
-          return;
-        } catch (supabaseError: any) {
-          const supabaseErrorMessage = supabaseError?.message || '';
-          // レコードが見つからないエラーの場合は成功として扱う
-          if (supabaseErrorMessage.includes('No rows found') || 
-              supabaseErrorMessage.includes('PGRST116') ||
-              supabaseErrorMessage.includes('Query returned no rows')) {
-            console.log('ℹ️ [deleteOrg] Supabaseからは既に削除されています:', id);
-            // Supabaseから既に削除されている場合、SQLiteからの削除は不要
-            return;
-          } else {
-            console.warn('⚠️ [deleteOrg] Supabaseからの削除に失敗しました（SQLiteからの削除は続行します）:', supabaseError);
-          }
-        }
-      }
-    } catch (dataSourceError: any) {
-      // DataSourceが利用できない場合は無視（SQLiteからの削除は続行）
-      console.log('ℹ️ [deleteOrg] DataSourceが利用できないため、SQLiteからのみ削除します:', dataSourceError?.message);
-    }
-    
-    // ローカルSQLite使用時はTauriコマンド経由で削除
-    
-    // 削除前に、該当する組織が存在するか確認
-    try {
-      try {
-        const orgCheck = await callTauriCommand('doc_get', {
-          collectionName: 'organizations',
-          docId: id,
-        });
-        console.log('🔍 [deleteOrg] 削除前の組織確認:', {
-          id,
-          exists: orgCheck?.exists || false,
-          data: orgCheck?.data || null,
-        });
-        
-        if (!orgCheck || !orgCheck.exists) {
-          console.warn('⚠️ [deleteOrg] 削除対象の組織が存在しません:', id);
-          // 組織が存在しない場合は、エラーを投げずに成功として扱う（既に削除されている）
-          return;
-        }
-      } catch (docGetError: any) {
-        // doc_getがエラーを返す場合（「Query returned no rows」）は、組織が存在しないことを意味する
-        if (docGetError?.message?.includes('Query returned no rows') || 
-            docGetError?.message?.includes('ドキュメント取得エラー')) {
-          console.warn('⚠️ [deleteOrg] 削除対象の組織が存在しません（doc_getが行を返さない）:', id);
-          // 組織が存在しない場合は、エラーを投げずに成功として扱う（既に削除されている）
-          return;
-        } else {
-          // その他のエラーの場合は再スロー
-          throw docGetError;
-        }
-      }
-    } catch (checkError: any) {
-      console.warn('⚠️ [deleteOrg] 削除前の確認でエラーが発生しました（続行します）:', checkError);
-    }
-    
-    // Tauri環境では直接Tauriコマンドを使用（APIサーバーが起動していない可能性があるため）
-    try {
-      console.log('🗑️ [deleteOrg] Tauriコマンド経由で削除を試みます');
-      await callTauriCommand('delete_org', { id });
-      console.log('✅ [deleteOrg] Tauriコマンド経由の削除が成功しました');
-      
-      // 削除処理は同期的に実行されるため、ポーリングは不要
-      // 念のため、削除が完了したことを確認（1回だけ）
-      try {
-        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms待機してから確認
-        
-        const allOrgs = await callTauriCommand('collection_get', {
-          collectionName: 'organizations',
-        }) as any[];
-        
-        const orgStillExists = allOrgs?.some((org: any) => {
-          const orgId = org.id || org.data?.id;
-          return orgId === id;
-        }) || false;
-        
-        if (orgStillExists) {
-          console.warn('⚠️ [deleteOrg] 削除後も組織が存在しています。データベースの更新が反映されていない可能性があります。');
-          // エラーを投げない（削除処理自体は成功している可能性があるため）
-        } else {
-          console.log('✅ [deleteOrg] 削除が確認されました。組織はデータベースから削除されています。');
-        }
-      } catch (verifyError: any) {
-        // 削除後の確認で予期しないエラーが発生した場合でも、削除処理自体は成功している可能性がある
-        console.warn('⚠️ [deleteOrg] 削除後の確認でエラーが発生しました（削除処理自体は成功している可能性があります）:', verifyError);
-        // エラーを再スローしない（削除処理は成功している可能性があるため）
-      }
-    } catch (error: any) {
-      console.error('❌ [deleteOrg] Tauriコマンド経由の削除が失敗しました:', error);
-      throw error;
-    }
+  } catch (error: any) {
+    console.error('❌ [deleteOrg] Supabase経由での削除が失敗しました:', error);
+    throw error;
   }
-  
-  // ChromaDBのコレクションを削除（非同期、エラーは無視）
-  (async () => {
-    try {
-      const { callTauriCommand: chromaCallTauriCommand } = await import('../localFirebase');
-      await chromaCallTauriCommand('chromadb_delete_organization_collections', {
-        organizationId: id,
-      });
-      console.log(`✅ [deleteOrg] ChromaDBコレクション削除成功: ${id}`);
-    } catch (error: any) {
-      console.warn(`⚠️ [deleteOrg] ChromaDBコレクション削除エラー（続行します）: ${id}`, error);
-    }
-  })();
 }
 
 /**
@@ -1175,72 +921,55 @@ export async function deleteOrg(id: string): Promise<void> {
  */
 export async function getOrganizationContent(organizationId: string): Promise<OrganizationContent | null> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    
-    // Supabase使用時はDataSource経由で取得
-    if (useSupabase) {
-      try {
-        const { getDataSourceInstance } = await import('../dataSource');
-        const dataSource = getDataSourceInstance();
-        // テーブル名はnormalizeTableNameで自動的に小文字に変換される
-        // 開発環境でのみログを出力
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔍 [getOrganizationContent] Supabase経由で取得を試みます:', { organizationId, tableName: 'organizationContents' });
-        }
-        const data = await dataSource.doc_get('organizationContents', organizationId);
-        if (process.env.NODE_ENV === 'development' && data) {
-          console.log('📖 [getOrganizationContent] Supabaseから取得したデータ:', data);
-        }
-        if (data) {
-          return {
-            organizationId: data.organizationId || data.organizationid || organizationId,
-            introduction: data.introduction || '',
-            focusAreas: data.focusAreas || data.focusareas || '',
-            meetingNotes: data.meetingNotes || data.meetingnotes || '',
-            createdAt: data.createdAt || data.createdat,
-            updatedAt: data.updatedAt || data.updatedat,
-          } as OrganizationContent;
-        }
-        // dataがnullの場合は、406エラーやレコードが見つからない場合
-        // doc_get内で既にエラーハンドリングされているので、ここではnullを返すだけ
-        // 開発環境でのみログを出力
-        if (process.env.NODE_ENV === 'development') {
-          console.log('📖 [getOrganizationContent] データが見つかりませんでした（新規作成またはアクセス不可）');
-        }
-        return null;
-      } catch (error: any) {
-        console.error('❌ [getOrganizationContent] Supabase取得エラー:', {
-          error,
-          errorMessage: error?.message,
-          errorCode: error?.code,
-          errorDetails: error?.details,
-          errorHint: error?.hint,
-          organizationId,
-        });
-        // テーブルが存在しない場合や406エラーの場合はnullを返す（エラーをスローしない）
-        // ただし、doc_get内で既に406エラーは処理されているので、ここに到達することは稀
-        if (error?.code === 'PGRST205' || 
-            error?.code === '406' ||
-            error?.message?.includes('Could not find the table') ||
-            error?.message?.includes('Not Acceptable')) {
-          console.warn('⚠️ [getOrganizationContent] テーブルが見つかりませんまたはアクセス不可。新規作成として扱います。');
-          return null;
-        }
-        // その他のエラーの場合はフォールバック
-        console.warn('⚠️ [getOrganizationContent] Supabase取得に失敗、Firestoreにフォールバック:', error);
-      }
+    // Supabase専用（環境変数チェック不要）
+    const { getDataSourceInstance } = await import('../dataSource');
+    const dataSource = getDataSourceInstance();
+    // テーブル名はnormalizeTableNameで自動的に小文字に変換される
+    // 開発環境でのみログを出力
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔍 [getOrganizationContent] Supabase経由で取得を試みます:', { organizationId, tableName: 'organizationContents' });
     }
-    
-    // ローカルSQLite使用時またはフォールバック時はFirestore経由
-    const docRef = doc(null, 'organizationContents', organizationId);
-    const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      return docSnap.data() as OrganizationContent;
+    const data = await dataSource.doc_get('organizationContents', organizationId);
+    if (process.env.NODE_ENV === 'development' && data) {
+      console.log('📖 [getOrganizationContent] Supabaseから取得したデータ:', data);
+    }
+    if (data) {
+      return {
+        organizationId: data.organizationId || data.organizationid || organizationId,
+        introduction: data.introduction || '',
+        focusAreas: data.focusAreas || data.focusareas || '',
+        meetingNotes: data.meetingNotes || data.meetingnotes || '',
+        createdAt: data.createdAt || data.createdat,
+        updatedAt: data.updatedAt || data.updatedat,
+      } as OrganizationContent;
+    }
+    // dataがnullの場合は、406エラーやレコードが見つからない場合
+    // doc_get内で既にエラーハンドリングされているので、ここではnullを返すだけ
+    // 開発環境でのみログを出力
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📖 [getOrganizationContent] データが見つかりませんでした（新規作成またはアクセス不可）');
     }
     return null;
-  } catch (error) {
-    console.error('組織コンテンツの取得に失敗しました:', error);
+  } catch (error: any) {
+    console.error('❌ [getOrganizationContent] Supabase取得エラー:', {
+      error,
+      errorMessage: error?.message,
+      errorCode: error?.code,
+      errorDetails: error?.details,
+      errorHint: error?.hint,
+      organizationId,
+    });
+    // テーブルが存在しない場合や406エラーの場合はnullを返す（エラーをスローしない）
+    // ただし、doc_get内で既に406エラーは処理されているので、ここに到達することは稀
+    if (error?.code === 'PGRST205' || 
+        error?.code === '406' ||
+        error?.message?.includes('Could not find the table') ||
+        error?.message?.includes('Not Acceptable')) {
+      console.warn('⚠️ [getOrganizationContent] テーブルが見つかりませんまたはアクセス不可。新規作成として扱います。');
+      return null;
+    }
+    // その他のエラーの場合もnullを返す
+    console.warn('⚠️ [getOrganizationContent] Supabase取得に失敗:', error);
     return null;
   }
 }
@@ -1253,113 +982,56 @@ export async function saveOrganizationContent(
   content: Partial<Omit<OrganizationContent, 'organizationId' | 'createdAt' | 'updatedAt'>>
 ): Promise<void> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    console.log(`💾 [saveOrganizationContent] 開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, { organizationId, content });
+    // Supabase専用（環境変数チェック不要）
+    console.log('💾 [saveOrganizationContent] 開始（Supabase経由）:', { organizationId, content });
     
-    // Supabase使用時はDataSource経由で保存
-    if (useSupabase) {
-      try {
-        const { getDocViaDataSource, setDocViaDataSource } = await import('../dataSourceAdapter');
-        
-        // 既存データを取得
-        let existingData: any = null;
-        try {
-          existingData = await getDocViaDataSource('organizationcontents', organizationId);
-          if (existingData) {
-            console.log('📖 [saveOrganizationContent] 既存データを取得:', existingData);
-          } else {
-            console.log('📝 [saveOrganizationContent] 新規作成');
-          }
-        } catch (getError: any) {
-          console.warn('⚠️ [saveOrganizationContent] 既存データ取得エラー（続行します）:', getError);
-        }
-        
-        const now = new Date().toISOString();
-        let data: any;
-        
-        if (existingData) {
-          // 既存データを取得してマージ
-          data = {
-            id: organizationId,
-            organizationId,
-            introduction: content.introduction !== undefined ? content.introduction : existingData.introduction || '',
-            focusAreas: content.focusAreas !== undefined ? content.focusAreas : existingData.focusAreas || '',
-            meetingNotes: content.meetingNotes !== undefined ? content.meetingNotes : existingData.meetingNotes || '',
-            createdAt: existingData.createdAt || now,
-            updatedAt: now,
-          };
-        } else {
-          // 新規作成
-          data = {
-            id: organizationId,
-            organizationId,
-            introduction: content.introduction || '',
-            focusAreas: content.focusAreas || '',
-            meetingNotes: content.meetingNotes || '',
-            createdAt: now,
-            updatedAt: now,
-          };
-        }
-        
-        console.log('💾 [saveOrganizationContent] Supabaseに保存するデータ:', data);
-        
-        // テーブル名はnormalizeTableNameで自動的に小文字に変換される
-        await setDocViaDataSource('organizationContents', organizationId, data);
-        console.log('✅ [saveOrganizationContent] Supabase経由で組織コンテンツを保存しました:', organizationId);
-      } catch (error: any) {
-        console.error('❌ [saveOrganizationContent] Supabase経由での保存に失敗しました:', error);
-        throw error;
-      }
-    } else {
-      // ローカルSQLite使用時はFirestore経由
-      const docRef = doc(null, 'organizationContents', organizationId);
-      
-      // 既存データを取得
-      let existingData: OrganizationContent | null = null;
-      try {
-        const existingDoc = await getDoc(docRef);
-        if (existingDoc.exists()) {
-          existingData = existingDoc.data() as OrganizationContent;
-          console.log('📖 [saveOrganizationContent] 既存データを取得:', existingData);
-        } else {
-          console.log('📝 [saveOrganizationContent] 新規作成');
-        }
-      } catch (getError: any) {
-        console.warn('⚠️ [saveOrganizationContent] 既存データ取得エラー（続行します）:', getError);
-      }
-      
-      let data: any;
-      
+    const { getDocViaDataSource, setDocViaDataSource } = await import('../dataSourceAdapter');
+    
+    // 既存データを取得
+    let existingData: any = null;
+    try {
+      existingData = await getDocViaDataSource('organizationcontents', organizationId);
       if (existingData) {
-        // 既存データを取得してマージ
-        data = {
-          ...existingData,
-          ...content,
-          organizationId, // organizationIdを確実に設定
-          updatedAt: serverTimestamp(),
-        };
-        // createdAtは既存のものを保持
-        if (existingData.createdAt) {
-          data.createdAt = existingData.createdAt;
-        }
+        console.log('📖 [saveOrganizationContent] 既存データを取得:', existingData);
       } else {
-        // 新規作成
-        data = {
-          id: organizationId,
-          organizationId,
-          introduction: content.introduction || '',
-          focusAreas: content.focusAreas || '',
-          meetingNotes: content.meetingNotes || '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
+        console.log('📝 [saveOrganizationContent] 新規作成');
       }
-      
-      console.log('💾 [saveOrganizationContent] Firestoreに保存するデータ:', data);
-      
-      await setDoc(docRef, data);
-      console.log('✅ [saveOrganizationContent] Firestore経由で組織コンテンツを保存しました:', organizationId);
+    } catch (getError: any) {
+      console.warn('⚠️ [saveOrganizationContent] 既存データ取得エラー（続行します）:', getError);
     }
+    
+    const now = new Date().toISOString();
+    let data: any;
+    
+    if (existingData) {
+      // 既存データを取得してマージ
+      data = {
+        id: organizationId,
+        organizationId,
+        introduction: content.introduction !== undefined ? content.introduction : existingData.introduction || '',
+        focusAreas: content.focusAreas !== undefined ? content.focusAreas : existingData.focusAreas || '',
+        meetingNotes: content.meetingNotes !== undefined ? content.meetingNotes : existingData.meetingNotes || '',
+        createdAt: existingData.createdAt || now,
+        updatedAt: now,
+      };
+    } else {
+      // 新規作成
+      data = {
+        id: organizationId,
+        organizationId,
+        introduction: content.introduction || '',
+        focusAreas: content.focusAreas || '',
+        meetingNotes: content.meetingNotes || '',
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+    
+    console.log('💾 [saveOrganizationContent] Supabaseに保存するデータ:', data);
+    
+    // テーブル名はnormalizeTableNameで自動的に小文字に変換される
+    await setDocViaDataSource('organizationContents', organizationId, data);
+    console.log('✅ [saveOrganizationContent] Supabase経由で組織コンテンツを保存しました:', organizationId);
   } catch (error: any) {
     console.error('❌ [saveOrganizationContent] 組織コンテンツの保存に失敗しました:', error);
     console.error('❌ [saveOrganizationContent] エラー詳細:', {

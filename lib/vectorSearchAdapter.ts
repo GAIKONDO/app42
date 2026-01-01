@@ -1,9 +1,8 @@
 /**
  * ベクトル検索の抽象化レイヤー
- * ChromaDBとSupabase（pgvector）を透過的に使用できるようにする
+ * Supabase（pgvector）専用
  */
 
-import { getVectorSearchBackend } from './vectorSearchConfig';
 import type { VectorSearchResult } from './vectorSearchSupabase';
 
 /**
@@ -23,34 +22,15 @@ export async function saveEntityEmbedding(
     embeddingVersion?: string;
   }
 ): Promise<void> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { saveEntityEmbeddingToSupabase } = await import('./vectorSearchSupabase');
-    await saveEntityEmbeddingToSupabase(
-      entityId,
-      organizationId,
-      companyId,
-      embedding,
-      metadata
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    await callTauriCommand('chromadb_save_entity_embedding', {
-      entityId,
-      organizationId,
-      combinedEmbedding: embedding,
-      metadata: {
-        ...metadata,
-        entityId,
-        organizationId,
-        companyId: companyId || '',
-        aliases: metadata.aliases ? JSON.stringify(metadata.aliases) : '',
-        metadata: metadata.metadata ? JSON.stringify(metadata.metadata) : '',
-      },
-    });
-  }
+  // Supabase専用
+  const { saveEntityEmbeddingToSupabase } = await import('./vectorSearchSupabase');
+  await saveEntityEmbeddingToSupabase(
+    entityId,
+    organizationId,
+    companyId,
+    embedding,
+    metadata
+  );
 }
 
 /**
@@ -73,33 +53,15 @@ export async function saveRelationEmbedding(
     embeddingVersion?: string;
   }
 ): Promise<void> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { saveRelationEmbeddingToSupabase } = await import('./vectorSearchSupabase');
-    await saveRelationEmbeddingToSupabase(
-      relationId,
-      organizationId,
-      companyId,
-      embedding,
-      metadata
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    await callTauriCommand('chromadb_save_relation_embedding', {
-      relationId,
-      organizationId,
-      combinedEmbedding: embedding,
-      metadata: {
-        ...metadata,
-        relationId,
-        organizationId,
-        companyId: companyId || '',
-        metadata: metadata.metadata ? JSON.stringify(metadata.metadata) : '',
-      },
-    });
-  }
+  // Supabase専用
+  const { saveRelationEmbeddingToSupabase } = await import('./vectorSearchSupabase');
+  await saveRelationEmbeddingToSupabase(
+    relationId,
+    organizationId,
+    companyId,
+    embedding,
+    metadata
+  );
 }
 
 /**
@@ -122,35 +84,15 @@ export async function saveTopicEmbedding(
     embeddingVersion?: string;
   }
 ): Promise<void> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { saveTopicEmbeddingToSupabase } = await import('./vectorSearchSupabase');
-    await saveTopicEmbeddingToSupabase(
-      topicId,
-      organizationId,
-      companyId,
-      embedding,
-      metadata
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    await callTauriCommand('chromadb_save_topic_embedding', {
-      topicId,
-      organizationId,
-      combinedEmbedding: embedding,
-      metadata: {
-        ...metadata,
-        topicId,
-        organizationId,
-        companyId: companyId || '',
-        keywords: metadata.keywords ? JSON.stringify(metadata.keywords) : '',
-        tags: metadata.tags ? JSON.stringify(metadata.tags) : '',
-        metadata: metadata.metadata ? JSON.stringify(metadata.metadata) : '',
-      },
-    });
-  }
+  // Supabase専用
+  const { saveTopicEmbeddingToSupabase } = await import('./vectorSearchSupabase');
+  await saveTopicEmbeddingToSupabase(
+    topicId,
+    organizationId,
+    companyId,
+    embedding,
+    metadata
+  );
 }
 
 /**
@@ -168,29 +110,13 @@ export async function saveDesignDocEmbedding(
     embeddingVersion?: string;
   }
 ): Promise<void> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { saveDesignDocEmbeddingToSupabase } = await import('./vectorSearchSupabase');
-    await saveDesignDocEmbeddingToSupabase(
-      sectionId,
-      embedding,
-      metadata
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    await callTauriCommand('chromadb_save_design_doc_embedding', {
-      sectionId,
-      combinedEmbedding: embedding,
-      metadata: {
-        ...metadata,
-        sectionId,
-        tags: metadata.tags ? JSON.stringify(metadata.tags) : '',
-        metadata: metadata.metadata ? JSON.stringify(metadata.metadata) : '',
-      },
-    });
-  }
+  // Supabase専用
+  const { saveDesignDocEmbeddingToSupabase } = await import('./vectorSearchSupabase');
+  await saveDesignDocEmbeddingToSupabase(
+    sectionId,
+    embedding,
+    metadata
+  );
 }
 
 /**
@@ -202,31 +128,14 @@ export async function findSimilarEntities(
   organizationId?: string | null,
   companyId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarEntitiesInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarEntitiesInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId,
-      companyId
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    const results = await callTauriCommand<Array<[string, number]>>('chromadb_find_similar_entities', {
-      queryEmbedding,
-      limit,
-      organizationId: organizationId || null,
-    });
-
-    // ChromaDBの結果形式をVectorSearchResultに変換
-    return results.map(([id, similarity]) => ({
-      id,
-      similarity,
-    }));
-  }
+  // Supabase専用
+  const { findSimilarEntitiesInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarEntitiesInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId,
+    companyId
+  );
 }
 
 /**
@@ -238,30 +147,14 @@ export async function findSimilarRelations(
   organizationId?: string | null,
   companyId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarRelationsInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarRelationsInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId,
-      companyId
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    const results = await callTauriCommand<Array<[string, number]>>('chromadb_find_similar_relations', {
-      queryEmbedding,
-      limit,
-      organizationId: organizationId || null,
-    });
-
-    return results.map(([id, similarity]) => ({
-      id,
-      similarity,
-    }));
-  }
+  // Supabase専用
+  const { findSimilarRelationsInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarRelationsInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId,
+    companyId
+  );
 }
 
 /**
@@ -273,30 +166,14 @@ export async function findSimilarTopics(
   organizationId?: string | null,
   companyId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarTopicsInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarTopicsInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId,
-      companyId
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    const results = await callTauriCommand<Array<[string, number]>>('chromadb_find_similar_topics', {
-      queryEmbedding,
-      limit,
-      organizationId: organizationId || null,
-    });
-
-    return results.map(([id, similarity]) => ({
-      id,
-      similarity,
-    }));
-  }
+  // Supabase専用
+  const { findSimilarTopicsInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarTopicsInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId,
+    companyId
+  );
 }
 
 /**
@@ -306,27 +183,12 @@ export async function findSimilarDesignDocs(
   queryEmbedding: number[],
   limit: number
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarDesignDocsInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarDesignDocsInSupabase(
-      queryEmbedding,
-      limit
-    );
-  } else {
-    // ChromaDBを使用
-    const { callTauriCommand } = await import('./localFirebase');
-    const results = await callTauriCommand<Array<[string, number]>>('chromadb_find_similar_design_docs', {
-      queryEmbedding,
-      limit,
-    });
-
-    return results.map(([id, similarity]) => ({
-      id,
-      similarity,
-    }));
-  }
+  // Supabase専用
+  const { findSimilarDesignDocsInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarDesignDocsInSupabase(
+    queryEmbedding,
+    limit
+  );
 }
 
 /**
@@ -338,21 +200,14 @@ export async function findSimilarStartups(
   organizationId?: string | null,
   companyId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarStartupsInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarStartupsInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId,
-      companyId
-    );
-  } else {
-    // ChromaDBは未実装（スタートアップ検索はSupabaseのみ）
-    console.warn('[findSimilarStartups] ChromaDBは未実装です。Supabaseを使用してください。');
-    return [];
-  }
+  // Supabase専用
+  const { findSimilarStartupsInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarStartupsInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId,
+    companyId
+  );
 }
 
 /**
@@ -364,21 +219,14 @@ export async function findSimilarFocusInitiatives(
   organizationId?: string | null,
   companyId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarFocusInitiativesInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarFocusInitiativesInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId,
-      companyId
-    );
-  } else {
-    // ChromaDBは未実装
-    console.warn('[findSimilarFocusInitiatives] ChromaDBは未実装です。Supabaseを使用してください。');
-    return [];
-  }
+  // Supabase専用
+  const { findSimilarFocusInitiativesInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarFocusInitiativesInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId,
+    companyId
+  );
 }
 
 /**
@@ -390,21 +238,14 @@ export async function findSimilarMeetingNotes(
   organizationId?: string | null,
   companyId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarMeetingNotesInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarMeetingNotesInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId,
-      companyId
-    );
-  } else {
-    // ChromaDBは未実装
-    console.warn('[findSimilarMeetingNotes] ChromaDBは未実装です。Supabaseを使用してください。');
-    return [];
-  }
+  // Supabase専用
+  const { findSimilarMeetingNotesInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarMeetingNotesInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId,
+    companyId
+  );
 }
 
 /**
@@ -415,19 +256,12 @@ export async function findSimilarRegulations(
   limit: number,
   organizationId?: string | null
 ): Promise<VectorSearchResult[]> {
-  const backend = getVectorSearchBackend();
-
-  if (backend === 'supabase') {
-    const { findSimilarRegulationsInSupabase } = await import('./vectorSearchSupabase');
-    return await findSimilarRegulationsInSupabase(
-      queryEmbedding,
-      limit,
-      organizationId
-    );
-  } else {
-    // ChromaDBは未実装
-    console.warn('[findSimilarRegulations] ChromaDBは未実装です。Supabaseを使用してください。');
-    return [];
-  }
+  // Supabase専用
+  const { findSimilarRegulationsInSupabase } = await import('./vectorSearchSupabase');
+  return await findSimilarRegulationsInSupabase(
+    queryEmbedding,
+    limit,
+    organizationId
+  );
 }
 

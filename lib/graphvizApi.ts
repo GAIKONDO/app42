@@ -279,12 +279,10 @@ export async function saveGraphvizYamlFileAttachment(
  */
 export async function getGraphvizYamlFileAttachments(yamlFileId: string): Promise<Array<{ path: string; description?: string; detailedDescription?: string; id?: string; fileName?: string; mimeType?: string; fileSize?: number }>> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    // Supabase専用（環境変数チェック不要）
     let result: Array<{ id: string; data: any }> = [];
     
-    if (useSupabase) {
-      // Supabase経由で取得
-      try {
+    try {
         const { queryGetViaDataSource } = await import('@/lib/dataSourceAdapter');
         const results = await queryGetViaDataSource('graphvizYamlFileAttachments', {
           field: 'yamlfileid',
@@ -308,14 +306,6 @@ export async function getGraphvizYamlFileAttachments(yamlFileId: string): Promis
         }
         throw supabaseError;
       }
-    } else {
-      // SQLite経由で取得
-      const { callTauriCommand } = await import('@/lib/localFirebase');
-      result = await callTauriCommand('query_get', {
-        collectionName: 'graphvizYamlFileAttachments',
-        conditions: { yamlFileId },
-      }) as Array<{ id: string; data: any }>;
-    }
     
     if (result && Array.isArray(result) && result.length > 0) {
       return result.map((item: any) => {
@@ -348,26 +338,16 @@ export async function deleteGraphvizYamlFileAttachment(
   filePath: string
 ): Promise<void> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    // Supabase専用（環境変数チェック不要）
     
     // ファイルIDを取得
     const attachments = await getGraphvizYamlFileAttachments(yamlFileId);
     const attachment = attachments.find(a => a.path === filePath);
     
     if (attachment && attachment.id) {
-      // データベースから削除
-      if (useSupabase) {
-        // Supabase経由で削除
-        const { deleteDocViaDataSource } = await import('@/lib/dataSourceAdapter');
-        await deleteDocViaDataSource('graphvizYamlFileAttachments', attachment.id);
-      } else {
-        // SQLite経由で削除
-        const { callTauriCommand } = await import('@/lib/localFirebase');
-        await callTauriCommand('doc_delete', {
-          collectionName: 'graphvizYamlFileAttachments',
-          docId: attachment.id,
-        });
-      }
+      // Supabase経由で削除
+      const { deleteDocViaDataSource } = await import('@/lib/dataSourceAdapter');
+      await deleteDocViaDataSource('graphvizYamlFileAttachments', attachment.id);
       
       // 物理ファイルはデータベースから削除するだけで、ファイルシステム上のファイルは残す
       // （後で必要に応じて手動で削除可能）

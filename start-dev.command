@@ -61,7 +61,7 @@ if [ ! -d "node_modules" ]; then
     echo ""
 fi
 
-# Supabase設定の確認
+# Supabase設定の確認（必須）
 print_info "Supabase設定を確認中..."
 if [ -f ".env.local" ]; then
     # .env.localファイルが存在する場合は、既存のファイルを保護
@@ -73,24 +73,23 @@ if [ -f ".env.local" ]; then
         print_info ".env.localファイルのバックアップを作成しました（.env.local.backup）"
     fi
     
-    # ファイルの内容を確認（表示はしない）
-    if grep -q "NEXT_PUBLIC_USE_SUPABASE=true" .env.local 2>/dev/null; then
-        if grep -q "NEXT_PUBLIC_SUPABASE_URL" .env.local 2>/dev/null && grep -q "NEXT_PUBLIC_SUPABASE_ANON_KEY" .env.local 2>/dev/null; then
-            print_success "Supabase設定が検出されました"
-            echo "  - .env.localファイルが存在し、Supabase設定が含まれています"
-            echo "  - 詳細な設定内容は表示しません（セキュリティのため）"
-            echo "  - 注意: このスクリプトは.env.localファイルを上書きしません"
-        else
-            print_error "Supabase設定が不完全です"
-            echo "  .env.localファイルに以下を設定してください:"
-            echo "  - NEXT_PUBLIC_USE_SUPABASE=true"
-            echo "  - NEXT_PUBLIC_SUPABASE_URL"
-            echo "  - NEXT_PUBLIC_SUPABASE_ANON_KEY"
-            echo ""
-            echo "詳細は SETUP_ENV_LOCAL.md を参照してください"
-        fi
+    # Supabase設定の確認（必須）
+    if grep -q "NEXT_PUBLIC_SUPABASE_URL" .env.local 2>/dev/null && grep -q "NEXT_PUBLIC_SUPABASE_ANON_KEY" .env.local 2>/dev/null; then
+        print_success "Supabase設定が検出されました"
+        echo "  - .env.localファイルが存在し、Supabase設定が含まれています"
+        echo "  - 詳細な設定内容は表示しません（セキュリティのため）"
+        echo "  - 注意: このスクリプトは.env.localファイルを上書きしません"
     else
-        print_info "ローカルSQLiteデータベースを使用します"
+        print_error "Supabase設定が不完全です（必須）"
+        echo "  .env.localファイルに以下を設定してください:"
+        echo "  - NEXT_PUBLIC_SUPABASE_URL"
+        echo "  - NEXT_PUBLIC_SUPABASE_ANON_KEY"
+        echo ""
+        echo "注意: このアプリケーションはSupabase専用です"
+        echo "詳細は SETUP_ENV_LOCAL.md を参照してください"
+        echo ""
+        read -p "Enterキーを押して終了..."
+        exit 1
     fi
     
     # ファイルの変更を検知（バックアップと比較）
@@ -102,14 +101,19 @@ if [ -f ".env.local" ]; then
         fi
     fi
 else
-    print_info ".env.localファイルが見つかりません"
-    echo "  Supabaseを使用する場合は、.env.localファイルを作成してください"
-    echo "  詳細は SETUP_ENV_LOCAL.md を参照してください"
+    print_error ".env.localファイルが見つかりません（必須）"
+    echo "  このアプリケーションはSupabase専用です"
+    echo "  .env.localファイルを作成して、以下を設定してください:"
+    echo "  - NEXT_PUBLIC_SUPABASE_URL"
+    echo "  - NEXT_PUBLIC_SUPABASE_ANON_KEY"
     echo ""
-    print_info "ローカルSQLiteデータベースを使用します"
+    echo "詳細は SETUP_ENV_LOCAL.md を参照してください"
     echo ""
     print_info "注意: このスクリプトは.env.localファイルを自動生成しません"
     echo "      手動で.env.localファイルを作成してください"
+    echo ""
+    read -p "Enterキーを押して終了..."
+    exit 1
 fi
 echo ""
 

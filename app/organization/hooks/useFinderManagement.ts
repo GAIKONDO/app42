@@ -76,11 +76,8 @@ export function useFinderManagement(
       await updateOrg(orgId, newName);
       devLog('✅ [handleEditSave] 組織名の更新が完了しました');
       
-      // Supabase使用時は、更新が反映されるまで少し待つ
-      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-      if (useSupabase) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
+      // Supabase専用（更新が反映されるまで少し待つ）
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // 組織ツリーを再取得（Supabase使用時は複数回試行）
       let tree: OrgNodeData | null = null;
@@ -207,10 +204,9 @@ export function useFinderManagement(
       });
       
       // データベースの更新を待つために、複数回再取得を試みる
-      // Supabase使用時は、リアルタイム更新が反映されるまで時間がかかる可能性があるため、待機時間を長めにする
-      const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-      const waitTime = useSupabase ? 500 : 300; // Supabase使用時は500ms、SQLite使用時は300ms
-      const maxAttempts = useSupabase ? 10 : 5; // Supabase使用時は最大10回、SQLite使用時は最大5回
+      // Supabase専用（リアルタイム更新が反映されるまで時間がかかる可能性があるため、待機時間を長めにする）
+      const waitTime = 500; // Supabase使用時は500ms
+      const maxAttempts = 10; // Supabase使用時は最大10回
       
       let tree: OrgNodeData | null = null;
       let attempts = 0;

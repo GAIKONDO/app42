@@ -11,7 +11,7 @@ export async function diagnoseRAGSearch() {
   devLog('🔍 RAG検索の診断を開始します...\n');
   
   // 1. ChromaDB設定の確認
-  const { shouldUseChroma } = await import('@/lib/chromaConfig');
+  const { shouldUseChroma } = await import('@/lib/vectorSearchConfig');
   const useChroma = shouldUseChroma();
   const localStorageValue = localStorage.getItem('useChromaDB');
   devLog('1️⃣ ChromaDB設定:');
@@ -48,18 +48,8 @@ export async function diagnoseRAGSearch() {
     if (orgIds.length === 0) {
       devLog('   ⚠️ organizationIdが設定されているエンティティがありません。');
     } else {
-      let totalCount = 0;
-      for (const orgId of orgIds.slice(0, 5)) {
-        if (!orgId) continue;
-        try {
-          const { countEntitiesInChroma } = await import('@/lib/entityEmbeddingsChroma');
-          const count = await countEntitiesInChroma(orgId);
-          totalCount += count;
-        } catch (error: any) {
-          devLog(`   - entities_${orgId}: エラー - ${error?.message || error}`);
-        }
-      }
-      devLog(`   - 確認したコレクション数: ${Math.min(5, orgIds.length)}件, 総エンティティ数: ${totalCount}件`);
+      // Supabaseに移行済みのため、ChromaDBカウントは不要
+      devLog(`   - Supabaseに移行済みのため、ChromaDBカウントは不要です`);
     }
     devLog('');
   }

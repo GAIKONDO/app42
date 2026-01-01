@@ -21,21 +21,12 @@ export class RealtimeSync {
   private channels: Map<string, RealtimeChannel> = new Map();
 
   constructor() {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-
-    if (!useSupabase) {
-      console.warn('RealtimeSync: Supabase環境変数が設定されていません。リアルタイム同期は無効です。');
-      // ダミーのSupabaseクライアントを作成（エラーを防ぐため）
-      const { createClient } = require('@supabase/supabase-js');
-      this.supabase = createClient('https://dummy.supabase.co', 'dummy-key');
-      return;
-    }
-
+    // Supabase専用（環境変数チェック不要）
     // シングルトンのSupabaseクライアントを使用
     try {
       this.supabase = getSupabaseClient();
     } catch (error) {
-      // 環境変数が設定されていない場合は、ダミークライアントを使用
+      // Supabaseクライアントの取得に失敗した場合は、ダミークライアントを使用
       console.warn('RealtimeSync: Supabaseクライアントの取得に失敗しました。ダミークライアントを使用します。', error);
       const { createClient } = require('@supabase/supabase-js');
       this.supabase = createClient('https://dummy.supabase.co', 'dummy-key');
@@ -49,12 +40,7 @@ export class RealtimeSync {
    * @returns 購読解除関数
    */
   subscribe(table: string, callback: (payload: RealtimePayload) => void): () => void {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    
-    if (!useSupabase) {
-      console.warn(`RealtimeSync: Supabaseが無効です。テーブル "${table}" の購読をスキップします。`);
-      return () => {};
-    }
+    // Supabase専用（環境変数チェック不要）
 
     // 既存の購読を解除
     this.unsubscribe(table);

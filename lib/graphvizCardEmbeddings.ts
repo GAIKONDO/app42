@@ -3,17 +3,16 @@
  * YAML、説明文、要約をトピックとしてEmbedding化し、RAG検索可能にする
  */
 
-import { callTauriCommand, doc, setDoc } from './localFirebase';
+import { doc, setDoc } from './localFirebase';
 import { 
   generateCombinedEmbedding, 
   generateSeparatedEmbeddings,
   generateEnhancedEmbedding,
   generateMetadataEmbedding,
 } from './embeddings';
-import { shouldUseChroma } from './chromaConfig';
 
 /**
- * Graphvizカードの埋め込みをChromaDBに保存
+ * Graphvizカードの埋め込みをSupabaseに保存（Supabase専用）
  * @param yamlFileId YAMLファイルID（トピックIDとして使用）
  * @param organizationId 組織ID
  * @param title タイトル（YAMLファイル名）
@@ -37,7 +36,9 @@ export async function saveGraphvizCardEmbeddingToChroma(
     throw new Error('Graphvizカード埋め込みの保存はクライアント側でのみ実行可能です');
   }
 
-  if (!shouldUseChroma()) {
+  // Supabase専用（環境変数チェック不要）
+  // 常にSupabaseを使用
+  {
     console.warn('⚠️ [saveGraphvizCardEmbeddingToChroma] ChromaDBが無効です。スキップします。');
     return;
   }
@@ -120,14 +121,27 @@ export async function saveGraphvizCardEmbeddingToChroma(
     const meetingNoteId = `graphviz_${yamlFileId}`; // Graphvizカード用のダミーID
     const embeddingId = `${meetingNoteId}-topic-${yamlFileId}`;
     
-    // Rust側のTauriコマンドを呼び出し（ChromaDBに保存）
-    await callTauriCommand('chromadb_save_topic_embedding', {
-      topicId: yamlFileId,
-      meetingNoteId,
-      organizationId,
-      combinedEmbedding: combinedEmbedding || [],
-      metadata: embeddingMetadata,
-    });
+    // Supabaseに保存（Supabase専用）
+    if (combinedEmbedding && combinedEmbedding.length > 0) {
+      const { saveTopicEmbedding } = await import('./vectorSearchAdapter');
+      await saveTopicEmbedding(
+        yamlFileId,
+        organizationId,
+        null, // companyId
+        combinedEmbedding,
+        {
+          meetingNoteId,
+          title: metadata?.title || title || '',
+          content: contentSummary || '',
+          semanticCategory: metadata?.semanticCategory,
+          keywords: metadata?.keywords,
+          tags: metadata?.tags,
+          metadata: embeddingMetadata,
+          embeddingModel: embeddingModel || 'text-embedding-3-small',
+          embeddingVersion: embeddingVersion || '2.0',
+        }
+      );
+    }
 
     // SQLiteのtopicsテーブルにも保存（ナレッジグラフのリスト表示で取得できるようにするため）
     try {
@@ -179,7 +193,7 @@ export async function saveGraphvizCardEmbeddingToChroma(
       }
       
       // ChromaDB同期状態を設定（ChromaDBに保存済みなので1）
-      topicData.chromaSynced = 1;
+      // chromaSyncedフラグは不要（Supabase専用）
 
       console.log('💾 [saveGraphvizCardEmbeddingToChroma] topicsテーブルに保存開始:', {
         embeddingId,

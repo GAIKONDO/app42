@@ -223,28 +223,14 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
         
         // デバッグ: まず、organizationsテーブルに実際にどのようなIDが存在するか確認
         try {
-          const { callTauriCommand } = await import('@/lib/localFirebase');
-          
-          // すべての組織を取得して、IDのリストを確認
-          const allOrgsResult = await callTauriCommand('collection_get', {
-            collectionName: 'organizations',
-          });
-          
-          // 大きなデータ構造のログを簡略化（パフォーマンス最適化）
-          devLog('🔍 [loadOrganizationData] organizationsテーブル:', {
-            count: allOrgsResult?.length || 0,
-            searchId: validOrganizationId,
-            foundOrgName: foundOrg.name,
-          });
+          // Supabase専用（環境変数チェック不要）
+          const { getDocViaDataSource } = await import('@/lib/dataSourceAdapter');
           
           // 特定のIDで検索
           try {
-            const orgCheckResult = await callTauriCommand('doc_get', {
-              collectionName: 'organizations',
-              docId: validOrganizationId,
-            });
+            const orgCheckResult = await getDocViaDataSource('organizations', validOrganizationId);
             
-            if (!orgCheckResult || !orgCheckResult.exists) {
+            if (!orgCheckResult) {
               devWarn('⚠️ [loadOrganizationData] foundOrg.idがorganizationsテーブルに存在しません:', {
                 foundOrgId: validOrganizationId,
                 foundOrgName: foundOrg.name,
@@ -826,11 +812,10 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
     });
   }, [startups, organization]);
 
-  // スタートアップのリアルタイム同期（Supabase使用時のみ）
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  // スタートアップのリアルタイム同期（Supabase専用）
   useRealtimeSync({
     table: 'startups',
-    enabled: useSupabase && !!organizationId,
+    enabled: !!organizationId,
     onInsert: async (payload) => {
       devLog('🆕 [RealtimeSync] 新しいスタートアップが追加されました:', payload.new);
       if (organizationId && payload.new?.organizationId === organizationId) {
@@ -872,10 +857,10 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
     },
   });
 
-  // 注力施策のリアルタイム同期（Supabase使用時のみ）
+  // 注力施策のリアルタイム同期（Supabase専用）
   useRealtimeSync({
     table: 'focusInitiatives',
-    enabled: useSupabase && !!organizationId,
+    enabled: !!organizationId,
     onInsert: async (payload) => {
       devLog('🆕 [RealtimeSync] 新しい注力施策が追加されました:', payload.new);
       if (organizationId && payload.new?.organizationId === organizationId) {

@@ -23,23 +23,22 @@ export interface SupabaseConfigStatus {
 export async function verifySupabaseConfig(): Promise<SupabaseConfigStatus> {
   const errors: string[] = [];
   const warnings: string[] = [];
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+  // Supabase専用（環境変数チェック不要、常にSupabaseを使用）
+  const useSupabase = true;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   // 基本設定の確認
-  if (useSupabase) {
-    if (!supabaseUrl) {
-      errors.push('NEXT_PUBLIC_SUPABASE_URLが設定されていません');
-    }
-    if (!supabaseAnonKey) {
-      errors.push('NEXT_PUBLIC_SUPABASE_ANON_KEYが設定されていません');
-    }
+  if (!supabaseUrl) {
+    errors.push('NEXT_PUBLIC_SUPABASE_URLが設定されていません');
+  }
+  if (!supabaseAnonKey) {
+    errors.push('NEXT_PUBLIC_SUPABASE_ANON_KEYが設定されていません');
   }
 
   // 接続確認
   let isConnected = false;
-  if (useSupabase && supabaseUrl && supabaseAnonKey) {
+  if (supabaseUrl && supabaseAnonKey) {
     try {
       const dataSource = getDataSourceInstance();
       // 簡単な接続テスト（organizationsテーブルから1件取得を試みる）
@@ -52,15 +51,15 @@ export async function verifySupabaseConfig(): Promise<SupabaseConfigStatus> {
   }
 
   // 警告の確認
-  if (useSupabase && !supabaseUrl) {
+  if (!supabaseUrl) {
     warnings.push('Supabase URLが設定されていません');
   }
-  if (useSupabase && !supabaseAnonKey) {
+  if (!supabaseAnonKey) {
     warnings.push('Supabase APIキーが設定されていません');
   }
 
   return {
-    isConfigured: useSupabase && !!supabaseUrl && !!supabaseAnonKey,
+    isConfigured: !!supabaseUrl && !!supabaseAnonKey,
     isConnected,
     errors,
     warnings,

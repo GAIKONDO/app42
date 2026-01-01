@@ -8,8 +8,6 @@ import { generateEmbedding, generateMetadataEmbedding } from './embeddings';
 import type { EntityEmbedding } from '@/types/entityEmbedding';
 import type { Entity, EntityMetadata } from '@/types/entity';
 import { getEntityById, getAllEntities, getEntitiesByIds } from './entityApi';
-import { shouldUseChroma } from './chromaConfig';
-import { shouldUseChroma as shouldUseChromaNew, getVectorSearchBackend } from './vectorSearchConfig';
 import { calculateEntityScore, adjustWeightsForQuery } from './ragSearchScoring';
 import { handleRAGSearchError, safeHandleRAGSearchError } from './ragSearchErrors';
 import pLimit from 'p-limit';
@@ -80,64 +78,26 @@ export async function saveEntityEmbedding(
       }
     }
     
-    // ベクトル検索バックエンドに保存（ChromaDBまたはSupabase）
-    const backend = getVectorSearchBackend();
-    if (backend === 'supabase' || shouldUseChroma()) {
-      try {
-        if (backend === 'supabase') {
-          // Supabaseを使用（新しい抽象化レイヤー）
-          const { saveEntityEmbedding } = await import('./vectorSearchAdapter');
-          await saveEntityEmbedding(
-            entityId,
-            orgOrCompanyId,
-            entity.companyId || null,
-            combinedEmbedding,
-            {
-              name: entity.name,
-              type: entity.type,
-              aliases: entity.aliases,
-              metadata: entity.metadata,
-              embeddingModel: CURRENT_EMBEDDING_MODEL,
-              embeddingVersion: CURRENT_EMBEDDING_VERSION,
-            }
-          );
-        } else {
-          // ChromaDBを使用（既存の実装）
-          const { saveEntityEmbeddingToChroma } = await import('./entityEmbeddingsChroma');
-          await saveEntityEmbeddingToChroma(entityId, orgOrCompanyId, entity);
+    // ベクトル検索バックエンドに保存（Supabase専用）
+    try {
+      // Supabaseを使用（新しい抽象化レイヤー）
+      const { saveEntityEmbedding } = await import('./vectorSearchAdapter');
+      await saveEntityEmbedding(
+        entityId,
+        orgOrCompanyId,
+        entity.companyId || null,
+        combinedEmbedding,
+        {
+          name: entity.name,
+          type: entity.type,
+          aliases: entity.aliases,
+          metadata: entity.metadata,
+          embeddingModel: CURRENT_EMBEDDING_MODEL,
+          embeddingVersion: CURRENT_EMBEDDING_VERSION,
         }
-        
-        // 同期状態を更新（ChromaDBの場合のみ）
-        if (backend === 'chromadb') {
-          try {
-            await callTauriCommand('update_chroma_sync_status', {
-              entityType: 'entity',
-              entityId: entityId,
-              synced: true,
-              error: null,
-            });
-          } catch (syncError: any) {
-            console.warn(`同期状態の更新に失敗しました: ${entityId}`, syncError?.message);
-          }
-        }
-      } catch (error: any) {
-        // 同期状態を失敗として更新（ChromaDBの場合のみ）
-        if (backend === 'chromadb') {
-          try {
-            await callTauriCommand('update_chroma_sync_status', {
-              entityType: 'entity',
-              entityId: entityId,
-              synced: false,
-              error: error?.message || String(error),
-            });
-          } catch (syncError: any) {
-            console.warn(`同期状態の更新に失敗しました: ${entityId}`, syncError?.message);
-          }
-        }
-        throw new Error(`エンティティ埋め込みの保存に失敗しました: ${error?.message || String(error)}`);
-      }
-    } else {
-      throw new Error('エンティティ埋め込みの保存にはベクトル検索バックエンド（ChromaDBまたはSupabase）が必要です');
+      );
+    } catch (error: any) {
+      throw new Error(`エンティティ埋め込みの保存に失敗しました: ${error?.message || String(error)}`);
     }
   } catch (error) {
     console.error('エンティティ埋め込みの保存エラー:', error);
@@ -201,23 +161,31 @@ export async function getEntityEmbedding(
         }
       }
 
+      // Supabaseに移行済みのため、ChromaDBからの取得は不要
+      // Supabaseから直接取得
       if (orgId) {
         try {
-          const { getEntityEmbeddingFromChroma } = await import('./entityEmbeddingsChroma');
-          const embedding = await Promise.race([
-            getEntityEmbeddingFromChroma(entityId, orgId),
-            new Promise<null>((_, reject) => 
-              setTimeout(() => reject(new Error('タイムアウト')), 30000)
-            )
-          ]);
-          return embedding;
-        } catch (chromaError: any) {
-          const errorMessage = chromaError?.message || String(chromaError);
-          if (errorMessage.includes('タイムアウト') || 
-              errorMessage.includes('ChromaDBサーバーの起動に失敗しました') ||
-              errorMessage.includes('ChromaDBクライアントが初期化されていません')) {
-            return null;
+          const { getSupabaseClient } = await import('./utils/supabaseClient');
+          const supabase = getSupabaseClient();
+          const { data: existing } = await supabase
+            .from('entity_embeddings')
+            .select('id, embedding, name, type, aliases, metadata')
+            .eq('id', entityId)
+            .single();
+          
+          if (existing && existing.embedding && Array.isArray(existing.embedding) && existing.embedding.length > 0) {
+            return {
+              combinedEmbedding: existing.embedding,
+              name: existing.name,
+              type: existing.type,
+              aliases: existing.aliases ? JSON.parse(existing.aliases) : [],
+              metadata: existing.metadata ? JSON.parse(existing.metadata) : {},
+            };
           }
+          return null;
+        } catch (error: any) {
+          console.debug('Supabase埋め込み取得エラー（無視）:', error);
+          return null;
         }
       }
       return null;
@@ -238,17 +206,14 @@ export async function findSimilarEntities(
   limit: number = 5,
   organizationId?: string
 ): Promise<Array<{ entityId: string; similarity: number }>> {
-  if (shouldUseChroma()) {
-    try {
-      const { findSimilarEntitiesChroma } = await import('./entityEmbeddingsChroma');
-      return await findSimilarEntitiesChroma(queryText, limit, organizationId);
-    } catch (chromaError: any) {
-      console.error('ChromaDBでの検索に失敗しました:', chromaError?.message || chromaError);
-      return [];
-    }
+  // Supabase pgvectorを使用
+  try {
+    const { findSimilarEntities } = await import('./vectorSearchAdapter');
+    return await findSimilarEntities(queryText, limit, organizationId || undefined, undefined);
+  } catch (error: any) {
+    console.error('Supabaseでの検索に失敗しました:', error?.message || error);
+    return [];
   }
-  
-  return [];
 }
 
 /**
@@ -330,71 +295,28 @@ export async function batchUpdateEntityEmbeddings(
         
         if (!forceRegenerate) {
           try {
-            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-            let entityDoc: any = null;
-            
-            if (useSupabase) {
-              // Supabase経由で取得
-              const { getDocViaDataSource } = await import('./dataSourceAdapter');
-              const entityData = await getDocViaDataSource('entities', entityId);
-              if (entityData) {
-                entityDoc = { exists: true, data: entityData };
-              }
-            } else {
-              // SQLite経由で取得
-              entityDoc = await callTauriCommand('doc_get', {
-                collectionName: 'entities',
-                docId: entityId,
-              });
-            }
+            // Supabase専用（環境変数チェック不要）
+            const { getDocViaDataSource } = await import('./dataSourceAdapter');
+            const entityData = await getDocViaDataSource('entities', entityId);
+            const entityDoc = entityData ? { exists: true, data: entityData } : null;
             
             if (entityDoc?.exists && entityDoc?.data) {
-              const chromaSynced = entityDoc.data.chromaSynced;
-              if (chromaSynced === 1) {
-                try {
-                  const existing = await getEntityEmbedding(entityId, orgOrCompanyId);
-                  if (existing && existing.combinedEmbedding && Array.isArray(existing.combinedEmbedding) && existing.combinedEmbedding.length > 0) {
-                    const current = ++processedCount;
-                    skippedCount++;
-                    onProgress?.(current, entityIds.length, entityId, 'skipped');
-                    return { status: 'skipped' as const };
-                  } else {
-                    try {
-                      // Supabase使用時はupdate_chroma_sync_statusをスキップ
-                      if (!useSupabase) {
-                        await callTauriCommand('update_chroma_sync_status', {
-                          entityType: 'entity',
-                          entityId: entityId,
-                          synced: false,
-                          error: 'ChromaDBに有効な埋め込みが存在しないため再生成',
-                        });
-                      }
-                    } catch (resetError) {
-                      console.warn(`chromaSyncedフラグのリセットエラー:`, resetError);
-                    }
-                  }
-                } catch (chromaCheckError) {
-                  console.warn(`ChromaDB確認エラー（続行）: ${entityId}`, chromaCheckError);
+              // chromaSyncedフラグは使用しない（Supabaseに移行済み）
+              try {
+                const existing = await getEntityEmbedding(entityId, orgOrCompanyId);
+                if (existing && existing.combinedEmbedding && Array.isArray(existing.combinedEmbedding) && existing.combinedEmbedding.length > 0) {
+                  const current = ++processedCount;
+                  skippedCount++;
+                  onProgress?.(current, entityIds.length, entityId, 'skipped');
+                  return { status: 'skipped' as const };
                 }
+              } catch (checkError) {
+                // 埋め込み確認エラーは無視して続行
               }
             }
           } catch (error: any) {
             // データ取得に失敗した場合は続行
             console.warn(`エンティティ取得エラー（続行）: ${entityId}`, error?.message);
-          }
-        }
-        
-        if (!forceRegenerate) {
-          try {
-            const existing = await getEntityEmbedding(entityId, orgOrCompanyId);
-            if (existing && existing.combinedEmbedding && Array.isArray(existing.combinedEmbedding) && existing.combinedEmbedding.length > 0) {
-              const current = ++processedCount;
-              skippedCount++;
-              onProgress?.(current, entityIds.length, entityId, 'skipped');
-              return { status: 'skipped' as const };
-            }
-          } catch (chromaCheckError) {
-            // ChromaDB確認エラーは無視して続行
           }
         }
 
@@ -415,20 +337,8 @@ export async function batchUpdateEntityEmbeddings(
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`エンティティ ${entityId} の埋め込み生成エラー:`, errorMessage);
         
-        try {
-          // Supabase使用時はupdate_chroma_sync_statusをスキップ
-          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-          if (!useSupabase) {
-            await callTauriCommand('update_chroma_sync_status', {
-              entityType: 'entity',
-              entityId: entityId,
-              synced: false,
-              error: errorMessage,
-            });
-          }
-        } catch (syncStatusError) {
-          console.warn(`エラーメッセージの保存に失敗しました: ${entityId}`, syncStatusError);
-        }
+        // Supabase専用（ChromaDBの同期ステータス更新は不要）
+        // ChromaDBはTypeScript側では使用しないため、この処理は削除
         
         errorCount++;
         onProgress?.(current, entityIds.length, entityId, 'error');

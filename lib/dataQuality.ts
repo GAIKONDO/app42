@@ -4,7 +4,7 @@
  */
 
 import { callTauriCommand } from './localFirebase';
-import { shouldUseChroma } from './chromaConfig';
+import { shouldUseChroma } from './vectorSearchConfig';
 
 // データ品質レポート
 export interface DataQualityReport {
@@ -91,24 +91,35 @@ export async function checkDataQuality(
         let actualChromaEntityIds = new Set<string>();
         
         if (organizationId) {
-          // 特定の組織の場合
-          const { countEntitiesInChroma } = await import('./entityEmbeddingsChroma');
-          chromaCount = await countEntitiesInChroma(organizationId);
-          console.log(`[checkDataQuality] ChromaDBコレクション entities_${organizationId} の件数: ${chromaCount}件`);
+          // Supabaseに移行済みのため、ChromaDBカウントは不要
+          // Supabaseから直接カウントする場合は、以下のように実装
+          try {
+            const { getSupabaseClient } = await import('./utils/supabaseClient');
+            const supabase = getSupabaseClient();
+            const { count } = await supabase
+              .from('entity_embeddings')
+              .select('*', { count: 'exact', head: true })
+              .eq('organization_id', organizationId);
+            chromaCount = count || 0;
+            console.log(`[checkDataQuality] Supabase entity_embeddingsテーブルの件数: ${chromaCount}件`);
+          } catch (error) {
+            console.warn('[checkDataQuality] Supabaseカウントエラー:', error);
+            chromaCount = 0;
+          }
           
           // 実際にChromaDBからエンティティIDを取得して確認（サンプルチェック）
-          // 注意: 全件取得はパフォーマンスの問題があるため、サンプルチェックのみ
-          if (chromaCount > 0) {
-            try {
-              // 検索で存在確認を試みる（簡易的な方法）
-              const { findSimilarEntitiesChroma } = await import('./entityEmbeddingsChroma');
-              const sampleResults = await findSimilarEntitiesChroma('', 100, organizationId);
-              sampleResults.forEach(r => actualChromaEntityIds.add(r.entityId));
-              console.log(`[checkDataQuality] ChromaDBから取得したエンティティID数（サンプル）: ${actualChromaEntityIds.size}件`);
-            } catch (sampleError) {
-              console.warn('[checkDataQuality] ChromaDBからのサンプル取得エラー:', sampleError);
-            }
-          }
+          // Supabaseに移行済みのため、ChromaDBからの取得は不要
+          // Supabaseから直接確認する場合は、以下のように実装
+          // const { getSupabaseClient } = await import('./utils/supabaseClient');
+          // const supabase = getSupabaseClient();
+          // const { data } = await supabase
+          //   .from('entity_embeddings')
+          //   .select('id')
+          //   .eq('organization_id', organizationId)
+          //   .limit(100);
+          // if (data) {
+          //   data.forEach(r => actualChromaEntityIds.add(r.id));
+          // }
         } else {
           // 全組織の場合、すべての組織のコレクションを確認
           try {
@@ -126,18 +137,15 @@ export async function checkDataQuality(
             const allOrgIds = collectOrgIds(orgTreeResult || []);
             console.log(`[checkDataQuality] 確認対象組織数: ${allOrgIds.length}件`);
             
-            for (const orgId of allOrgIds) {
-              try {
-                const { countEntitiesInChroma } = await import('./entityEmbeddingsChroma');
-                const orgCount = await countEntitiesInChroma(orgId);
-                chromaCount += orgCount;
-                if (orgCount > 0) {
-                  console.log(`[checkDataQuality] ChromaDBコレクション entities_${orgId} の件数: ${orgCount}件`);
-                }
-              } catch (orgError) {
-                console.warn(`[checkDataQuality] 組織 ${orgId} のChromaDB確認エラー:`, orgError);
-              }
-            }
+            // Supabaseに移行済みのため、ChromaDBカウントは不要
+            // Supabaseから直接カウントする場合は、以下のように実装
+            // const { getSupabaseClient } = await import('./utils/supabaseClient');
+            // const supabase = getSupabaseClient();
+            // const { count } = await supabase
+            //   .from('entity_embeddings')
+            //   .select('*', { count: 'exact', head: true })
+            //   .eq('organization_id', orgId);
+            // chromaCount += count || 0;
           } catch (orgTreeError) {
             console.warn('[checkDataQuality] 組織ツリー取得エラー:', orgTreeError);
           }

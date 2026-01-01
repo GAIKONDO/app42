@@ -4,7 +4,7 @@
 
 import type { Entity } from '@/types/entity';
 import type { KnowledgeGraphSearchResult, SearchFilters } from './types';
-import { findSimilarEntitiesChroma } from '../entityEmbeddingsChroma';
+// Supabaseに移行済みのため、ChromaDB専用実装は不要
 import { findSimilarEntities as findSimilarEntitiesAdapter } from '../vectorSearchAdapter';
 import { getVectorSearchBackend } from '../vectorSearchConfig';
 import { getEntitiesByIds } from '../entityApi';
@@ -68,15 +68,9 @@ export async function searchEntities(
                 return [];
               }
             } else {
-              // ChromaDBを使用（既存の実装）
-              return findSimilarEntitiesChroma(
-                queryText,
-                limit * 2,
-                filters?.organizationId
-              ).catch(error => {
-                console.warn('[searchEntities] ベクトル検索エラー:', error);
-                return [];
-              });
+              // Supabaseに移行済みのため、ChromaDBは使用しない
+              console.warn('[searchEntities] ChromaDBは使用されていません。Supabaseを使用してください。');
+              return [];
             }
           })()
         : Promise.resolve([]),

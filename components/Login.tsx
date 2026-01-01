@@ -73,17 +73,12 @@ export default function Login() {
             setLoading(false);
             return;
           }
-          // ログインエラーの処理
-          const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+          // ログインエラーの処理（Supabase専用）
           if (err.message?.includes('ログインエラー') || 
               err.message?.includes('Query returned no rows') ||
               err.message?.includes('Invalid login credentials') ||
               err.message?.includes('invalid_credentials')) {
-            if (useSupabase) {
-              setError('メールアドレスまたはパスワードが正しくありません。\n\nSupabaseを使用している場合、ユーザーが登録されていない可能性があります。\n「新規登録はこちら」をクリックして、まずユーザーを登録してください。');
-            } else {
-              setError('メールアドレスまたはパスワードが正しくありません。\n\nデフォルトユーザーでログインする場合:\n- メールアドレス: admin@example.com\n- パスワード: admin123\n\n新規登録が必要な場合は「新規登録はこちら」をクリックしてください。');
-            }
+            setError('メールアドレスまたはパスワードが正しくありません。\n\nSupabaseを使用している場合、ユーザーが登録されていない可能性があります。\n「新規登録はこちら」をクリックして、まずユーザーを登録してください。');
             setLoading(false);
             return;
           }

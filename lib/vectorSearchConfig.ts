@@ -1,54 +1,38 @@
 /**
- * ベクトル検索の設定と切り替え
- * ChromaDBとSupabase（pgvector）を環境変数で切り替え可能にする
+ * ベクトル検索の設定
+ * Supabase（pgvector）専用
  */
 
 /**
  * ベクトル検索のバックエンドタイプ
+ * 現在はSupabaseのみサポート
  */
-export type VectorSearchBackend = 'chromadb' | 'supabase';
+export type VectorSearchBackend = 'supabase';
 
 /**
  * 使用するベクトル検索バックエンドを取得
- * 
- * 環境変数の優先順位:
- * 1. NEXT_PUBLIC_USE_SUPABASE_VECTOR_SEARCH=true → Supabase
- * 2. NEXT_PUBLIC_USE_SUPABASE=true → Supabase（既存のSupabase設定を利用）
- * 3. それ以外 → ChromaDB（デフォルト）
+ * Supabase専用（常に'supabase'を返す）
  */
 export function getVectorSearchBackend(): VectorSearchBackend {
-  // 明示的にSupabaseベクトル検索を指定
-  if (process.env.NEXT_PUBLIC_USE_SUPABASE_VECTOR_SEARCH === 'true') {
-    return 'supabase';
-  }
-
-  // 既存のSupabase設定がある場合、Supabaseを使用
-  if (process.env.NEXT_PUBLIC_USE_SUPABASE === 'true') {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    
-    if (supabaseUrl && supabaseAnonKey) {
-      return 'supabase';
-    }
-  }
-
-  // デフォルトはChromaDB
-  return 'chromadb';
+  // Supabase専用
+  return 'supabase';
 }
 
 /**
  * ChromaDBを使用するかどうか
- * 後方互換性のため、既存のshouldUseChroma()関数の代替
+ * 後方互換性のため残しているが、常にfalseを返す
+ * @deprecated ChromaDBは使用されていません。Supabaseを使用してください。
  */
 export function shouldUseChroma(): boolean {
-  return getVectorSearchBackend() === 'chromadb';
+  return false;
 }
 
 /**
  * Supabaseを使用するかどうか
+ * 常にtrueを返す（Supabase専用）
  */
 export function shouldUseSupabase(): boolean {
-  return getVectorSearchBackend() === 'supabase';
+  return true;
 }
 
 /**
@@ -69,8 +53,8 @@ export function getVectorSearchConfig(): {
   
   return {
     backend,
-    isChromaDB: backend === 'chromadb',
-    isSupabase: backend === 'supabase',
+    isChromaDB: false, // ChromaDBは使用されていません
+    isSupabase: true, // Supabase専用
     config: {
       useSupabaseVectorSearch: process.env.NEXT_PUBLIC_USE_SUPABASE_VECTOR_SEARCH,
       useSupabase: process.env.NEXT_PUBLIC_USE_SUPABASE,

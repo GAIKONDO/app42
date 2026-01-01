@@ -10,7 +10,7 @@ import type { TopicEmbedding } from '@/types/topicMetadata';
 import { getAllEntities } from './entityApi';
 import { getAllRelations } from './relationApi';
 import { getAllTopicsBatch } from './orgApi';
-import { shouldUseChroma } from './chromaConfig';
+import { shouldUseChroma } from './vectorSearchConfig';
 import { getVectorSearchBackend } from './vectorSearchConfig';
 import { getRelationEmbedding } from './relationEmbeddings';
 import { getSupabaseClient } from './utils/supabaseClient';

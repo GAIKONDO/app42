@@ -346,8 +346,8 @@ export async function getAllTopics(organizationId: string): Promise<TopicInfo[]>
  */
 export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    console.log(`📖 [getAllTopicsBatch] 開始: 全組織のトピックを一括取得（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
+    // Supabase専用（環境変数チェック不要）
+    console.log('📖 [getAllTopicsBatch] 開始: 全組織のトピックを一括取得（Supabaseから取得）');
     
     const allMeetingNotes = await getAllMeetingNotes();
     console.log('📖 [getAllTopicsBatch] 全議事録数:', allMeetingNotes.length);
@@ -435,37 +435,23 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
     const topicsFromDbMap = new Map<string, { createdAt?: string; updatedAt?: string; topicDate?: string }>();
     
     try {
-      let allTopicsFromDb: Array<{ id: string; data: any }> = [];
+      // Supabase専用（環境変数チェック不要）
+      const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
+      const allTopicsResult = await getCollectionViaDataSource('topics');
       
-      if (useSupabase) {
-        // Supabase使用時はDataSource経由で取得
-        const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
-        const allTopicsResult = await getCollectionViaDataSource('topics');
-        
-        // Supabaseから取得したデータは直接配列形式
-        allTopicsFromDb = Array.isArray(allTopicsResult)
-          ? allTopicsResult.map((item: any) => ({
-              id: item.id,
-              data: item, // Supabaseの場合は直接オブジェクト
-            }))
-          : [];
-        console.log('📖 [getAllTopicsBatch] topicsテーブルから取得（Supabase）:', allTopicsFromDb.length, '件');
-      } else {
-        // SQLite使用時はTauriコマンド経由
-        const { callTauriCommand } = await import('../localFirebase');
-        const allTopicsResult = await callTauriCommand('query_get', {
-          collectionName: 'topics',
-          conditions: {},
-        });
-        
-        allTopicsFromDb = (allTopicsResult || []) as Array<{ id: string; data: any }>;
-        console.log('📖 [getAllTopicsBatch] topicsテーブルから取得（SQLite）:', allTopicsFromDb.length, '件');
-      }
+      // Supabaseから取得したデータは直接配列形式
+      const allTopicsFromDb: Array<{ id: string; data: any }> = Array.isArray(allTopicsResult)
+        ? allTopicsResult.map((item: any) => ({
+            id: item.id,
+            data: item, // Supabaseの場合は直接オブジェクト
+          }))
+        : [];
+      console.log('📖 [getAllTopicsBatch] topicsテーブルから取得（Supabase）:', allTopicsFromDb.length, '件');
       
       // すべてのトピックをマップに登録（createdAt/updatedAt/topicDate補完用）
       for (const item of allTopicsFromDb) {
-        // Supabaseの場合はitem.dataが直接オブジェクト、SQLiteの場合はitem.data
-        const topicData = useSupabase ? item.data : item.data;
+        // Supabaseの場合はitem.dataが直接オブジェクト
+        const topicData = item.data;
         const topicId = topicData.topicId || topicData.topicid;
         const meetingNoteId = topicData.meetingNoteId || topicData.meetingnoteid;
         if (topicId && meetingNoteId) {
@@ -479,7 +465,7 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
       }
       
       const graphvizTopics = allTopicsFromDb.filter(item => {
-        const topicData = useSupabase ? item.data : item.data;
+        const topicData = item.data;
         const meetingNoteId = topicData?.meetingNoteId || topicData?.meetingnoteid || '';
         return meetingNoteId.startsWith('graphviz_');
       });
@@ -487,7 +473,7 @@ export async function getAllTopicsBatch(): Promise<TopicInfo[]> {
       console.log('📖 [getAllTopicsBatch] Graphvizカードのトピック数:', graphvizTopics.length, '/ 全トピック数:', allTopicsFromDb.length);
       
       for (const item of graphvizTopics) {
-        const topicData = useSupabase ? item.data : item.data;
+        const topicData = item.data;
         const topicId = topicData.topicId || topicData.topicid;
         const title = topicData.title;
         if (!topicId || !title) continue;

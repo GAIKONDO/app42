@@ -12,7 +12,7 @@ import {
   cosineSimilarity 
 } from './embeddings';
 import type { TopicEmbedding, TopicMetadata, TopicSemanticCategory } from '@/types/topicMetadata';
-import { shouldUseChroma } from './chromaConfig';
+import { shouldUseChroma } from './vectorSearchConfig';
 import { getVectorSearchBackend } from './vectorSearchConfig';
 import { saveTopicEmbedding as saveTopicEmbeddingAdapter } from './vectorSearchAdapter';
 import { getTopicsByIds } from './topicApi';
@@ -61,21 +61,9 @@ export async function saveTopicEmbedding(
       let description: string | undefined;
       
       try {
-        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-        let topicDoc: any = null;
-        
-        if (useSupabase) {
-          // Supabase経由で取得
-          const { getDocViaDataSource } = await import('./dataSourceAdapter');
-          topicDoc = await getDocViaDataSource('topics', embeddingId);
-        } else {
-          // SQLite経由で取得
-          const { callTauriCommand } = await import('./localFirebase');
-          topicDoc = await callTauriCommand('doc_get', {
-            collectionName: 'topics',
-            docId: embeddingId,
-          });
-        }
+        // Supabase専用（環境変数チェック不要）
+        const { getDocViaDataSource } = await import('./dataSourceAdapter');
+        const topicDoc = await getDocViaDataSource('topics', embeddingId);
         
         if (topicDoc) {
           const topicData = topicDoc.data || topicDoc;
@@ -133,12 +121,8 @@ export async function saveTopicEmbedding(
     }
     
     // topicDate（登録日）を設定
-    // 注意: SupabaseスキーマにtopicDateカラムが存在しないため、Supabase使用時は除外
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    if (topicDate && !useSupabase) {
-      // SQLite使用時のみtopicDateを設定
-      topicData.topicDate = topicDate;
-    }
+    // 注意: SupabaseスキーマにtopicDateカラムが存在しないため、Supabase専用では除外
+    // topicDateは使用しない（Supabase専用）
 
     // メタデータフィールドを追加
     if (metadata?.semanticCategory) {
@@ -254,9 +238,8 @@ export async function saveTopicEmbedding(
             throw error;
           }
         } else {
-          // ChromaDBを使用（既存の実装）
-          const { saveTopicEmbeddingToChroma } = await import('./topicEmbeddingsChroma');
-          await saveTopicEmbeddingToChroma(topicId, meetingNoteId, organizationId, title, content, metadata, regulationId);
+          // Supabaseに移行済みのため、ChromaDBは使用しない
+          console.warn('[saveTopicEmbedding] ChromaDBは使用されていません。Supabaseを使用してください。');
         }
         
         // topicsテーブルにメタデータを保存
@@ -450,24 +433,10 @@ export async function getTopicEmbedding(
     }
     const embeddingId = `${parentId}-topic-${topicId}`;
     
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    let result: any = null;
-    
-    if (useSupabase) {
-      // Supabase経由で取得
-      const { getDocViaDataSource } = await import('./dataSourceAdapter');
-      result = await getDocViaDataSource('topics', embeddingId);
-      if (result) {
-        result = { exists: true, data: result };
-      }
-    } else {
-      // SQLite経由で取得
-      const { callTauriCommand } = await import('./localFirebase');
-      result = await callTauriCommand('doc_get', {
-        collectionName: 'topics',
-        docId: embeddingId,
-      });
-    }
+    // Supabase専用（環境変数チェック不要）
+    const { getDocViaDataSource } = await import('./dataSourceAdapter');
+    const resultData = await getDocViaDataSource('topics', embeddingId);
+    const result = resultData ? { exists: true, data: resultData } : null;
     
     if (result && result.data) {
       return result.data as TopicEmbedding;
@@ -490,22 +459,60 @@ export async function findSimilarTopics(
   organizationId?: string,
   regulationId?: string
 ): Promise<Array<{ topicId: string; meetingNoteId?: string; regulationId?: string; similarity: number; title?: string; contentSummary?: string }>> {
-  if (shouldUseChroma()) {
-    try {
-      const { findSimilarTopicsChroma } = await import('./topicEmbeddingsChroma');
-      const results = await findSimilarTopicsChroma(queryText, limit, organizationId);
-      // meetingNoteIdまたはregulationIdでフィルタリング
-      let filteredResults = results;
-      if (meetingNoteId) {
-        filteredResults = results.filter(r => r.meetingNoteId === meetingNoteId);
-      } else if (regulationId) {
-        filteredResults = results.filter(r => r.regulationId === regulationId);
-      }
-      return filteredResults;
-    } catch (chromaError: any) {
-      console.error('ChromaDBでの検索に失敗しました:', chromaError?.message || chromaError);
-      return [];
+  // Supabase pgvectorを使用
+  try {
+    const { findSimilarTopics } = await import('./vectorSearchAdapter');
+    const { generateEmbedding } = await import('./embeddings');
+    const queryEmbedding = await generateEmbedding(queryText);
+    const results = await findSimilarTopics(queryEmbedding, limit, organizationId || undefined, undefined);
+    
+    // VectorSearchResult形式を変換
+    const topicResults = await Promise.all(
+      results.map(async (result) => {
+        try {
+          // topic_embeddingsテーブルからmeeting_note_idを取得
+          const { getSupabaseClient } = await import('./utils/supabaseClient');
+          const supabase = getSupabaseClient();
+          const { data: embeddingData } = await supabase
+            .from('topic_embeddings')
+            .select('meeting_note_id, regulation_id, title, content_summary')
+            .eq('id', result.id)
+            .single();
+          
+          // result.idは {meetingNoteId}-topic-{topicId} または {regulationId}-topic-{topicId} 形式
+          const topicIdMatch = result.id.match(/^(.+?)-topic-(.+)$/);
+          const actualTopicId = topicIdMatch ? topicIdMatch[2] : result.id;
+          const parentId = topicIdMatch ? topicIdMatch[1] : undefined;
+          
+          return {
+            topicId: actualTopicId,
+            meetingNoteId: embeddingData?.meeting_note_id || (parentId?.startsWith('meeting_') ? parentId : undefined),
+            regulationId: embeddingData?.regulation_id || (parentId && !parentId.startsWith('meeting_') ? parentId : undefined),
+            similarity: result.similarity,
+            title: embeddingData?.title,
+            contentSummary: embeddingData?.content_summary,
+          };
+        } catch (error) {
+          console.warn(`[findSimilarTopics] トピック ${result.id} の取得エラー:`, error);
+          return null;
+        }
+      })
+    );
+    
+    const validResults = topicResults.filter((r): r is NonNullable<typeof r> => r !== null);
+    
+    // meetingNoteIdまたはregulationIdでフィルタリング
+    let filteredResults = validResults;
+    if (meetingNoteId) {
+      filteredResults = validResults.filter(r => r.meetingNoteId === meetingNoteId);
+    } else if (regulationId) {
+      filteredResults = validResults.filter(r => r.regulationId === regulationId);
     }
+    
+    return filteredResults;
+  } catch (error: any) {
+    console.error('Supabaseでの検索に失敗しました:', error?.message || error);
+    return [];
   }
   
   return [];
@@ -627,54 +634,14 @@ export async function batchUpdateTopicEmbeddings(
         
         if (!forceRegenerate) {
           try {
-            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-            let topicDoc: any = null;
+            // Supabase専用（環境変数チェック不要）
+            const { getDocViaDataSource } = await import('./dataSourceAdapter');
+            const topicData = await getDocViaDataSource('topics', topicEmbeddingId);
+            const topicDoc = topicData ? { exists: true, data: topicData } : null;
             
-            if (useSupabase) {
-              // Supabase経由で取得
-              const { getDocViaDataSource } = await import('./dataSourceAdapter');
-              const topicData = await getDocViaDataSource('topics', topicEmbeddingId);
-              if (topicData) {
-                topicDoc = { exists: true, data: topicData };
-              }
-            } else {
-              // SQLite経由で取得
-              topicDoc = await callTauriCommand('doc_get', {
-                collectionName: 'topics',
-                docId: topicEmbeddingId,
-              });
-            }
-            
+            // chromaSyncedフラグは使用しない（Supabaseに移行済み）
             if (topicDoc?.exists && topicDoc?.data) {
-              const chromaSynced = topicDoc.data.chromaSynced;
-              if (chromaSynced === 1 || chromaSynced === true || chromaSynced === '1') {
-                try {
-                  const { getTopicEmbeddingFromChroma } = await import('./topicEmbeddingsChroma');
-                  const existing = await getTopicEmbeddingFromChroma(topic.id, organizationId);
-                  if (existing && existing.combinedEmbedding && Array.isArray(existing.combinedEmbedding) && existing.combinedEmbedding.length > 0) {
-                    const current = ++processedCount;
-                    skippedCount++;
-                    onProgress?.(current, topics.length, topic.id, 'skipped');
-                    return { status: 'skipped' as const };
-                  } else {
-                    try {
-                      // Supabase使用時はupdate_chroma_sync_statusをスキップ
-                      if (!useSupabase) {
-                        await callTauriCommand('update_chroma_sync_status', {
-                          entityType: 'topic',
-                          entityId: topicEmbeddingId,
-                          synced: false,
-                          error: 'ChromaDBに存在しないため再生成',
-                        });
-                      }
-                    } catch (resetError) {
-                      console.warn(`chromaSyncedフラグのリセットエラー:`, resetError);
-                    }
-                  }
-                } catch (chromaCheckError) {
-                  console.warn(`ChromaDB確認エラー（続行）: ${topic.id}`, chromaCheckError);
-                }
-              }
+              // 既存の埋め込み確認はSupabaseで行う
             }
           } catch (error: any) {
             // データ取得に失敗した場合は続行
@@ -682,18 +649,26 @@ export async function batchUpdateTopicEmbeddings(
           }
         }
         
+        // Supabaseに移行済みのため、既存埋め込みの確認はSupabaseで行う
         if (!forceRegenerate) {
           try {
-            const { getTopicEmbeddingFromChroma } = await import('./topicEmbeddingsChroma');
-            const existing = await getTopicEmbeddingFromChroma(topic.id, organizationId);
-            if (existing && existing.combinedEmbedding && Array.isArray(existing.combinedEmbedding) && existing.combinedEmbedding.length > 0) {
+            const { getSupabaseClient } = await import('./utils/supabaseClient');
+            const supabase = getSupabaseClient();
+            const { data: existing } = await supabase
+              .from('topic_embeddings')
+              .select('id, embedding')
+              .eq('id', topic.id)
+              .single();
+            
+            if (existing && existing.embedding && Array.isArray(existing.embedding) && existing.embedding.length > 0) {
               const current = ++processedCount;
               skippedCount++;
               onProgress?.(current, topics.length, topic.id, 'skipped');
               return { status: 'skipped' as const };
             }
-          } catch (chromaCheckError) {
-            // ChromaDB確認エラーは無視して続行
+          } catch (checkError) {
+            // Supabase確認エラーは無視して続行
+            console.debug('Supabase埋め込み確認エラー（続行）:', checkError);
           }
         }
 

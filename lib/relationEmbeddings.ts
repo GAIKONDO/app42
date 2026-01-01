@@ -8,7 +8,7 @@ import { generateEmbedding } from './embeddings';
 import type { RelationEmbedding } from '@/types/relationEmbedding';
 import type { Relation } from '@/types/relation';
 import { getRelationById, getAllRelations, getRelationsByIds } from './relationApi';
-import { shouldUseChroma } from './chromaConfig';
+import { shouldUseChroma } from './vectorSearchConfig';
 import { getVectorSearchBackend } from './vectorSearchConfig';
 // saveRelationEmbeddingAdapterは動的インポートで使用
 import { calculateRelationScore, adjustWeightsForQuery } from './ragSearchScoring';
@@ -49,10 +49,7 @@ export async function saveRelationEmbedding(
       try {
         if (backend === 'supabase') {
           // Supabaseを使用（新しい抽象化レイヤー）
-          // 埋め込みを生成（relationEmbeddingsChromaと同じロジック）
-          const { saveRelationEmbeddingToChroma } = await import('./relationEmbeddingsChroma');
-          // 一時的にChromaDBの埋め込み生成ロジックを使用して埋め込みを生成
-          // 注意: これは後で最適化できますが、互換性のために同じロジックを使用
+          // 埋め込みを生成
           const { generateEmbedding } = await import('./embeddings');
           const { getEntityById } = await import('./entityApi');
           
@@ -139,9 +136,8 @@ export async function saveRelationEmbedding(
           );
           console.log(`✅ [saveRelationEmbedding] Supabaseにリレーション埋め込みを保存しました: ${relationId}`);
         } else {
-          // ChromaDBを使用（既存の実装）
-          const { saveRelationEmbeddingToChroma } = await import('./relationEmbeddingsChroma');
-          await saveRelationEmbeddingToChroma(relationId, topicId, orgOrCompanyId, relation);
+          // Supabaseに移行済みのため、ChromaDBは使用しない
+          console.warn('[saveRelationEmbedding] ChromaDBは使用されていません。Supabaseを使用してください。');
         }
         
         // 同期状態を更新（ChromaDBの場合のみ）
@@ -259,17 +255,33 @@ export async function getRelationEmbedding(
         }
       }
 
+      // Supabaseに移行済みのため、ChromaDBからの取得は不要
+      // Supabaseから直接取得
       if (orgId) {
         try {
-          const { getRelationEmbeddingFromChroma } = await import('./relationEmbeddingsChroma');
-          const embedding = await getRelationEmbeddingFromChroma(relationId, orgId);
-          return embedding;
-        } catch (chromaError: any) {
-          const errorMessage = chromaError?.message || String(chromaError);
-          if (errorMessage.includes('ChromaDBサーバーの起動に失敗しました') || 
-              errorMessage.includes('ChromaDBクライアントが初期化されていません')) {
-            return null;
+          const { getSupabaseClient } = await import('./utils/supabaseClient');
+          const supabase = getSupabaseClient();
+          const { data: existing } = await supabase
+            .from('relation_embeddings')
+            .select('id, embedding, topic_id, source_entity_id, target_entity_id, relation_type, description, metadata')
+            .eq('id', relationId)
+            .single();
+          
+          if (existing && existing.embedding && Array.isArray(existing.embedding) && existing.embedding.length > 0) {
+            return {
+              combinedEmbedding: existing.embedding,
+              topicId: existing.topic_id,
+              sourceEntityId: existing.source_entity_id,
+              targetEntityId: existing.target_entity_id,
+              relationType: existing.relation_type,
+              description: existing.description,
+              metadata: existing.metadata ? JSON.parse(existing.metadata) : {},
+            };
           }
+          return null;
+        } catch (error: any) {
+          console.debug('Supabase埋め込み取得エラー（無視）:', error);
+          return null;
         }
       }
       return null;
@@ -290,17 +302,14 @@ export async function findSimilarRelations(
   limit: number = 5,
   organizationId?: string
 ): Promise<Array<{ relationId: string; similarity: number }>> {
-  if (shouldUseChroma()) {
-    try {
-      const { findSimilarRelationsChroma } = await import('./relationEmbeddingsChroma');
-      return await findSimilarRelationsChroma(queryText, limit, organizationId);
-    } catch (chromaError: any) {
-      console.error('ChromaDBでの検索に失敗しました:', chromaError?.message || chromaError);
-      return [];
-    }
+  // Supabase pgvectorを使用
+  try {
+    const { findSimilarRelations } = await import('./vectorSearchAdapter');
+    return await findSimilarRelations(queryText, limit, organizationId || undefined, undefined);
+  } catch (error: any) {
+    console.error('Supabaseでの検索に失敗しました:', error?.message || error);
+    return [];
   }
-  
-  return [];
 }
 
 /**
@@ -390,71 +399,28 @@ export async function batchUpdateRelationEmbeddings(
         
         if (!forceRegenerate) {
           try {
-            const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-            let relationDoc: any = null;
-            
-            if (useSupabase) {
-              // Supabase経由で取得
-              const { getDocViaDataSource } = await import('./dataSourceAdapter');
-              const relationData = await getDocViaDataSource('relations', relationId);
-              if (relationData) {
-                relationDoc = { exists: true, data: relationData };
-              }
-            } else {
-              // SQLite経由で取得
-              relationDoc = await callTauriCommand('doc_get', {
-                collectionName: 'relations',
-                docId: relationId,
-              });
-            }
+            // Supabase専用（環境変数チェック不要）
+            const { getDocViaDataSource } = await import('./dataSourceAdapter');
+            const relationData = await getDocViaDataSource('relations', relationId);
+            const relationDoc = relationData ? { exists: true, data: relationData } : null;
             
             if (relationDoc?.exists && relationDoc?.data) {
-              const chromaSynced = relationDoc.data.chromaSynced;
-              if (chromaSynced === 1) {
-                try {
-                  const existing = await getRelationEmbedding(relationId);
-                  if (existing) {
-                    const current = ++processedCount;
-                    skippedCount++;
-                    onProgress?.(current, relationIds.length, relationId, 'skipped');
-                    return { status: 'skipped' as const };
-                  } else {
-                    try {
-                      // Supabase使用時はupdate_chroma_sync_statusをスキップ
-                      if (!useSupabase) {
-                        await callTauriCommand('update_chroma_sync_status', {
-                          entityType: 'relation',
-                          entityId: relationId,
-                          synced: false,
-                          error: 'ChromaDBに存在しないため再生成',
-                        });
-                      }
-                    } catch (resetError) {
-                      console.warn(`chromaSyncedフラグのリセットエラー:`, resetError);
-                    }
-                  }
-                } catch (chromaCheckError) {
-                  // ChromaDB確認エラーは無視して続行
+              // chromaSyncedフラグは使用しない（Supabaseに移行済み）
+              try {
+                const existing = await getRelationEmbedding(relationId);
+                if (existing) {
+                  const current = ++processedCount;
+                  skippedCount++;
+                  onProgress?.(current, relationIds.length, relationId, 'skipped');
+                  return { status: 'skipped' as const };
                 }
+              } catch (checkError) {
+                // 埋め込み確認エラーは無視して続行
               }
             }
           } catch (error: any) {
             // データ取得に失敗した場合は続行
             console.warn(`リレーション取得エラー（続行）: ${relationId}`, error?.message);
-          }
-        }
-        
-        if (!forceRegenerate) {
-          try {
-            const existing = await getRelationEmbedding(relationId);
-            if (existing) {
-              const current = ++processedCount;
-              skippedCount++;
-              onProgress?.(current, relationIds.length, relationId, 'skipped');
-              return { status: 'skipped' as const };
-            }
-          } catch (chromaCheckError) {
-            // ChromaDB確認エラーは無視して続行
           }
         }
 

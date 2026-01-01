@@ -96,10 +96,8 @@ async function loadInitiativeFromJson(initiativeId: string): Promise<FocusInitia
  * データベースから組織データを取得してOrgNodeData形式に変換
  */
 export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | null> {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  
-  // Supabase使用時はDataSource経由で取得
-  if (useSupabase) {
+  // Supabase専用（環境変数チェック不要）
+  try {
     try {
       console.log('🔍 [getOrgTreeFromDb] Supabase経由で組織ツリーを取得します');
       const { getDataSourceInstance } = await import('./dataSource');
@@ -229,170 +227,13 @@ export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | n
       }
       
       return null;
-    } catch (error) {
-      console.error('Supabase経由の組織データ取得に失敗:', error);
-      // フォールバック: Tauriコマンド経由
-      console.warn('Supabase経由の取得に失敗、Tauriコマンドにフォールバック:', error);
+    } catch (error: any) {
+      console.error('❌ [getOrgTreeFromDb] Supabase経由の取得に失敗:', error);
+      throw error;
     }
-  }
-  
-  // ローカルSQLite使用時またはフォールバック時はTauriコマンド経由
-  try {
-    // Tauriコマンド経由で直接取得（APIサーバー経由ではなく）
-    console.log('🔍 [getOrgTreeFromDb] Tauriコマンド経由で組織ツリーを取得します');
-    const tree = await callTauriCommand('get_org_tree', { rootId: rootId || null });
-    
-    if (!tree || tree.length === 0) {
-      return null;
-    }
-
-      // デバッグ: Tauriコマンドが返すデータを確認
-      console.log('🔍 [getOrgTreeFromDb] Tauriコマンドが返すデータ:', {
-        treeLength: tree.length,
-        rootOrgs: tree.map((org: any, index: number) => {
-          const orgData = org.organization || org;
-          const finalId = orgData.id || org.id;
-          console.log(`🔍 [getOrgTreeFromDb] ルート組織 #${index + 1} の詳細:`, {
-            finalId,
-            orgName: orgData.name || org.name,
-            hasOrganization: !!org.organization,
-            dbOrgId: org.id,
-            orgId: orgData.id,
-            keys: Object.keys(org),
-            orgKeys: org.organization ? Object.keys(org.organization) : [],
-            rawOrgString: JSON.stringify(org).substring(0, 1000), // 生データの最初の1000文字
-            parentId: orgData.parent_id || org.parent_id || org.parentId,
-          });
-          return {
-            id: finalId,
-            name: orgData.name || org.name,
-            hasOrganization: !!org.organization,
-            keys: Object.keys(org),
-            rawOrg: org, // 生データも確認
-          };
-        }),
-      });
-
-    // rootIdが指定されている場合は、該当する組織を返す
-    if (rootId) {
-      const found = tree.find((org: any) => {
-        const orgData = org.organization || org;
-        return orgData.id === rootId;
-      });
-      if (found) {
-        return convertToOrgNodeData(found);
-      }
-      // 見つからない場合は最初の1つを返す
-      return convertToOrgNodeData(tree[0]);
-    }
-
-    // 複数のルート組織がある場合、全てを子ノードとして持つ仮想的なルートノードを作成
-    if (tree.length > 1) {
-      console.log(`⚠️ [getOrgTreeFromDb] 複数のルート組織が見つかりました (${tree.length}件)。全て表示します。`);
-      const convertedRoots = tree.map((org: any) => convertToOrgNodeData(org));
-      
-      // 仮想的なルートノードを作成（重複を識別しやすくするため）
-      const virtualRoot: OrgNodeData = {
-        id: 'virtual-root',
-        name: `全組織 (${tree.length}件のルート組織)`,
-        title: `All Organizations (${tree.length} root organizations)`,
-        description: '複数のルート組織が存在します。重複している可能性があります。',
-        children: convertedRoots,
-        members: [],
-      };
-      
-      // 重複している組織名をログに出力
-      const orgNames = convertedRoots.map((org: OrgNodeData) => org.name);
-      const duplicateNames = orgNames.filter((name: string, index: number) => orgNames.indexOf(name) !== index);
-      if (duplicateNames.length > 0) {
-        console.warn(`⚠️ [getOrgTreeFromDb] 重複している組織名:`, [...new Set(duplicateNames)]);
-      }
-      
-      return virtualRoot;
-    }
-
-    // 1つだけの場合はそのまま返す
-    return convertToOrgNodeData(tree[0]);
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の取得に失敗、Tauriコマンドにフォールバック:', error);
-    try {
-      const tree = await callTauriCommand('get_org_tree', { rootId: rootId || null });
-      
-      if (!tree || tree.length === 0) {
-        return null;
-      }
-
-      // デバッグ: Tauriコマンドが返すデータを確認
-      console.log('🔍 [getOrgTreeFromDb] Tauriコマンドが返すデータ:', {
-        treeLength: tree.length,
-        rootOrgs: tree.map((org: any) => {
-          const orgData = org.organization || org;
-          const finalId = orgData.id || org.id;
-          console.log('🔍 [getOrgTreeFromDb] ルート組織の詳細:', {
-            finalId,
-            orgName: orgData.name || org.name,
-            hasOrganization: !!org.organization,
-            dbOrgId: org.id,
-            orgId: orgData.id,
-            keys: Object.keys(org),
-            orgKeys: Object.keys(orgData),
-            rawOrg: JSON.stringify(org).substring(0, 500), // 生データの最初の500文字
-          });
-          return {
-            id: finalId,
-            name: orgData.name || org.name,
-            hasOrganization: !!org.organization,
-            keys: Object.keys(org),
-            rawOrg: org, // 生データも確認
-          };
-        }),
-      });
-
-      // rootIdが指定されている場合は、該当する組織を返す
-      if (rootId) {
-        const found = tree.find((org: any) => {
-          const orgData = org.organization || org;
-          return orgData.id === rootId;
-        });
-        if (found) {
-          return convertToOrgNodeData(found);
-        }
-        // 見つからない場合は最初の1つを返す
-        return convertToOrgNodeData(tree[0]);
-      }
-
-      // 複数のルート組織がある場合、全てを子ノードとして持つ仮想的なルートノードを作成
-      if (tree.length > 1) {
-        console.log(`⚠️ [getOrgTreeFromDb] 複数のルート組織が見つかりました (${tree.length}件)。全て表示します。`);
-        const convertedRoots = tree.map((org: any) => convertToOrgNodeData(org));
-        
-        // 仮想的なルートノードを作成（重複を識別しやすくするため）
-        const virtualRoot: OrgNodeData = {
-          id: 'virtual-root',
-          name: `全組織 (${tree.length}件のルート組織)`,
-          title: `All Organizations (${tree.length} root organizations)`,
-          description: '複数のルート組織が存在します。重複している可能性があります。',
-          children: convertedRoots,
-          members: [],
-        };
-        
-        // 重複している組織名をログに出力
-        const orgNames = convertedRoots.map((org: OrgNodeData) => org.name);
-        const duplicateNames = orgNames.filter((name: string, index: number) => orgNames.indexOf(name) !== index);
-        if (duplicateNames.length > 0) {
-          console.warn(`⚠️ [getOrgTreeFromDb] 重複している組織名:`, [...new Set(duplicateNames)]);
-        }
-        
-        return virtualRoot;
-      }
-
-      // 1つだけの場合はそのまま返す
-      return convertToOrgNodeData(tree[0]);
-    } catch (fallbackError) {
-      console.error('組織データの取得に失敗しました:', fallbackError);
-      return null;
-    }
+  } catch (error: any) {
+    console.error('❌ [getOrgTreeFromDb] エラー:', error);
+    throw error;
   }
 }
 
@@ -552,95 +393,60 @@ export async function createOrg(
   position: number,
   orgType?: string
 ): Promise<any> {
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  
-  // Supabase使用時はSupabaseDataSource経由で作成
-  if (useSupabase) {
-    try {
-      console.log('🔍 [createOrg] Supabase経由で組織を作成します');
-      const { getDataSourceInstance } = await import('./dataSource');
-      const dataSource = getDataSourceInstance();
-      
-      // parentIdが指定されている場合、親組織が存在するか確認
-      if (parentId) {
-        const parentOrg = await dataSource.doc_get('organizations', parentId);
-        if (!parentOrg) {
-          throw new Error(`親組織が見つかりません: ${parentId}`);
-        }
-      }
-      
-      // 組織データを準備（Supabaseのスキーマに合わせてカラム名を調整）
-      const orgData: any = {
-        name,
-        level,
-        levelName,
-        position,
-        type: orgType || 'organization',
-      };
-      
-      // NULLでない値のみ追加
-      if (parentId) {
-        orgData.parentId = parentId; // Supabaseスキーマでは"parentId"（引用符付き）
-      }
-      if (title) {
-        orgData.title = title;
-      }
-      if (description) {
-        orgData.description = description;
-      }
-      
-      // SupabaseDataSource経由で作成
-      const orgId = await dataSource.collection_add('organizations', orgData);
-      
-      // 作成された組織を取得して返す
-      const createdOrg = await dataSource.doc_get('organizations', orgId);
-      
-      if (!createdOrg) {
-        throw new Error('組織の作成に失敗しました: 作成後の取得に失敗');
-      }
-      
-      console.log('✅ [createOrg] Supabase経由で組織を作成成功:', {
-        id: createdOrg.id,
-        name: createdOrg.name,
-        parentId: createdOrg.parentId || null,
-      });
-      
-      return createdOrg;
-    } catch (error: any) {
-      console.error('❌ [createOrg] Supabase経由の作成に失敗:', error);
-      throw error;
-    }
-  }
-  
-  // ローカルSQLite使用時は従来の方法
+  // Supabase専用（環境変数チェック不要）
   try {
-    // Rust API経由で作成
-    const payload: any = {
-      parent_id: parentId,
-      name,
-      title: title || null,
-      description: description || null,
-      level,
-      level_name: levelName,
-      position,
-    };
-    if (orgType) {
-      payload.type = orgType;
+    console.log('🔍 [createOrg] Supabase経由で組織を作成します');
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // parentIdが指定されている場合、親組織が存在するか確認
+    if (parentId) {
+      const parentOrg = await dataSource.doc_get('organizations', parentId);
+      if (!parentOrg) {
+        throw new Error(`親組織が見つかりません: ${parentId}`);
+      }
     }
-    return await apiPost<any>('/api/organizations', payload);
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の作成に失敗、Tauriコマンドにフォールバック:', error);
-    return callTauriCommand('create_org', {
-      parentId: parentId,
+    
+    // 組織データを準備（Supabaseのスキーマに合わせてカラム名を調整）
+    const orgData: any = {
       name,
-      title,
-      description,
       level,
       levelName,
       position,
-      orgType: orgType || null,
+      type: orgType || 'organization',
+    };
+    
+    // NULLでない値のみ追加
+    if (parentId) {
+      orgData.parentId = parentId; // Supabaseスキーマでは"parentId"（引用符付き）
+    }
+    if (title) {
+      orgData.title = title;
+    }
+    if (description) {
+      orgData.description = description;
+    }
+    
+    // SupabaseDataSource経由で作成
+    const orgId = await dataSource.collection_add('organizations', orgData);
+    
+    // 作成された組織を取得して返す
+    const createdOrg = await dataSource.doc_get('organizations', orgId);
+    
+    if (!createdOrg) {
+      throw new Error('組織の作成に失敗しました: 作成後の取得に失敗');
+    }
+    
+    console.log('✅ [createOrg] Supabase経由で組織を作成成功:', {
+      id: createdOrg.id,
+      name: createdOrg.name,
+      parentId: createdOrg.parentId || null,
     });
+    
+    return createdOrg;
+  } catch (error: any) {
+    console.error('❌ [createOrg] Supabase経由の作成に失敗:', error);
+    throw error;
   }
 }
 
@@ -690,142 +496,17 @@ export async function searchOrgsByName(namePattern: string): Promise<any[]> {
 
 
 export async function deleteOrg(id: string): Promise<void> {
-  // getOrgTreeFromDbと同じ方法でSupabaseが有効かどうかを判定
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  console.log(`🗑️ [deleteOrg] 削除開始（${useSupabase ? 'Supabase' : 'SQLite'}経由）:`, id);
-  console.log(`🔍 [deleteOrg] 環境変数確認: NEXT_PUBLIC_USE_SUPABASE=${process.env.NEXT_PUBLIC_USE_SUPABASE}, useSupabase=${useSupabase}`);
+  // Supabase専用（環境変数チェック不要）
+  console.log('🗑️ [deleteOrg] 削除開始（Supabase経由）:', id);
   
-  // Supabase使用時はDataSource経由で削除
-  if (useSupabase) {
-    try {
-      // lib/orgApi/organizations.tsのdeleteOrg関数を使用
-      const { deleteOrg: deleteOrgFromOrganizations } = await import('./orgApi/organizations');
-      await deleteOrgFromOrganizations(id);
-      return;
-    } catch (error: any) {
-      console.error('❌ [deleteOrg] Supabase経由での削除が失敗しました:', error);
-      throw error;
-    }
-  }
-  
-  // 環境変数ではSupabaseが無効だが、getOrgTreeFromDbがSupabaseから取得している可能性がある
-  // 念のため、DataSourceを確認してSupabaseが有効な場合はSupabaseから削除
   try {
-    const { getDataSourceInstance } = await import('./dataSource');
-    const dataSource = getDataSourceInstance();
-    // DataSourceがSupabaseDataSourceかどうかを確認
-    const dataSourceType = dataSource.constructor.name;
-    const isSupabaseDataSource = dataSourceType === 'SupabaseDataSource';
-    
-    if (isSupabaseDataSource) {
-      console.log('🔍 [deleteOrg] 環境変数ではSupabaseが無効ですが、SupabaseDataSourceが検出されました。Supabaseから削除を試みます。');
-      try {
-        const { deleteDocViaDataSource } = await import('./dataSourceAdapter');
-        await deleteDocViaDataSource('organizations', id);
-        console.log('✅ [deleteOrg] Supabase経由で削除成功:', id);
-        // Supabaseから削除が成功した場合、SQLiteからの削除は不要
-        return;
-      } catch (supabaseError: any) {
-        const supabaseErrorMessage = supabaseError?.message || '';
-        // レコードが見つからないエラーの場合は成功として扱う
-        if (supabaseErrorMessage.includes('No rows found') || 
-            supabaseErrorMessage.includes('PGRST116') ||
-            supabaseErrorMessage.includes('Query returned no rows')) {
-          console.log('ℹ️ [deleteOrg] Supabaseからは既に削除されています:', id);
-          // Supabaseから既に削除されている場合、SQLiteからの削除は不要
-          return;
-        } else {
-          console.warn('⚠️ [deleteOrg] Supabaseからの削除に失敗しました（SQLiteからの削除は続行します）:', supabaseError);
-        }
-      }
-    }
-  } catch (dataSourceError: any) {
-    // DataSourceが利用できない場合は無視（SQLiteからの削除は続行）
-    console.log('ℹ️ [deleteOrg] DataSourceが利用できないため、SQLiteからのみ削除します:', dataSourceError?.message);
-  }
-  
-  // 削除前に、該当する組織が存在するか確認
-  try {
-    try {
-      const orgCheck = await callTauriCommand('doc_get', {
-        collectionName: 'organizations',
-        docId: id,
-      });
-      console.log('🔍 [deleteOrg] 削除前の組織確認:', {
-        id,
-        exists: orgCheck?.exists || false,
-        data: orgCheck?.data || null,
-      });
-      
-      if (!orgCheck || !orgCheck.exists) {
-        console.warn('⚠️ [deleteOrg] 削除対象の組織が存在しません:', id);
-        // 組織が存在しない場合は、エラーを投げずに成功として扱う（既に削除されている）
-        return;
-      }
-    } catch (docGetError: any) {
-      // doc_getがエラーを返す場合（「Query returned no rows」）は、組織が存在しないことを意味する
-      if (docGetError?.message?.includes('Query returned no rows') || 
-          docGetError?.message?.includes('ドキュメント取得エラー')) {
-        console.warn('⚠️ [deleteOrg] 削除対象の組織が存在しません（doc_getが行を返さない）:', id);
-        // 組織が存在しない場合は、エラーを投げずに成功として扱う（既に削除されている）
-        return;
-      } else {
-        // その他のエラーの場合は再スロー
-        throw docGetError;
-      }
-    }
-  } catch (checkError: any) {
-    console.warn('⚠️ [deleteOrg] 削除前の確認でエラーが発生しました（続行します）:', checkError);
-  }
-  
-  // Tauri環境では直接Tauriコマンドを使用（APIサーバーが起動していない可能性があるため）
-  try {
-    console.log('🗑️ [deleteOrg] Tauriコマンド経由で削除を試みます');
-    await callTauriCommand('delete_org', { id });
-    console.log('✅ [deleteOrg] Tauriコマンド経由の削除が成功しました');
-    
-    // 削除処理は同期的に実行されるため、ポーリングは不要
-    // 念のため、削除が完了したことを確認（1回だけ）
-    try {
-      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms待機してから確認
-      
-      const allOrgs = await callTauriCommand('collection_get', {
-        collectionName: 'organizations',
-      }) as any[];
-      
-      const orgStillExists = allOrgs?.some((org: any) => {
-        const orgId = org.id || org.data?.id;
-        return orgId === id;
-      }) || false;
-      
-      if (orgStillExists) {
-        console.warn('⚠️ [deleteOrg] 削除後も組織が存在しています。データベースの更新が反映されていない可能性があります。');
-        // エラーを投げない（削除処理自体は成功している可能性があるため）
-      } else {
-        console.log('✅ [deleteOrg] 削除が確認されました。組織はデータベースから削除されています。');
-      }
-    } catch (verifyError: any) {
-      // 削除後の確認で予期しないエラーが発生した場合でも、削除処理自体は成功している可能性がある
-      console.warn('⚠️ [deleteOrg] 削除後の確認でエラーが発生しました（削除処理自体は成功している可能性があります）:', verifyError);
-      // エラーを再スローしない（削除処理は成功している可能性があるため）
-    }
+    // lib/orgApi/organizations.tsのdeleteOrg関数を使用
+    const { deleteOrg: deleteOrgFromOrganizations } = await import('./orgApi/organizations');
+    await deleteOrgFromOrganizations(id);
   } catch (error: any) {
-    console.error('❌ [deleteOrg] Tauriコマンド経由の削除が失敗しました:', error);
+    console.error('❌ [deleteOrg] Supabase経由での削除が失敗しました:', error);
     throw error;
   }
-  
-  // ChromaDBのコレクションを削除（非同期、エラーは無視）
-  (async () => {
-    try {
-      const { callTauriCommand: chromaCallTauriCommand } = await import('./localFirebase');
-      await chromaCallTauriCommand('chromadb_delete_organization_collections', {
-        organizationId: id,
-      });
-      console.log(`✅ [deleteOrg] ChromaDBコレクション削除成功: ${id}`);
-    } catch (error: any) {
-      console.warn(`⚠️ [deleteOrg] ChromaDBコレクション削除エラー（続行します）: ${id}`, error);
-    }
-  })();
 }
 
 /**
@@ -969,49 +650,32 @@ export async function getOrgMembers(organizationId: string): Promise<any[]> {
     return [];
   }
   
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  
-  // Supabase使用時はDataSource経由で直接取得（パフォーマンス最適化）
-  if (useSupabase) {
-    try {
-      const { getDataSourceInstance } = await import('./dataSource');
-      const dataSource = getDataSourceInstance();
-      
-      // organizationIdでフィルタリングしてから取得（クライアント側でのフィルタリングを回避）
-      // normalizeFieldNameで自動的に小文字に変換されるため、organizationId（キャメルケース）を使用可能
-      const result = await dataSource.collection_get('organizationMembers', {
-        filters: [
-          { field: 'organizationId', operator: 'eq', value: organizationId }
-        ],
-        orderBy: 'position',
-        orderDirection: 'asc'
-      });
-      
-      console.log('✅ [getOrgMembers] Supabase経由でメンバー取得成功:', { 
-        organizationId, 
-        count: result?.length || 0
-      });
-      return result || [];
-    } catch (supabaseError: any) {
-      console.warn('⚠️ [getOrgMembers] Supabase経由の取得に失敗、フォールバック:', { 
-        organizationId, 
-        error: supabaseError?.message 
-      });
-      // フォールバック: Rust API経由
-    }
-  }
-  
+  // Supabase専用（環境変数チェック不要）
   try {
-    // Rust API経由で取得
-    const result = await apiGet<any[]>(`/api/organizations/${organizationId}/members`);
-    console.log('✅ [getOrgMembers] メンバー取得成功:', { 
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // organizationIdでフィルタリングしてから取得（クライアント側でのフィルタリングを回避）
+    // normalizeFieldNameで自動的に小文字に変換されるため、organizationId（キャメルケース）を使用可能
+    const result = await dataSource.collection_get('organizationMembers', {
+      filters: [
+        { field: 'organizationId', operator: 'eq', value: organizationId }
+      ],
+      orderBy: 'position',
+      orderDirection: 'asc'
+    });
+    
+    console.log('✅ [getOrgMembers] Supabase経由でメンバー取得成功:', { 
       organizationId, 
-      count: result?.length || 0,
-      result 
+      count: result?.length || 0
     });
     return result || [];
   } catch (error: any) {
-    // ネットワークエラーやCORSエラー、TypeError（fetch失敗）の場合はTauriコマンドにフォールバック
+    console.error('❌ [getOrgMembers] Supabase経由の取得に失敗:', { 
+      organizationId, 
+      error: error?.message 
+    });
+    // ネットワークエラーやCORSエラー、TypeError（fetch失敗）の場合は空配列を返す
     const isNetworkError = 
       error instanceof TypeError || 
       error?.message?.includes('network') || 

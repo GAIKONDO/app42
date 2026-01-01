@@ -22,9 +22,8 @@ export function useOrganizationData() {
       try {
         setLoading(true);
         
-        const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
         devLog('📖 [組織ページ] データ読み込み開始', {
-          useSupabase: useSupabase ? 'Supabase' : 'SQLite',
+          dataSource: 'Supabase',
         });
         
         const startTime = performance.now();

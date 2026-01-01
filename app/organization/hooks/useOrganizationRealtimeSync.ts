@@ -24,7 +24,7 @@ import type { OrgNodeData } from '@/components/OrgChart';
 export function useOrganizationRealtimeSync({
   orgData,
   setOrgData,
-  enabled = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true',
+  enabled = true, // Supabase専用
 }: {
   orgData: OrgNodeData | null;
   setOrgData: (data: OrgNodeData | null) => void;

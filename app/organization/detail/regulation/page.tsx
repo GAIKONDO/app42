@@ -16,7 +16,7 @@ import type { Relation, RelationType } from '@/types/relation';
 import { getRelationsByTopicId, createRelation, deleteRelation } from '@/lib/relationApi';
 import { createEntity, getEntitiesByOrganizationId, deleteEntity } from '@/lib/entityApi';
 import { callTauriCommand } from '@/lib/localFirebase';
-import { deleteTopicFromChroma } from '@/lib/chromaSync';
+// Supabaseに移行済みのため、ChromaDB削除は不要
 import { EditIcon, AIIcon, DeleteIcon } from './components/Icons';
 import { devLog, devWarn, markdownComponents } from './utils';
 import type { TabType, MonthTab, SummaryTab, MonthContent, RegulationData } from './types';

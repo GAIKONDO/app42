@@ -1,6 +1,6 @@
 /**
  * Firebase互換APIラッパー (Electron/Tauri版)
- * DataSourceインターフェースを使用してSQLiteまたはSupabaseにアクセス
+ * Supabase専用（データはSupabaseに保存、Tauriコマンドはローカルファイル操作などに使用）
  */
 
 // 環境を検出（Tauriアプリ内では__TAURI__が存在する）
@@ -15,17 +15,15 @@ const isTauri = typeof window !== 'undefined' && (
 );
 const isElectron = typeof window !== 'undefined' && window.electronAPI;
 
-// Supabaseを使用するかどうか
-const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+// Supabaseを常に使用（環境変数チェック不要）
+const useSupabase = true;
 
-// DataSourceアダプターをインポート（Supabase使用時のみ）
+// DataSourceアダプターをインポート（Supabase専用）
 let dataSourceAdapter: any = null;
-if (useSupabase) {
-  try {
-    dataSourceAdapter = require('./dataSourceAdapter');
-  } catch (e) {
-    console.warn('DataSourceアダプターの読み込みに失敗しました。Tauriコマンドを使用します。', e);
-  }
+try {
+  dataSourceAdapter = require('./dataSourceAdapter');
+} catch (e) {
+  console.warn('DataSourceアダプターの読み込みに失敗しました。Tauriコマンドを使用します。', e);
 }
 
 // Tauriコマンドを呼び出すヘルパー関数
@@ -94,16 +92,7 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
                                      errorMessage.includes('ipc://localhost') ||
                                      (invokeError?.name === 'TypeError' && errorMessage.includes('Load failed'));
           
-          // ChromaDB関連のエラーは抑制（埋め込みが存在しない場合は正常な動作）
-          const isChromaDBError = command.startsWith('chromadb_') && (
-            errorMessage.includes('ChromaDBクライアントが初期化されていません') ||
-            errorMessage.includes('no such table') ||
-            errorMessage.includes('Database error') ||
-            errorMessage.includes('InternalError') ||
-            errorMessage.includes('acquire_write')
-          );
-          
-          if (!isNoRowsError && !isIPCProtocolError && !isChromaDBError && isDev) {
+          if (!isNoRowsError && !isIPCProtocolError && isDev) {
             console.error('[callTauriCommand] ❌ invoke実行エラー', {
               command,
               args,
@@ -148,16 +137,7 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
                                    errorMessage.includes('TypeError: Load failed') ||
                                    (error?.name === 'TypeError' && errorMessage.includes('Load failed'));
         
-        // ChromaDB関連のエラーは抑制（埋め込みが存在しない場合は正常な動作）
-        const isChromaDBError = command.startsWith('chromadb_') && (
-          errorMessage.includes('ChromaDBクライアントが初期化されていません') ||
-          errorMessage.includes('no such table') ||
-          errorMessage.includes('Database error') ||
-          errorMessage.includes('InternalError') ||
-          errorMessage.includes('acquire_write')
-        );
-        
-        if (!isNoRowsError && !isIPCProtocolError && !isChromaDBError && isDev) {
+        if (!isNoRowsError && !isIPCProtocolError && isDev) {
           console.error('[callTauriCommand] ❌ window.__TAURI__使用時にエラー', {
             command,
             errorMessage: error?.message,
@@ -208,16 +188,7 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
                           errorMessage.includes('Query returned no rows') ||
                           (command === 'doc_get' && errorMessage.includes('ドキュメント取得エラー'));
     
-    // ChromaDB関連のエラーは抑制（埋め込みが存在しない場合は正常な動作）
-    const isChromaDBError = command.startsWith('chromadb_') && (
-      errorMessage.includes('ChromaDBクライアントが初期化されていません') ||
-      errorMessage.includes('no such table') ||
-      errorMessage.includes('Database error') ||
-      errorMessage.includes('InternalError') ||
-      errorMessage.includes('acquire_write')
-    );
-    
-    if (!isNoRowsError && !isChromaDBError) {
+    if (!isNoRowsError) {
       console.error('[callTauriCommand] ❌ エラー発生', { 
         command, 
         args: args ? JSON.stringify(args).substring(0, 200) : 'none',
@@ -294,8 +265,8 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
       path: collectionName,
     },
     get: async () => {
-      // Supabase使用時はDataSourceアダプターを使用
-      if (useSupabase && dataSourceAdapter) {
+      // Supabase専用（DataSourceアダプターを使用）
+      if (dataSourceAdapter) {
         try {
           const data = await dataSourceAdapter.getDocViaDataSource(collectionName, docId);
           if (!data) {
@@ -324,57 +295,15 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
           }
           throw error;
         }
-      } else if (isTauri) {
-        try {
-          const result = await callTauriCommand('doc_get', { collectionName: collectionName, docId: docId });
-          if (!result || !result.data || result.exists === false) {
-            return { 
-              exists: () => false, 
-              data: () => undefined, 
-              id: docId 
-            };
-          }
-          return {
-            exists: () => true,
-            data: () => enhanceTimestampsInData(result.data),
-            id: result.data.id || docId,
-          };
-        } catch (error: any) {
-          // ドキュメントが存在しない場合のエラーは正常な状態として扱う
-          const errorMessage = error?.message || error?.error || String(error || '');
-          if (errorMessage.includes('no rows') || 
-              errorMessage.includes('Query returned no rows') ||
-              errorMessage.includes('ドキュメント取得エラー')) {
-            return { 
-              exists: () => false, 
-              data: () => undefined, 
-              id: docId 
-            };
-          }
-          // その他のエラーは再スロー
-          throw error;
-        }
-      } else if (isElectron) {
-        const result = await window.electronAPI!.db.collection(collectionName).doc(docId!).get();
-        if (!result.exists) {
-          return { 
-            exists: () => false, 
-            data: () => undefined, 
-            id: docId 
-          };
-        }
-        return {
-          exists: () => true,
-          data: () => enhanceTimestampsInData(result.data),
-          id: result.data.id || docId,
-        };
       } else {
-        throw new Error('Neither Tauri nor Electron API is available');
+        // DataSourceアダプターが利用できない場合はエラー
+        throw new Error('Supabase DataSourceアダプターが利用できません。Supabaseの設定を確認してください。');
       }
+      
     },
     set: async (data: any, options?: any) => {
-      // Supabase使用時はDataSourceアダプターを使用
-      if (useSupabase && dataSourceAdapter) {
+      // Supabase専用（DataSourceアダプターを使用）
+      if (dataSourceAdapter) {
         try {
           await dataSourceAdapter.setDocViaDataSource(collectionName, docId, data);
           return { id: docId };
@@ -387,49 +316,13 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
           });
           throw error;
         }
-      } else if (isTauri) {
-        console.log('💾 [doc.set] Tauriコマンドを呼び出します:', {
-          command: 'doc_set',
-          collectionName,
-          docId,
-          dataKeys: Object.keys(data || {}),
-          dataPreview: JSON.stringify(data || {}).substring(0, 200),
-          hasMonetizationRenewalNotRequired: 'monetizationRenewalNotRequired' in (data || {}),
-          monetizationRenewalNotRequiredValue: data?.monetizationRenewalNotRequired,
-          monetizationRenewalNotRequiredType: typeof data?.monetizationRenewalNotRequired,
-        });
-        try {
-          const result = await callTauriCommand('doc_set', { collectionName: collectionName, docId: docId, data });
-          console.log('✅ [doc.set] Tauriコマンド成功:', {
-            collectionName,
-            docId,
-            result,
-          });
-          return result;
-        } catch (error: any) {
-          console.error('❌ [doc.set] Tauriコマンド失敗:', {
-            collectionName,
-            docId,
-            errorMessage: error?.message,
-            errorName: error?.name,
-            errorCode: error?.code,
-            errorStack: error?.stack,
-            error: error,
-            dataKeys: Object.keys(data || {}),
-            hasMonetizationRenewalNotRequired: 'monetizationRenewalNotRequired' in (data || {}),
-            monetizationRenewalNotRequiredValue: data?.monetizationRenewalNotRequired,
-          });
-          throw error;
-        }
-      } else if (isElectron) {
-        return await window.electronAPI!.db.collection(collectionName).doc(docId!).set(data);
       } else {
-        throw new Error('Neither Tauri nor Electron API is available');
+        throw new Error('Supabase DataSourceアダプターが利用できません。Supabaseの設定を確認してください。');
       }
     },
     update: async (data: any) => {
-      // Supabase使用時はDataSourceアダプターを使用
-      if (useSupabase && dataSourceAdapter) {
+      // Supabase専用（DataSourceアダプターを使用）
+      if (dataSourceAdapter) {
         try {
           await dataSourceAdapter.updateDocViaDataSource(collectionName, docId, data);
           return { id: docId };
@@ -442,17 +335,13 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
           });
           throw error;
         }
-      } else if (isTauri) {
-        return await callTauriCommand('doc_update', { collectionName: collectionName, docId: docId, data });
-      } else if (isElectron) {
-        return await window.electronAPI!.db.collection(collectionName).doc(docId!).update(data);
       } else {
-        throw new Error('Neither Tauri nor Electron API is available');
+        throw new Error('Supabase DataSourceアダプターが利用できません。Supabaseの設定を確認してください。');
       }
     },
     delete: async () => {
-      // Supabase使用時はDataSourceアダプターを使用
-      if (useSupabase && dataSourceAdapter) {
+      // Supabase専用（DataSourceアダプターを使用）
+      if (dataSourceAdapter) {
         try {
           await dataSourceAdapter.deleteDocViaDataSource(collectionName, docId);
           return { id: docId };
@@ -465,29 +354,8 @@ export const doc = (db: any, collectionName: string, docId?: string) => {
           });
           throw error;
         }
-      } else if (isTauri) {
-        console.log('🗑️ [doc.delete] Tauriコマンドを呼び出します:', {
-          command: 'doc_delete',
-          collectionName,
-          docId
-        });
-        try {
-          const result = await callTauriCommand('doc_delete', { collectionName: collectionName, docId: docId });
-          console.log('✅ [doc.delete] Tauriコマンド成功:', result);
-          return result;
-        } catch (error: any) {
-          console.error('❌ [doc.delete] Tauriコマンド失敗:', {
-            collectionName,
-            docId,
-            errorMessage: error?.message,
-            error: error
-          });
-          throw error;
-        }
-      } else if (isElectron) {
-        return await window.electronAPI!.db.collection(collectionName).doc(docId!).delete();
       } else {
-        throw new Error('Neither Tauri nor Electron API is available');
+        throw new Error('Supabase DataSourceアダプターが利用できません。Supabaseの設定を確認してください。');
       }
     },
   };
@@ -508,8 +376,8 @@ export const collection = (db: any, collectionName: string) => {
           isElectron
         });
         
-        // Supabase使用時はDataSourceアダプターを使用
-        if (useSupabase && dataSourceAdapter) {
+        // Supabase専用（DataSourceアダプターを使用）
+        if (dataSourceAdapter) {
           try {
             const docId = await dataSourceAdapter.addDocViaDataSource(collectionName, data);
             return {
@@ -525,48 +393,8 @@ export const collection = (db: any, collectionName: string) => {
             });
             throw error;
           }
-        } else if (isTauri) {
-          console.log(`[collection.add] Tauriコマンドを呼び出します`, {
-            command: 'collection_add',
-            collectionName,
-            dataKeys: Object.keys(data || {}),
-            dataSize: JSON.stringify(data || {}).length
-          });
-          
-          let result;
-          try {
-            result = await callTauriCommand('collection_add', { collectionName: collectionName, data });
-            console.log(`[collection.add] ✅ Tauriコマンド成功:`, {
-              resultType: typeof result,
-              resultId: result?.id || result,
-              resultKeys: result && typeof result === 'object' ? Object.keys(result) : 'N/A',
-              result: result
-            });
-          } catch (error: any) {
-            console.error(`[collection.add] ❌ Tauriコマンドエラー:`, {
-              errorMessage: error?.message,
-              errorName: error?.name,
-              errorCode: error?.code,
-              errorStack: error?.stack,
-              error: error,
-              collectionName,
-              dataKeys: Object.keys(data || {})
-            });
-            throw error;
-          }
-          
-          return {
-            id: result.id || result,
-            path: `${collectionName}/${result.id || result}`,
-          };
-        } else if (isElectron) {
-          const result = await window.electronAPI!.db.collection(collectionName).add(data);
-          return {
-            id: result.id,
-            path: `${collectionName}/${result.id}`,
-          };
         } else {
-          throw new Error('Neither Tauri nor Electron API is available');
+          throw new Error('Supabase DataSourceアダプターが利用できません。Supabaseの設定を確認してください。');
         }
       } catch (error: any) {
         console.error(`[collection.add] エラー発生:`, {
@@ -645,8 +473,8 @@ export const collection = (db: any, collectionName: string) => {
       }
     },
     get: async () => {
-      // Supabase使用時はDataSourceアダプターを使用
-      if (useSupabase && dataSourceAdapter) {
+      // Supabase専用（環境変数チェック不要）
+      if (dataSourceAdapter) {
         try {
           const results = await dataSourceAdapter.getCollectionViaDataSource(collectionName);
           const docs = (results || []).map((r: any) => ({
@@ -671,40 +499,6 @@ export const collection = (db: any, collectionName: string) => {
           });
           throw error;
         }
-      } else if (isTauri) {
-        const results = await callTauriCommand('collection_get', { collectionName: collectionName });
-        const docs = (results || []).map((r: any) => ({
-          id: r.id,
-          data: () => r.data || r,
-          exists: () => true,
-        }));
-        
-        return {
-          docs: docs,
-          empty: docs.length === 0,
-          size: docs.length,
-          forEach: (callback: (doc: any) => void) => {
-            docs.forEach(callback);
-          },
-        };
-      } else if (isElectron) {
-        const results = await window.electronAPI!.db.collection(collectionName).get();
-        const docs = results.map((r: any) => ({
-          id: r.id,
-          data: () => r.data,
-          exists: () => true,
-        }));
-        
-        return {
-          docs: docs,
-          empty: docs.length === 0,
-          size: docs.length,
-          forEach: (callback: (doc: any) => void) => {
-            docs.forEach(callback);
-          },
-        };
-      } else {
-        throw new Error('Neither Tauri nor Electron API is available');
       }
     },
   };
@@ -735,40 +529,76 @@ export const query = (...args: any[]) => {
 
   return {
     get: async () => {
-      if (isTauri) {
-        const results = await callTauriCommand('query_get', { collectionName: collectionName, conditions });
-        const docs = (results || []).map((r: any) => ({
-          id: r.id,
-          data: () => r.data || r,
-          exists: () => true,
-        }));
-        
-        return {
-          docs: docs,
-          empty: docs.length === 0,
-          size: docs.length,
-          forEach: (callback: (doc: any) => void) => {
-            docs.forEach(callback);
-          },
-        };
-      } else if (isElectron) {
-        const results = await window.electronAPI!.db.query(collectionName, conditions).get();
-        const docs = results.map((r: any) => ({
-          id: r.id,
-          data: () => r.data,
-          exists: () => true,
-        }));
-        
-        return {
-          docs: docs,
-          empty: docs.length === 0,
-          size: docs.length,
-          forEach: (callback: (doc: any) => void) => {
-            docs.forEach(callback);
-          },
-        };
+      // Supabase専用（DataSourceアダプターを使用）
+      if (dataSourceAdapter) {
+        try {
+          // query機能はSupabaseのクエリビルダーを使用
+          // 簡易実装：条件に基づいてコレクションを取得
+          const results = await dataSourceAdapter.getCollectionViaDataSource(collectionName);
+          let docs = (results || []).map((r: any) => ({
+            id: r.id,
+            data: () => enhanceTimestampsInData(r),
+            exists: () => true,
+          }));
+          
+          // where条件でフィルタリング
+          if (conditions.field && conditions.operator && conditions.value !== undefined) {
+            docs = docs.filter((doc: any) => {
+              const fieldValue = doc.data()[conditions.field];
+              switch (conditions.operator) {
+                case '==':
+                  return fieldValue === conditions.value;
+                case '!=':
+                  return fieldValue !== conditions.value;
+                case '>':
+                  return fieldValue > conditions.value;
+                case '>=':
+                  return fieldValue >= conditions.value;
+                case '<':
+                  return fieldValue < conditions.value;
+                case '<=':
+                  return fieldValue <= conditions.value;
+                default:
+                  return true;
+              }
+            });
+          }
+          
+          // orderByでソート
+          if (conditions.orderBy) {
+            docs.sort((a: any, b: any) => {
+              const aValue = a.data()[conditions.orderBy];
+              const bValue = b.data()[conditions.orderBy];
+              const direction = conditions.orderDirection === 'desc' ? -1 : 1;
+              if (aValue < bValue) return -1 * direction;
+              if (aValue > bValue) return 1 * direction;
+              return 0;
+            });
+          }
+          
+          // limitで制限
+          if (conditions.limit) {
+            docs = docs.slice(0, conditions.limit);
+          }
+          
+          return {
+            docs: docs,
+            empty: docs.length === 0,
+            size: docs.length,
+            forEach: (callback: (doc: any) => void) => {
+              docs.forEach(callback);
+            },
+          };
+        } catch (error: any) {
+          console.error('❌ [query.get] DataSourceエラー:', {
+            collectionName,
+            errorMessage: error?.message,
+            error: error,
+          });
+          throw error;
+        }
       } else {
-        throw new Error('Neither Tauri nor Electron API is available');
+        throw new Error('Supabase DataSourceアダプターが利用できません。Supabaseの設定を確認してください。');
       }
     },
   };
@@ -830,31 +660,24 @@ export const getDoc = async (docRef: any) => {
       };
     }
   }
-  // フォールバック: 直接APIを呼び出す
+  // フォールバック: Supabase経由で取得（SQLiteフォールバックは削除）
   if (docRef && docRef.path) {
     const [collectionName, docId] = docRef.path.split('/');
-    if (isTauri) {
-      const result = await callTauriCommand('doc_get', { collectionName: collectionName, docId: docId });
-      if (!result || !result.data) {
+    try {
+      // Supabase専用（環境変数チェック不要）
+      const { getDocViaDataSource } = await import('./dataSourceAdapter');
+      const result = await getDocViaDataSource(collectionName, docId);
+      if (!result) {
         return { exists: () => false, data: () => undefined, id: docId };
       }
       return {
         exists: () => true,
-        data: () => enhanceTimestampsInData(result.data),
-        id: result.data.id || docId,
+        data: () => enhanceTimestampsInData(result),
+        id: result.id || docId,
       };
-    } else if (isElectron) {
-      const result = await window.electronAPI!.db.collection(collectionName).doc(docId).get();
-      if (!result.exists) {
-        return { exists: () => false, data: () => undefined, id: docId };
-      }
-      return {
-        exists: () => true,
-        data: () => enhanceTimestampsInData(result.data),
-        id: result.data.id || docId,
-      };
-    } else {
-      throw new Error('Neither Tauri nor Electron API is available');
+    } catch (error: any) {
+      console.error('❌ [getDoc] Supabaseからの取得エラー:', error);
+      return { exists: () => false, data: () => undefined, id: docId };
     }
   }
   throw new Error('Invalid document reference');
@@ -921,103 +744,68 @@ export const signInWithEmailAndPassword = async (auth: any, email: string, passw
   // キャッシュをクリア（新しいユーザーでログインするため）
   currentUserCache = null;
   
-  // Supabase使用時はDataSource経由でログイン
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  if (useSupabase) {
-    try {
-      const { getDataSourceInstance } = await import('./dataSource');
-      const dataSource = getDataSourceInstance();
-      const result = await dataSource.sign_in(email, password);
-      
-      if (result && result.user) {
-        // ログイン成功時にキャッシュを更新
-        currentAuthUser = result.user;
-        currentUserCache = {
-          user: result.user,
-          timestamp: Date.now(),
-        };
-        return { user: result.user };
-      }
-      throw new Error('ログインに失敗しました。ユーザー情報が取得できませんでした。');
-    } catch (error: any) {
-      // サンプルアカウントでログイン失敗した場合、自動的に登録を試みる
-      const isSampleAccount = (email === 'gkondo@ctc-america.com' || email === 'admin@example.com' || email === 'admin@test.com' || email === 'admin@test.local') && password === 'admin123';
-      const isInvalidCredentials = error?.message?.includes('Invalid login credentials') || 
-                                    error?.message?.includes('invalid_credentials');
-      
-      if (isSampleAccount && isInvalidCredentials) {
-        try {
-          console.log('[signInWithEmailAndPassword] サンプルアカウントが存在しないため、自動的に登録します...');
-          // サンプルアカウントを自動的に登録
-          const { getDataSourceInstance } = await import('./dataSource');
-          const dataSource = getDataSourceInstance();
-          const signUpResult = await dataSource.sign_up(email, password);
-          
-          if (signUpResult && signUpResult.user) {
-            console.log('[signInWithEmailAndPassword] サンプルアカウントの登録に成功しました。再度ログインを試みます...');
-            // 登録後、再度ログインを試みる
-            const loginResult = await dataSource.sign_in(email, password);
-            
-            if (loginResult && loginResult.user) {
-              // ログイン成功時にキャッシュを更新
-              currentAuthUser = loginResult.user;
-              currentUserCache = {
-                user: loginResult.user,
-                timestamp: Date.now(),
-              };
-              return { user: loginResult.user };
-            }
-          }
-        } catch (autoSignUpError: any) {
-          // 自動登録に失敗した場合、またはメール確認が必要な場合
-          const isEmailNotConfirmed = autoSignUpError?.message?.includes('Email not confirmed') || 
-                                      autoSignUpError?.code === 'email_not_confirmed';
-          
-          if (isEmailNotConfirmed) {
-            // メール確認が必要な場合、Supabaseダッシュボードで確認するよう案内
-            throw new Error('ユーザーは登録されましたが、メール確認が必要です。\n\n開発環境では、Supabaseダッシュボードで以下を設定してください：\n1. 「Authentication」→「Settings」→「Enable email confirmations」のチェックを外す\n2. または、「Authentication」→「Users」で該当ユーザーを選択し、「Confirm email」をクリック');
-          }
-          
-          // その他のエラーの場合は、元のエラーを投げる
-          console.warn('[signInWithEmailAndPassword] サンプルアカウントの自動登録に失敗:', autoSignUpError);
-          throw error;
-        }
-      }
-      
-      throw error;
-    }
-  }
-  
-  // SQLite使用時（Tauriコマンド経由）
-  if (isTauri) {
-    try {
-      const result = await callTauriCommand('sign_in', { email, password });
-      if (result && result.user) {
-        // ログイン成功時にキャッシュを更新
-        currentAuthUser = result.user;
-        currentUserCache = {
-          user: result.user,
-          timestamp: Date.now(),
-        };
-        return { user: result.user };
-      }
-      throw new Error('ログインに失敗しました。ユーザー情報が取得できませんでした。');
-    } catch (error: any) {
-      // Tauriコマンドのエラーをそのまま投げる（エラーメッセージが含まれている）
-      throw error;
-    }
-  } else if (isElectron) {
-    const result = await window.electronAPI!.db.signIn(email, password);
+  // Supabase専用（環境変数チェック不要）
+  try {
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    const result = await dataSource.sign_in(email, password);
+    
     if (result && result.user) {
+      // ログイン成功時にキャッシュを更新
       currentAuthUser = result.user;
       currentUserCache = {
         user: result.user,
         timestamp: Date.now(),
       };
+      return { user: result.user };
     }
-    return result;
-  } else {
-    throw new Error('Neither Tauri nor Electron API is available');
+    throw new Error('ログインに失敗しました。ユーザー情報が取得できませんでした。');
+  } catch (error: any) {
+    // サンプルアカウントでログイン失敗した場合、自動的に登録を試みる
+    const isSampleAccount = (email === 'gkondo@ctc-america.com' || email === 'admin@example.com' || email === 'admin@test.com' || email === 'admin@test.local') && password === 'admin123';
+    const isInvalidCredentials = error?.message?.includes('Invalid login credentials') || 
+                                  error?.message?.includes('invalid_credentials');
+    
+    if (isSampleAccount && isInvalidCredentials) {
+      try {
+        console.log('[signInWithEmailAndPassword] サンプルアカウントが存在しないため、自動的に登録します...');
+        // サンプルアカウントを自動的に登録
+        const { getDataSourceInstance } = await import('./dataSource');
+        const dataSource = getDataSourceInstance();
+        const signUpResult = await dataSource.sign_up(email, password);
+        
+        if (signUpResult && signUpResult.user) {
+          console.log('[signInWithEmailAndPassword] サンプルアカウントの登録に成功しました。再度ログインを試みます...');
+          // 登録後、再度ログインを試みる
+          const loginResult = await dataSource.sign_in(email, password);
+          
+          if (loginResult && loginResult.user) {
+            // ログイン成功時にキャッシュを更新
+            currentAuthUser = loginResult.user;
+            currentUserCache = {
+              user: loginResult.user,
+              timestamp: Date.now(),
+            };
+            return { user: loginResult.user };
+          }
+        }
+      } catch (autoSignUpError: any) {
+        // 自動登録に失敗した場合、またはメール確認が必要な場合
+        const isEmailNotConfirmed = autoSignUpError?.message?.includes('Email not confirmed') || 
+                                    autoSignUpError?.code === 'email_not_confirmed';
+        
+        if (isEmailNotConfirmed) {
+          // メール確認が必要な場合、Supabaseダッシュボードで確認するよう案内
+          throw new Error('ユーザーは登録されましたが、メール確認が必要です。\n\n開発環境では、Supabaseダッシュボードで以下を設定してください：\n1. 「Authentication」→「Settings」→「Enable email confirmations」のチェックを外す\n2. または、「Authentication」→「Users」で該当ユーザーを選択し、「Confirm email」をクリック');
+        }
+        
+        // その他のエラーの場合は、元のエラーを投げる
+        console.warn('[signInWithEmailAndPassword] サンプルアカウントの自動登録に失敗:', autoSignUpError);
+        throw error;
+      }
+    }
+    
+    throw error;
   }
 };
 
@@ -1025,60 +813,21 @@ export const createUserWithEmailAndPassword = async (auth: any, email: string, p
   // キャッシュをクリア（新しいユーザーを作成するため）
   currentUserCache = null;
   
-  // Supabase使用時はDataSource経由で登録
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  if (useSupabase) {
-    try {
-      const { getDataSourceInstance } = await import('./dataSource');
-      const dataSource = getDataSourceInstance();
-      const result = await dataSource.sign_up(email, password);
-      
-      if (result && result.user) {
-        // 登録成功時にキャッシュを更新
-        currentAuthUser = result.user;
-        currentUserCache = {
-          user: result.user,
-          timestamp: Date.now(),
-        };
-        return { user: result.user };
-      }
-      throw new Error('登録に失敗しました。ユーザー情報が取得できませんでした。');
-    } catch (error: any) {
-      throw error;
-    }
-  }
+  // Supabase専用（環境変数チェック不要）
+  const { getDataSourceInstance } = await import('./dataSource');
+  const dataSource = getDataSourceInstance();
+  const result = await dataSource.sign_up(email, password);
   
-  // SQLite使用時（Tauriコマンド経由）
-  if (isTauri) {
-    try {
-      const result = await callTauriCommand('sign_up', { email, password });
-      if (result && result.user) {
-        // 登録成功時にキャッシュを更新
-        currentAuthUser = result.user;
-        currentUserCache = {
-          user: result.user,
-          timestamp: Date.now(),
-        };
-        return { user: result.user };
-      }
-      throw new Error('登録に失敗しました。ユーザー情報が取得できませんでした。');
-    } catch (error: any) {
-      // Tauriコマンドのエラーをそのまま投げる（エラーメッセージが含まれている）
-      throw error;
-    }
-  } else if (isElectron) {
-    const result = await window.electronAPI!.db.signUp(email, password);
-    if (result && result.user) {
-      currentAuthUser = result.user;
-      currentUserCache = {
-        user: result.user,
-        timestamp: Date.now(),
-      };
-    }
-    return result;
-  } else {
-    throw new Error('Neither Tauri nor Electron API is available');
+  if (result && result.user) {
+    // 登録成功時にキャッシュを更新
+    currentAuthUser = result.user;
+    currentUserCache = {
+      user: result.user,
+      timestamp: Date.now(),
+    };
+    return { user: result.user };
   }
+  throw new Error('登録に失敗しました。ユーザー情報が取得できませんでした。');
 };
 
 export const signOut = async (auth: any) => {
@@ -1086,27 +835,10 @@ export const signOut = async (auth: any) => {
   currentUserCache = null;
   currentAuthUser = null;
   
-  // Supabase使用時はDataSource経由でログアウト
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  if (useSupabase) {
-    try {
-      const { getDataSourceInstance } = await import('./dataSource');
-      const dataSource = getDataSourceInstance();
-      await dataSource.sign_out();
-      return;
-    } catch (error: any) {
-      throw error;
-    }
-  }
-  
-  // SQLite使用時（Tauriコマンド経由）
-  if (isTauri) {
-    return await callTauriCommand('sign_out', {});
-  } else if (isElectron) {
-    return await window.electronAPI!.db.signOut();
-  } else {
-    throw new Error('Neither Tauri nor Electron API is available');
-  }
+  // Supabase専用（環境変数チェック不要）
+  const { getDataSourceInstance } = await import('./dataSource');
+  const dataSource = getDataSourceInstance();
+  await dataSource.sign_out();
 };
 
 // authオブジェクトの互換実装（onAuthStateChangedより前に定義）
@@ -1134,30 +866,14 @@ const getCurrentUserWithCache = async (forceRefresh: boolean = false): Promise<a
   // キャッシュが無効または強制リフレッシュの場合は取得
   let user: any = null;
   
-  // Supabase使用時はDataSource経由で取得
-  const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-  if (useSupabase) {
-    try {
-      const { getDataSourceInstance } = await import('./dataSource');
-      const dataSource = getDataSourceInstance();
-      const result = await dataSource.get_current_user();
-      user = result || null;
-    } catch (error: any) {
-      user = null;
-    }
-  } else if (isTauri) {
-    try {
-      const result = await callTauriCommand('get_current_user', {});
-      user = result || null;
-    } catch (error: any) {
-      user = null;
-    }
-  } else if (isElectron && window.electronAPI && window.electronAPI.db) {
-    try {
-      user = await window.electronAPI.db.getCurrentUser();
-    } catch (error: any) {
-      user = null;
-    }
+  // Supabase専用（DataSource経由で取得）
+  try {
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    const result = await dataSource.get_current_user();
+    user = result || null;
+  } catch (error: any) {
+    user = null;
   }
 
   // キャッシュを更新

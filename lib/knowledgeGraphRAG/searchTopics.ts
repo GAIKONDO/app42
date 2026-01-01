@@ -3,7 +3,7 @@
  */
 
 import type { KnowledgeGraphSearchResult, SearchFilters, TopicSummary } from './types';
-import { findSimilarTopicsChroma } from '../topicEmbeddingsChroma';
+// Supabaseに移行済みのため、ChromaDB専用実装は不要
 import { findSimilarTopics as findSimilarTopicsAdapter } from '../vectorSearchAdapter';
 import { getVectorSearchBackend } from '../vectorSearchConfig';
 import { getTopicsByIds, getTopicFilesByTopicIds } from '../topicApi';
@@ -82,22 +82,9 @@ export async function searchTopics(
                 return [];
               }
             } else {
-              // ChromaDBを使用（既存の実装）
-              return findSimilarTopicsChroma(
-                queryText,
-                limit * 2,
-                filters?.organizationId,
-                filters?.topicSemanticCategory
-              ).catch(error => {
-                const errorMessage = error?.message || String(error || '');
-                // ChromaDBが初期化されていない場合や、埋め込みが存在しない場合は警告のみ
-                if (!errorMessage.includes('ChromaDBクライアントが初期化されていません') && 
-                    !errorMessage.includes('no such table') &&
-                    !errorMessage.includes('Database error')) {
-                  console.warn('[searchTopics] ベクトル検索エラー:', error);
-                }
-                return [];
-              });
+              // Supabaseに移行済みのため、ChromaDBは使用しない
+              console.warn('[searchTopics] ChromaDBは使用されていません。Supabaseを使用してください。');
+              return [];
             }
           })()
         : Promise.resolve([]),

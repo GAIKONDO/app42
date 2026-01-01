@@ -23,7 +23,7 @@ const recentlyCreatedRelations = new Map<string, { timestamp: number; relation: 
 
 export async function createRelation(relation: CreateRelationInput): Promise<Relation> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
+    // Supabase専用（環境変数チェック不要）
     
     // 重複チェック：既存のリレーションを確認（常に実行）
     const relationKey = `${relation.topicId || ''}_${relation.sourceEntityId}_${relation.targetEntityId}_${relation.relationType}`;
@@ -111,124 +111,56 @@ export async function createRelation(relation: CreateRelationInput): Promise<Rel
       throw new Error(`リレーションのバリデーションエラー: ${validation.errors.join(', ')}`);
     }
 
-    // Supabase使用時はDataSource経由で作成
-    if (useSupabase) {
-      try {
-        console.log('📝 [createRelation] Supabase経由でリレーションを作成します:', {
-          relationId: id,
-          topicId: relationData.topicId,
-          sourceEntityId: relationData.sourceEntityId,
-          targetEntityId: relationData.targetEntityId,
-        });
-        
-        // undefinedをnullに変換（データベースのNOT NULL制約対応）
-        const relationDataForDb: any = {
-          ...relationData,
-        };
-        // undefinedの値をnullに変換
-        Object.keys(relationDataForDb).forEach(key => {
-          if (relationDataForDb[key] === undefined) {
-            relationDataForDb[key] = null;
-          }
-        });
-        
-        // Supabaseスキーマに存在しないカラムを除外（yamlFileId）
-        // SupabaseのrelationsテーブルにはyamlFileIdカラムが存在しないため、事前に除外
-        if (relationDataForDb.yamlFileId !== undefined && relationDataForDb.yamlFileId !== null) {
-          delete relationDataForDb.yamlFileId;
-        }
-        
-        // metadataをJSON文字列に変換
-        if (relationDataForDb.metadata && typeof relationDataForDb.metadata === 'object') {
-          relationDataForDb.metadata = JSON.stringify(relationDataForDb.metadata);
-        }
-        
-        // Supabaseに保存
-        const { setDocViaDataSource } = await import('./dataSourceAdapter');
-        await setDocViaDataSource('relations', id, relationDataForDb);
-        console.log('✅ [createRelation] Supabase経由でリレーションを作成しました:', id);
-        
-        // 埋め込みを非同期で生成（エラーは無視）
-        // Graphvizのリレーションの場合、topicIdはnullになるが、空文字列として扱う
-        console.log(`[createRelation] 埋め込み生成チェック: organizationId=${relation.organizationId}, companyId=${relation.companyId}`);
-        if (relation.organizationId) {
-          const topicIdForEmbedding = relation.topicId || '';
-          console.log(`[createRelation] リレーション埋め込み生成を開始: ${id}, organizationId=${relation.organizationId}, topicId=${topicIdForEmbedding}`);
-          saveRelationEmbeddingAsync(id, topicIdForEmbedding, relation.organizationId)
-            .then((success) => {
-              if (success) {
-                console.log(`✅ [createRelation] リレーション埋め込み生成成功: ${id}`);
-              } else {
-                console.warn(`⚠️ [createRelation] リレーション埋め込み生成が失敗しました（続行します）: ${id}`);
-              }
-            })
-            .catch(error => {
-              console.error('❌ [createRelation] リレーション埋め込みの生成に失敗しました（続行します）:', {
-                relationId: id,
-                relationType: relation.relationType,
-                topicId: relation.topicId,
-                topicIdForEmbedding,
-                yamlFileId: relation.yamlFileId,
-                organizationId: relation.organizationId,
-                error: error?.message || String(error),
-                stack: error?.stack,
-              });
-            });
-        } else if (relation.companyId) {
-          console.log(`ℹ️ [createRelation] companyIdが設定されていますが、事業会社用の埋め込み生成は未実装です: ${relation.relationType} (${id})`);
-        } else {
-          console.warn(`⚠️ [createRelation] organizationIdもcompanyIdも設定されていないため、埋め込み生成をスキップ: ${relation.relationType} (${id})`);
-        }
-        
-        return relationData;
-      } catch (supabaseError: any) {
-        console.error('❌ [createRelation] Supabase経由の作成に失敗:', supabaseError);
-        throw supabaseError;
+    // Supabase専用（環境変数チェック不要）
+    console.log('📝 [createRelation] Supabase経由でリレーションを作成します:', {
+      relationId: id,
+      topicId: relationData.topicId,
+      sourceEntityId: relationData.sourceEntityId,
+      targetEntityId: relationData.targetEntityId,
+    });
+    
+    // undefinedをnullに変換（データベースのNOT NULL制約対応）
+    const relationDataForDb: any = {
+      ...relationData,
+    };
+    // undefinedの値をnullに変換
+    Object.keys(relationDataForDb).forEach(key => {
+      if (relationDataForDb[key] === undefined) {
+        relationDataForDb[key] = null;
       }
+    });
+    
+    // Supabaseスキーマに存在しないカラムを除外（yamlFileId）
+    // SupabaseのrelationsテーブルにはyamlFileIdカラムが存在しないため、事前に除外
+    if (relationDataForDb.yamlFileId !== undefined && relationDataForDb.yamlFileId !== null) {
+      delete relationDataForDb.yamlFileId;
     }
-
-    // SQLite使用時は既存のロジック
-    try {
-      // Rust API経由で作成（未実装の場合はフォールバック）
-      const createdRelation = await apiPost<Relation>('/api/relations', relationData);
-      console.log('✅ [createRelation] Rust API経由でリレーションを作成:', {
-        relationId: createdRelation.id,
-        topicId: createdRelation.topicId,
-        sourceEntityId: createdRelation.sourceEntityId,
-        targetEntityId: createdRelation.targetEntityId,
-      });
-      return createdRelation;
-    } catch (error) {
-      // フォールバック: Tauriコマンド経由
-      console.warn('⚠️ [createRelation] Rust API経由の作成に失敗、Tauriコマンドにフォールバック:', error);
-      console.log('📊 [createRelation] Tauriコマンド経由でリレーションを作成:', {
-        relationId: id,
-        topicId: relationData.topicId,
-        sourceEntityId: relationData.sourceEntityId,
-        targetEntityId: relationData.targetEntityId,
-      });
-      // undefinedをnullに変換（データベースのNOT NULL制約対応）
-      const relationDataForDb: any = {
-        ...relationData,
-      };
-      // undefinedの値をnullに変換
-      Object.keys(relationDataForDb).forEach(key => {
-        if (relationDataForDb[key] === undefined) {
-          relationDataForDb[key] = null;
-        }
-      });
-      
-      await callTauriCommand('doc_set', {
-        collectionName: 'relations',
-        docId: id,
-        data: relationDataForDb,
-      });
-      
-      // 埋め込みを非同期で生成（エラーは無視）
-      // Graphvizのリレーションの場合、topicIdはnullになるが、空文字列として扱う
-      if (relation.organizationId) {
-        const topicIdForEmbedding = relation.topicId || '';
-        saveRelationEmbeddingAsync(id, topicIdForEmbedding, relation.organizationId).catch(error => {
+    
+    // metadataをJSON文字列に変換
+    if (relationDataForDb.metadata && typeof relationDataForDb.metadata === 'object') {
+      relationDataForDb.metadata = JSON.stringify(relationDataForDb.metadata);
+    }
+    
+    // Supabaseに保存
+    const { setDocViaDataSource } = await import('./dataSourceAdapter');
+    await setDocViaDataSource('relations', id, relationDataForDb);
+    console.log('✅ [createRelation] Supabase経由でリレーションを作成しました:', id);
+    
+    // 埋め込みを非同期で生成（エラーは無視）
+    // Graphvizのリレーションの場合、topicIdはnullになるが、空文字列として扱う
+    console.log(`[createRelation] 埋め込み生成チェック: organizationId=${relation.organizationId}, companyId=${relation.companyId}`);
+    if (relation.organizationId) {
+      const topicIdForEmbedding = relation.topicId || '';
+      console.log(`[createRelation] リレーション埋め込み生成を開始: ${id}, organizationId=${relation.organizationId}, topicId=${topicIdForEmbedding}`);
+      saveRelationEmbeddingAsync(id, topicIdForEmbedding, relation.organizationId)
+        .then((success) => {
+          if (success) {
+            console.log(`✅ [createRelation] リレーション埋め込み生成成功: ${id}`);
+          } else {
+            console.warn(`⚠️ [createRelation] リレーション埋め込み生成が失敗しました（続行します）: ${id}`);
+          }
+        })
+        .catch(error => {
           console.error('❌ [createRelation] リレーション埋め込みの生成に失敗しました（続行します）:', {
             relationId: id,
             relationType: relation.relationType,
@@ -238,18 +170,15 @@ export async function createRelation(relation: CreateRelationInput): Promise<Rel
             organizationId: relation.organizationId,
             error: error?.message || String(error),
             stack: error?.stack,
-            timestamp: new Date().toISOString(),
           });
         });
-      } else if (relation.companyId) {
-        // 事業会社用の埋め込み生成（将来的に実装）
-        console.log(`ℹ️ [createRelation] companyIdが設定されていますが、事業会社用の埋め込み生成は未実装です: ${relation.relationType} (${id})`);
-      } else {
-        console.warn(`⚠️ [createRelation] organizationIdもcompanyIdも設定されていないため、埋め込み生成をスキップ: ${relation.relationType} (${id})`);
-      }
-      
-      return relationData;
+    } else if (relation.companyId) {
+      console.log(`ℹ️ [createRelation] companyIdが設定されていますが、事業会社用の埋め込み生成は未実装です: ${relation.relationType} (${id})`);
+    } else {
+      console.warn(`⚠️ [createRelation] organizationIdもcompanyIdも設定されていないため、埋め込み生成をスキップ: ${relation.relationType} (${id})`);
     }
+    
+    return relationData;
   } catch (error: any) {
     console.error('❌ [createRelation] エラー:', error);
     throw error;
@@ -373,49 +302,23 @@ export async function getRelationById(relationId: string): Promise<Relation | nu
  */
 export async function getAllRelations(): Promise<Relation[]> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    console.log(`📖 [getAllRelations] 開始（${useSupabase ? 'Supabase' : 'SQLite'}から取得）`);
+    // Supabase専用（環境変数チェック不要）
+    console.log('📖 [getAllRelations] 開始（Supabaseから取得）');
     
-    let result: any[] = [];
+    const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+    const result = await getCollectionViaDataSource('relations');
     
-    // Supabase使用時はDataSource経由で取得
-    if (useSupabase) {
-      try {
-        const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
-        result = await getCollectionViaDataSource('relations');
-        
-        // Supabaseから取得したデータは既に配列形式
-        if (!Array.isArray(result)) {
-          console.warn('⚠️ [getAllRelations] 結果が配列ではありません:', result);
-          return [];
-        }
-        console.log('📖 [getAllRelations] Supabaseから取得:', result.length, '件');
-      } catch (supabaseError: any) {
-        console.error('❌ [getAllRelations] Supabase経由の取得に失敗:', supabaseError);
-        return [];
-      }
-    } else {
-      // SQLite使用時はTauriコマンド経由
-      if (typeof window !== 'undefined' && '__TAURI__' in window) {
-        const tauriResult = await callTauriCommand('collection_get', {
-          collectionName: 'relations',
-        });
-        
-        if (!tauriResult || !Array.isArray(tauriResult)) {
-          console.warn('⚠️ [getAllRelations] 結果が配列ではありません:', tauriResult);
-          return [];
-        }
-        result = tauriResult;
-      } else {
-        // Tauri環境でない場合は空配列を返す
-        return [];
-      }
+    // Supabaseから取得したデータは既に配列形式
+    if (!Array.isArray(result)) {
+      console.warn('⚠️ [getAllRelations] 結果が配列ではありません:', result);
+      return [];
     }
+    console.log('📖 [getAllRelations] Supabaseから取得:', result.length, '件');
     
     const relations: Relation[] = result.map((item: any) => {
-      // Supabaseの場合は直接オブジェクト、Tauriの場合はitem.dataまたはitem
-      const relationData = useSupabase ? item : (item.data || item);
-      const relationId = useSupabase ? item.id : (item.id || relationData.id);
+      // Supabaseの場合は直接オブジェクト
+      const relationData = item;
+      const relationId = item.id;
       
       const relation: Relation = {
         id: relationId,
@@ -461,50 +364,31 @@ export async function getAllRelations(): Promise<Relation[]> {
  */
 export async function getRelationsByTopicId(topicId: string): Promise<Relation[]> {
   try {
+    // Supabase専用（環境変数チェック不要）
     console.log('📊 [getRelationsByTopicId] リレーション取得開始:', { topicId });
     
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    let result: any[] = [];
+    const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
+    // Supabaseではtopicid（小文字）として保存されている
+    const result = await getCollectionViaDataSource('relations', {
+      filters: [
+        { field: 'topicid', operator: 'eq', value: topicId }
+      ]
+    });
     
-    if (useSupabase) {
-      try {
-        const { getCollectionViaDataSource } = await import('./dataSourceAdapter');
-        // Supabaseではtopicid（小文字）として保存されている
-        result = await getCollectionViaDataSource('relations', {
-          filters: [
-            { field: 'topicid', operator: 'eq', value: topicId }
-          ]
-        });
-        
-        // Supabaseから取得したデータは既に配列形式
-        if (!Array.isArray(result)) {
-          console.warn('⚠️ [getRelationsByTopicId] 結果が配列ではありません:', result);
-          return [];
-        }
-      } catch (supabaseError: any) {
-        console.error('❌ [getRelationsByTopicId] Supabase経由の取得に失敗:', supabaseError);
-        return [];
-      }
-    } else {
-      const tauriResult = await callTauriCommand('query_get', {
-        collectionName: 'relations',
-        conditions: { topicId },
-      });
-
-      // query_getの結果は[{id: ..., data: ...}, ...]の形式
-      result = (tauriResult || []) as Array<{id: string; data: any}>;
+    // Supabaseから取得したデータは既に配列形式
+    if (!Array.isArray(result)) {
+      console.warn('⚠️ [getRelationsByTopicId] 結果が配列ではありません:', result);
+      return [];
     }
     
     // データをRelation形式に変換
-    const items = useSupabase 
-      ? result.map((item: any) => ({ id: item.id, data: item }))
-      : result as Array<{id: string; data: any}>;
+    const items = result.map((item: any) => ({ id: item.id, data: item }));
     
     const relations = items.map(item => {
-      let relationData = useSupabase ? item.data : item.data;
+      let relationData = item.data;
       
       // Supabaseから取得したデータの場合、小文字のフィールド名をキャメルケースにマッピング
-      if (useSupabase && relationData) {
+      if (relationData) {
         relationData = {
           ...relationData,
           // topicid -> topicId
@@ -588,23 +472,21 @@ export async function getRelationsByTopicId(topicId: string): Promise<Relation[]
  */
 export async function getRelationsByEntityId(entityId: string): Promise<Relation[]> {
   try {
+    // Supabase専用（環境変数チェック不要）
+    const { queryGetViaDataSource } = await import('./dataSourceAdapter');
+    
     // 起点としてのリレーション
-    const sourceResult = await callTauriCommand('query_get', {
-      collectionName: 'relations',
-      conditions: { sourceEntityId: entityId },
+    const sourceResults = await queryGetViaDataSource('relations', {
+      filters: [{ field: 'sourceEntityId', operator: 'eq', value: entityId }]
     });
 
     // 終点としてのリレーション
-    const targetResult = await callTauriCommand('query_get', {
-      collectionName: 'relations',
-      conditions: { targetEntityId: entityId },
+    const targetResults = await queryGetViaDataSource('relations', {
+      filters: [{ field: 'targetEntityId', operator: 'eq', value: entityId }]
     });
 
-    // query_getの結果は[{id: ..., data: ...}, ...]の形式
-    const sourceItems = (sourceResult || []) as Array<{id: string; data: any}>;
-    const targetItems = (targetResult || []) as Array<{id: string; data: any}>;
-    const sourceRelations = sourceItems.map(item => ({ ...item.data, id: item.id })) as Relation[];
-    const targetRelations = targetItems.map(item => ({ ...item.data, id: item.id })) as Relation[];
+    const sourceRelations = (sourceResults || []).map((item: any) => ({ ...item, id: item.id })) as Relation[];
+    const targetRelations = (targetResults || []).map((item: any) => ({ ...item, id: item.id })) as Relation[];
 
     // 重複を除去して結合
     const allRelations = [...sourceRelations, ...targetRelations];
@@ -637,14 +519,21 @@ export async function getRelationsByType(
       filters.companyId = companyId;
     }
 
-    const result = await callTauriCommand('query_get', {
-      collectionName: 'relations',
-      conditions: filters,
-    });
+    // Supabase専用（環境変数チェック不要）
+    const { queryGetViaDataSource } = await import('./dataSourceAdapter');
+    
+    const supabaseFilters: Array<{ field: string; operator: string; value: any }> = [
+      { field: 'relationType', operator: 'eq', value: relationType }
+    ];
+    if (organizationId) {
+      supabaseFilters.push({ field: 'organizationId', operator: 'eq', value: organizationId });
+    }
+    if (companyId) {
+      supabaseFilters.push({ field: 'companyId', operator: 'eq', value: companyId });
+    }
 
-    // query_getの結果は[{id: ..., data: ...}, ...]の形式
-    const items = (result || []) as Array<{id: string; data: any}>;
-    return items.map(item => ({ ...item.data, id: item.id })) as Relation[];
+    const results = await queryGetViaDataSource('relations', { filters: supabaseFilters });
+    return (results || []).map((item: any) => ({ ...item, id: item.id })) as Relation[];
   } catch (error: any) {
     console.error('❌ [getRelationsByType] エラー:', error);
     return [];
@@ -656,14 +545,15 @@ export async function getRelationsByType(
  */
 export async function getRelationsByYamlFileId(yamlFileId: string): Promise<Relation[]> {
   try {
-    const result = await callTauriCommand('query_get', {
-      collectionName: 'relations',
-      conditions: { yamlFileId },
+    // Supabase専用（環境変数チェック不要）
+    const { queryGetViaDataSource } = await import('./dataSourceAdapter');
+    
+    const results = await queryGetViaDataSource('relations', {
+      filters: [{ field: 'yamlFileId', operator: 'eq', value: yamlFileId }]
     });
 
-    // query_getの結果は[{id: ..., data: ...}, ...]の形式
-    const items = (result || []) as Array<{id: string; data: any}>;
-    const relations = items.map(item => ({ ...item.data, id: item.id })) as Relation[];
+    const items = results || [];
+    const relations = items.map((item: any) => ({ ...item, id: item.id })) as Relation[];
     
     // metadataをパース
     relations.forEach(relation => {
@@ -714,8 +604,7 @@ export async function updateRelation(
       throw new Error(`リレーションのバリデーションエラー: ${validation.errors.join(', ')}`);
     }
 
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    
+    // Supabase専用（環境変数チェック不要）
     // データベース用のデータを準備
     const updatedForDb: any = {
       ...updated,
@@ -723,7 +612,7 @@ export async function updateRelation(
     
     // Supabaseスキーマに存在しないカラムを除外（yamlFileId）
     // SupabaseのrelationsテーブルにはyamlFileIdカラムが存在しないため、事前に除外
-    if (useSupabase && updatedForDb.yamlFileId !== undefined) {
+    if (updatedForDb.yamlFileId !== undefined) {
       delete updatedForDb.yamlFileId;
     }
     
@@ -737,83 +626,16 @@ export async function updateRelation(
         : JSON.stringify(existing.metadata);
     }
     
-    // Supabase使用時はDataSource経由で更新
-    if (useSupabase) {
-      try {
-        console.log('📝 [updateRelation] Supabase経由でリレーションを更新します:', relationId);
-        
-        // Supabaseに保存（doc_setは既存レコードがある場合は更新、ない場合は作成）
-        const { setDocViaDataSource } = await import('./dataSourceAdapter');
-        await setDocViaDataSource('relations', relationId, updatedForDb);
-        console.log('✅ [updateRelation] Supabase経由でリレーションを更新しました:', relationId);
-        
-        // ChromaDB同期（改善版: 変更検知、リトライ、エラー通知付き）
-        if (updated.organizationId) {
-          try {
-            const { syncRelationToChroma } = await import('./chromaSync');
-            await syncRelationToChroma(
-              relationId,
-              updated.topicId || '',
-              updated.organizationId,
-              updated,
-              existing,
-              updates
-            );
-          } catch (error) {
-            // エラーは既にsyncRelationToChroma内で処理されているため、ここではログのみ
-            console.debug(`[updateRelation] ChromaDB同期エラー（処理は続行）: ${relationId}`, error);
-          }
-        } else if (updated.companyId) {
-          console.log(`ℹ️ [updateRelation] companyIdが設定されていますが、事業会社用のChromaDB同期は未実装です: ${relationId}`);
-        } else {
-          console.warn(`⚠️ [updateRelation] organizationIdもcompanyIdも設定されていないため、ChromaDB同期をスキップ: ${relationId}`);
-        }
-        
-        return updated;
-      } catch (supabaseError: any) {
-        console.error('❌ [updateRelation] Supabase経由の更新に失敗:', supabaseError);
-        throw supabaseError;
-      }
-    }
+    console.log('📝 [updateRelation] Supabase経由でリレーションを更新します:', relationId);
     
-    // SQLite使用時は既存のロジック
-    try {
-      // Rust API経由で更新（未実装の場合はフォールバック）
-      return await apiPut<Relation>(`/api/relations/${relationId}`, updates);
-    } catch (error) {
-      // フォールバック: Tauriコマンド経由
-      console.warn('Rust API経由の更新に失敗、Tauriコマンドにフォールバック:', error);
-      await callTauriCommand('doc_update', {
-        collectionName: 'relations',
-        docId: relationId,
-        data: updatedForDb,
-      });
-      
-      // ChromaDB同期（改善版: 変更検知、リトライ、エラー通知付き）
-      if (updated.organizationId) {
-        try {
-          const { syncRelationToChroma } = await import('./chromaSync');
-          await syncRelationToChroma(
-            relationId,
-            updated.topicId || '',
-            updated.organizationId,
-            updated,
-            existing,
-            updates
-          );
-        } catch (error) {
-          // エラーは既にsyncRelationToChroma内で処理されているため、ここではログのみ
-          console.debug(`[updateRelation] ChromaDB同期エラー（処理は続行）: ${relationId}`, error);
-        }
-      } else if (updated.companyId) {
-        // 事業会社用のChromaDB同期（将来的に実装）
-        console.log(`ℹ️ [updateRelation] companyIdが設定されていますが、事業会社用のChromaDB同期は未実装です: ${relationId}`);
-      } else {
-        console.warn(`⚠️ [updateRelation] organizationIdもcompanyIdも設定されていないため、ChromaDB同期をスキップ: ${relationId}`);
-      }
-      
-      return updated;
-    }
+    // Supabaseに保存（doc_setは既存レコードがある場合は更新、ない場合は作成）
+    const { setDocViaDataSource } = await import('./dataSourceAdapter');
+    await setDocViaDataSource('relations', relationId, updatedForDb);
+    console.log('✅ [updateRelation] Supabase経由でリレーションを更新しました:', relationId);
+    
+    // Supabaseに移行済みのため、ChromaDB同期は不要
+    
+    return updated;
   } catch (error: any) {
     console.error('❌ [updateRelation] エラー:', error);
     throw error;
@@ -856,53 +678,19 @@ async function retryDbOperation<T>(
  */
 export async function deleteRelation(relationId: string): Promise<void> {
   try {
-    const useSupabase = process.env.NEXT_PUBLIC_USE_SUPABASE === 'true';
-    
+    // Supabase専用（環境変数チェック不要）
     // 削除前にリレーション情報を取得（ChromaDB削除用）
     const existing = await retryDbOperation(() => getRelationById(relationId));
     const organizationId = existing?.organizationId;
     const companyId = existing?.companyId;
     
-    // Supabase使用時はDataSource経由で削除
-    if (useSupabase) {
-      try {
-        console.log('📝 [deleteRelation] Supabase経由でリレーションを削除します:', relationId);
-        
-        const { deleteDocViaDataSource } = await import('./dataSourceAdapter');
-        await deleteDocViaDataSource('relations', relationId);
-        console.log('✅ [deleteRelation] Supabase経由でリレーションを削除しました:', relationId);
-      } catch (supabaseError: any) {
-        console.error('❌ [deleteRelation] Supabase経由の削除に失敗:', supabaseError);
-        throw supabaseError;
-      }
-    } else {
-      // SQLite使用時は既存のロジック
-      try {
-        // Rust API経由で削除（未実装の場合はフォールバック）
-        await retryDbOperation(() => apiDelete(`/api/relations/${relationId}`), 5, 200);
-      } catch (error) {
-        // フォールバック: Tauriコマンド経由（リトライ付き）
-        console.warn('Rust API経由の削除に失敗、Tauriコマンドにフォールバック:', error);
-        await retryDbOperation(() => callTauriCommand('doc_delete', {
-          collectionName: 'relations',
-          docId: relationId,
-        }), 5, 200);
-      }
-    }
+    console.log('📝 [deleteRelation] Supabase経由でリレーションを削除します:', relationId);
     
-    // ChromaDBからも削除（改善版: リトライ、エラー通知付き）
-    if (organizationId) {
-      try {
-        const { deleteRelationFromChroma } = await import('./chromaSync');
-        await deleteRelationFromChroma(relationId, organizationId);
-      } catch (error) {
-        // エラーは既にdeleteRelationFromChroma内で処理されているため、ここではログのみ
-        console.debug(`[deleteRelation] ChromaDB削除エラー（処理は続行）: ${relationId}`, error);
-      }
-    } else if (companyId) {
-      // 事業会社用のChromaDB削除（将来的に実装）
-      console.log(`ℹ️ [deleteRelation] companyIdが設定されていますが、事業会社用のChromaDB削除は未実装です: ${relationId}`);
-    }
+    const { deleteDocViaDataSource } = await import('./dataSourceAdapter');
+    await deleteDocViaDataSource('relations', relationId);
+    console.log('✅ [deleteRelation] Supabase経由でリレーションを削除しました:', relationId);
+    
+    // Supabaseに移行済みのため、ChromaDB削除は不要
     
     // キャッシュを無効化
     try {

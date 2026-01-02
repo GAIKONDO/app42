@@ -6,10 +6,10 @@ mod commands;
 mod api;
 mod db;
 
-use std::net::SocketAddr;
-// SQLite削除のため、以下のインポートは不要（後方互換性のためコメントアウト）
-// use tauri::Manager;
-// use db::{WriteJob, WriteWorker, WriteQueueState};
+use std::sync::Arc;
+use async_channel;
+use tauri::Manager;
+use db::{WriteJob, WriteQueueState};
 
 fn main() {
     // ログシステムの初期化（リリースビルドではINFOレベル）
@@ -23,7 +23,7 @@ fn main() {
         .init();
     
     tauri::Builder::default()
-        .setup(|_app| {
+        .setup(|app| {
             // 開発環境でのみ環境変数ファイルを読み込む
             #[cfg(debug_assertions)]
             {
@@ -56,6 +56,14 @@ fn main() {
             // ポート競合を避けるため、APIサーバーの起動をスキップ
             #[cfg(debug_assertions)]
             eprintln!("ℹ️  Rust APIサーバーの起動をスキップしました（Supabase専用）");
+            
+            // WriteQueueStateを初期化（Supabase専用のため、ダミーのチャネルを作成）
+            // 注意: 実際には書き込みワーカーは動作しないが、コマンドのState管理のために必要
+            let (_tx, _rx) = async_channel::unbounded::<WriteJob>();
+            let write_queue_state = WriteQueueState {
+                tx: Arc::new(_tx),
+            };
+            app.manage(write_queue_state);
             
             Ok(())
         })

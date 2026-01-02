@@ -735,7 +735,7 @@ export default function FinderColumnView({
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
             <span style={{ fontSize: '18px', lineHeight: '1' }}>+</span>
-            <span>新しい事業会社</span>
+            <span>新しいプロジェクト</span>
           </div>
           {/* +ボタン（ルート個人を作成） */}
           <div

@@ -558,16 +558,116 @@ export async function updateOrg(
 }
 
 /**
- * 組織の親IDを更新
+ * 組織の親IDを更新（Supabase対応）
  */
 export async function updateOrgParent(
   id: string,
   parentId: string | null
 ): Promise<any> {
-  return callTauriCommand('update_org_parent', {
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔄 [updateOrgParent] 組織の親IDを更新開始（Supabase経由）:', {
     id,
-    parentId: parentId || null,
+    parentId,
   });
+  
+  try {
+    const { getDataSourceInstance } = await import('../dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // 既存の組織データを取得
+    let existingOrg: any = null;
+    try {
+      existingOrg = await dataSource.doc_get('organizations', id);
+      if (existingOrg) {
+        console.log('📖 [updateOrgParent] 既存の組織データを取得:', existingOrg);
+      }
+    } catch (getError: any) {
+      const errorMessage = getError?.message || '';
+      // レコードが見つからないエラーの場合は警告のみ（更新を試みる）
+      if (errorMessage.includes('Query returned no rows') || 
+          errorMessage.includes('ドキュメント取得エラー') ||
+          getError?.code === 'PGRST116') {
+        console.warn(`⚠️ [updateOrgParent] 既存の組織データを取得できませんでしたが、更新を試みます: ${id}`);
+      } else {
+        // その他のエラーの場合は警告のみ（更新を試みる）
+        console.warn(`⚠️ [updateOrgParent] 既存の組織データの取得でエラーが発生しましたが、更新を試みます:`, getError);
+      }
+    }
+    
+    // 更新データを準備
+    const now = new Date().toISOString();
+    const updateData: any = {
+      id,
+      updatedAt: now,
+    };
+    
+    // 既存データがある場合はマージ、ない場合は新規作成として扱う
+    if (existingOrg) {
+      // 既存データを保持しつつ、parentIdのみ更新
+      const { levelName, levelname, ...existingOrgWithoutLevelName } = existingOrg;
+      Object.assign(updateData, existingOrgWithoutLevelName, { updatedAt: now });
+    } else {
+      // 既存データがない場合は、最低限のデータを設定
+      updateData.createdAt = now;
+    }
+    
+    // parentIdを更新（nullの場合は明示的にnullを設定）
+    updateData.parentId = parentId;
+    
+    console.log('💾 [updateOrgParent] Supabaseに更新するデータ:', updateData);
+    
+    // SupabaseDataSource経由で更新（doc_setを使用して、存在しない場合は作成、存在する場合は更新）
+    try {
+      await dataSource.doc_set('organizations', id, updateData);
+      console.log('✅ [updateOrgParent] Supabase経由で組織の親IDを更新/作成成功:', id);
+    } catch (updateError: any) {
+      const updateErrorMessage = updateError?.message || '';
+      // レコードが見つからないエラーの場合は、doc_setで再試行（新規作成として扱う）
+      if (updateErrorMessage.includes('Query returned no rows') || 
+          updateErrorMessage.includes('No rows found') ||
+          updateError?.code === 'PGRST116') {
+        console.log('ℹ️ [updateOrgParent] 組織が見つからないため、新規作成として処理します:', id);
+        await dataSource.doc_set('organizations', id, updateData);
+      } else {
+        throw updateError;
+      }
+    }
+    
+    console.log('✅ [updateOrgParent] Supabase経由で組織の親IDを更新成功:', id);
+    
+    // 更新後の組織データを取得して返す
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    let updatedOrg: any = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries && !updatedOrg) {
+      try {
+        updatedOrg = await dataSource.doc_get('organizations', id);
+        if (updatedOrg) {
+          break;
+        }
+      } catch (getError: any) {
+        console.warn(`⚠️ [updateOrgParent] 更新後の組織取得に失敗（再試行 ${retryCount + 1}/${maxRetries}）:`, getError);
+        if (retryCount < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+      retryCount++;
+    }
+    
+    if (!updatedOrg) {
+      // 取得に失敗した場合でも、更新データを返す
+      console.warn('⚠️ [updateOrgParent] 更新後の組織取得に失敗しましたが、更新データを返します:', id);
+      return updateData;
+    }
+    
+    return updatedOrg;
+  } catch (error: any) {
+    console.error('❌ [updateOrgParent] Supabase経由の更新に失敗:', error);
+    throw error;
+  }
 }
 
 /**

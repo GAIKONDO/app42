@@ -172,7 +172,7 @@ export function useFinderManagement(
       
       const level = parentLevel >= 0 ? parentLevel + 1 : 1;
       const levelName = `階層レベル ${level}`;
-      const defaultName = type === 'company' ? '新しい事業会社' : type === 'person' ? '新しい個人' : '新しい組織';
+      const defaultName = type === 'company' ? '新しいプロジェクト' : type === 'person' ? '新しい個人' : '新しい組織';
       
       devLog('🔍 [onCreateOrg] 組織を作成中:', {
         parentId,

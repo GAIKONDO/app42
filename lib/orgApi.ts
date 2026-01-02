@@ -466,16 +466,116 @@ export async function updateOrg(
 }
 
 /**
- * 組織の親IDを更新
+ * 組織の親IDを更新（Supabase対応）
  */
 export async function updateOrgParent(
   id: string,
   parentId: string | null
 ): Promise<any> {
-  return callTauriCommand('update_org_parent', {
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔄 [updateOrgParent] 組織の親IDを更新開始（Supabase経由）:', {
     id,
-    parentId: parentId || null,
+    parentId,
   });
+  
+  try {
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // 既存の組織データを取得
+    let existingOrg: any = null;
+    try {
+      existingOrg = await dataSource.doc_get('organizations', id);
+      if (existingOrg) {
+        console.log('📖 [updateOrgParent] 既存の組織データを取得:', existingOrg);
+      }
+    } catch (getError: any) {
+      const errorMessage = getError?.message || '';
+      // レコードが見つからないエラーの場合は警告のみ（更新を試みる）
+      if (errorMessage.includes('Query returned no rows') || 
+          errorMessage.includes('ドキュメント取得エラー') ||
+          getError?.code === 'PGRST116') {
+        console.warn(`⚠️ [updateOrgParent] 既存の組織データを取得できませんでしたが、更新を試みます: ${id}`);
+      } else {
+        // その他のエラーの場合は警告のみ（更新を試みる）
+        console.warn(`⚠️ [updateOrgParent] 既存の組織データの取得でエラーが発生しましたが、更新を試みます:`, getError);
+      }
+    }
+    
+    // 更新データを準備
+    const now = new Date().toISOString();
+    const updateData: any = {
+      id,
+      updatedAt: now,
+    };
+    
+    // 既存データがある場合はマージ、ない場合は新規作成として扱う
+    if (existingOrg) {
+      // 既存データを保持しつつ、parentIdのみ更新
+      const { levelName, levelname, ...existingOrgWithoutLevelName } = existingOrg;
+      Object.assign(updateData, existingOrgWithoutLevelName, { updatedAt: now });
+    } else {
+      // 既存データがない場合は、最低限のデータを設定
+      updateData.createdAt = now;
+    }
+    
+    // parentIdを更新（nullの場合は明示的にnullを設定）
+    updateData.parentId = parentId;
+    
+    console.log('💾 [updateOrgParent] Supabaseに更新するデータ:', updateData);
+    
+    // SupabaseDataSource経由で更新（doc_setを使用して、存在しない場合は作成、存在する場合は更新）
+    try {
+      await dataSource.doc_set('organizations', id, updateData);
+      console.log('✅ [updateOrgParent] Supabase経由で組織の親IDを更新/作成成功:', id);
+    } catch (updateError: any) {
+      const updateErrorMessage = updateError?.message || '';
+      // レコードが見つからないエラーの場合は、doc_setで再試行（新規作成として扱う）
+      if (updateErrorMessage.includes('Query returned no rows') || 
+          updateErrorMessage.includes('No rows found') ||
+          updateError?.code === 'PGRST116') {
+        console.log('ℹ️ [updateOrgParent] 組織が見つからないため、新規作成として処理します:', id);
+        await dataSource.doc_set('organizations', id, updateData);
+      } else {
+        throw updateError;
+      }
+    }
+    
+    console.log('✅ [updateOrgParent] Supabase経由で組織の親IDを更新成功:', id);
+    
+    // 更新後の組織データを取得して返す
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    let updatedOrg: any = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries && !updatedOrg) {
+      try {
+        updatedOrg = await dataSource.doc_get('organizations', id);
+        if (updatedOrg) {
+          break;
+        }
+      } catch (getError: any) {
+        console.warn(`⚠️ [updateOrgParent] 更新後の組織取得に失敗（再試行 ${retryCount + 1}/${maxRetries}）:`, getError);
+        if (retryCount < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+      retryCount++;
+    }
+    
+    if (!updatedOrg) {
+      // 取得に失敗した場合でも、更新データを返す
+      console.warn('⚠️ [updateOrgParent] 更新後の組織取得に失敗しましたが、更新データを返します:', id);
+      return updateData;
+    }
+    
+    return updatedOrg;
+  } catch (error: any) {
+    console.error('❌ [updateOrgParent] Supabase経由の更新に失敗:', error);
+    throw error;
+  }
 }
 
 /**
@@ -552,6 +652,7 @@ export async function addOrgMember(
       location: memberInfo.location || null,
       floorDoorNo: memberInfo.floorDoorNo || null,
       previousName: memberInfo.previousName || null,
+      displayOrder: (memberInfo as any).displayOrder !== undefined ? (memberInfo as any).displayOrder : null,
     };
     
     console.log('💾 [addOrgMember] Supabaseに追加するデータ:', memberData);
@@ -573,63 +674,102 @@ export async function addOrgMember(
 }
 
 /**
- * メンバーを更新（詳細情報対応）
+ * メンバーを更新（詳細情報対応、Supabase対応）
  */
 export async function updateOrgMember(
   id: string,
   memberInfo: Partial<MemberInfo>
 ): Promise<any> {
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔄 [updateOrgMember] メンバーを更新開始（Supabase経由）:', {
+    id,
+    name: memberInfo.name,
+  });
+  
   try {
-    // Rust API経由で更新（organizationIdとmemberIdが必要）
-    // idは "orgId:memberId" の形式を想定、または別途organizationIdを取得する必要がある
-    // 暫定的にTauriコマンドにフォールバック
-    const orgId = (memberInfo as any).organizationId || (id.includes(':') ? id.split(':')[0] : '');
-    if (!orgId) {
-      // フォールバック: Tauriコマンド経由
-      console.warn('Rust API経由の更新に失敗、Tauriコマンドにフォールバック（organizationId不明）');
-      return await callTauriCommand('update_org_member', { id, ...memberInfo });
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // 既存のメンバーデータを取得
+    let existingMember: any = null;
+    try {
+      existingMember = await dataSource.doc_get('organizationMembers', id);
+      if (existingMember) {
+        console.log('📖 [updateOrgMember] 既存のメンバーデータを取得:', existingMember);
+      }
+    } catch (getError: any) {
+      console.warn('⚠️ [updateOrgMember] 既存のメンバーデータを取得できませんでしたが、更新を試みます:', getError);
     }
-    const memberId = id.includes(':') ? id.split(':')[1] : id;
-    return await apiPut<any>(`/api/organizations/${orgId}/members/${memberId}`, {
-      name: memberInfo.name || null,
-      position: memberInfo.title || null,
-      name_romaji: memberInfo.nameRomaji || null,
-      department: memberInfo.department || null,
-      extension: memberInfo.extension || null,
-      company_phone: memberInfo.companyPhone || null,
-      mobile_phone: memberInfo.mobilePhone || null,
-      email: memberInfo.email || null,
-      itochu_email: memberInfo.itochuEmail || null,
-      teams: memberInfo.teams || null,
-      employee_type: memberInfo.employeeType || null,
-      role_name: memberInfo.roleName || null,
-      indicator: memberInfo.indicator || null,
-      location: memberInfo.location || null,
-      floor_door_no: memberInfo.floorDoorNo || null,
-      previous_name: memberInfo.previousName || null,
-    });
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の更新に失敗、Tauriコマンドにフォールバック:', error);
-    return callTauriCommand('update_org_member', {
+    
+    // 更新データを準備（既存データをマージ）
+    const updateData: any = {
       id,
-      name: memberInfo.name || null,
-      position: memberInfo.title || null,
-      nameRomaji: memberInfo.nameRomaji || null,
-      department: memberInfo.department || null,
-      extension: memberInfo.extension || null,
-      companyPhone: memberInfo.companyPhone || null,
-      mobilePhone: memberInfo.mobilePhone || null,
-      email: memberInfo.email || null,
-      itochuEmail: memberInfo.itochuEmail || null,
-      teams: memberInfo.teams || null,
-      employeeType: memberInfo.employeeType || null,
-      roleName: memberInfo.roleName || null,
-      indicator: memberInfo.indicator || null,
-      location: memberInfo.location || null,
-      floorDoorNo: memberInfo.floorDoorNo || null,
-      previousName: memberInfo.previousName || null,
-    });
+      ...(existingMember || {}),
+    };
+    
+    // 指定されたフィールドのみ更新
+    if (memberInfo.name !== undefined) {
+      updateData.name = memberInfo.name;
+    }
+    if (memberInfo.title !== undefined) {
+      updateData.position = memberInfo.title || null;
+    }
+    if (memberInfo.nameRomaji !== undefined) {
+      updateData.nameRomaji = memberInfo.nameRomaji || null;
+    }
+    if (memberInfo.department !== undefined) {
+      updateData.department = memberInfo.department || null;
+    }
+    if (memberInfo.extension !== undefined) {
+      updateData.extension = memberInfo.extension || null;
+    }
+    if (memberInfo.companyPhone !== undefined) {
+      updateData.companyPhone = memberInfo.companyPhone || null;
+    }
+    if (memberInfo.mobilePhone !== undefined) {
+      updateData.mobilePhone = memberInfo.mobilePhone || null;
+    }
+    if (memberInfo.email !== undefined) {
+      updateData.email = memberInfo.email || null;
+    }
+    if (memberInfo.itochuEmail !== undefined) {
+      updateData.itochuEmail = memberInfo.itochuEmail || null;
+    }
+    if (memberInfo.teams !== undefined) {
+      updateData.teams = memberInfo.teams || null;
+    }
+    if (memberInfo.employeeType !== undefined) {
+      updateData.employeeType = memberInfo.employeeType || null;
+    }
+    if (memberInfo.roleName !== undefined) {
+      updateData.roleName = memberInfo.roleName || null;
+    }
+    if (memberInfo.indicator !== undefined) {
+      updateData.indicator = memberInfo.indicator || null;
+    }
+    if (memberInfo.location !== undefined) {
+      updateData.location = memberInfo.location || null;
+    }
+    if (memberInfo.floorDoorNo !== undefined) {
+      updateData.floorDoorNo = memberInfo.floorDoorNo || null;
+    }
+    if (memberInfo.previousName !== undefined) {
+      updateData.previousName = memberInfo.previousName || null;
+    }
+    if ((memberInfo as any).displayOrder !== undefined) {
+      updateData.displayOrder = (memberInfo as any).displayOrder !== null ? (memberInfo as any).displayOrder : null;
+    }
+    
+    console.log('💾 [updateOrgMember] Supabaseに更新するデータ:', updateData);
+    
+    // SupabaseDataSource経由で更新
+    await dataSource.doc_set('organizationMembers', id, updateData);
+    console.log('✅ [updateOrgMember] Supabase経由でメンバーを更新成功:', id);
+    
+    return updateData;
+  } catch (error: any) {
+    console.error('❌ [updateOrgMember] Supabase経由の更新に失敗:', error);
+    throw error;
   }
 }
 
@@ -668,13 +808,57 @@ export async function getOrgMembers(organizationId: string): Promise<any[]> {
     
     // organizationIdでフィルタリングしてから取得（クライアント側でのフィルタリングを回避）
     // normalizeFieldNameで自動的に小文字に変換されるため、organizationId（キャメルケース）を使用可能
-    const result = await dataSource.collection_get('organizationMembers', {
-      filters: [
-        { field: 'organizationId', operator: 'eq', value: organizationId }
-      ],
-      orderBy: 'position',
-      orderDirection: 'asc'
-    });
+    // displayOrderカラムが存在しない場合に備えて、まずpositionでソートを試みる
+    let result: any[] = [];
+    try {
+      // まずdisplayOrderでソートを試みる
+      result = await dataSource.collection_get('organizationMembers', {
+        filters: [
+          { field: 'organizationId', operator: 'eq', value: organizationId }
+        ],
+        orderBy: 'displayOrder',
+        orderDirection: 'asc'
+      });
+    } catch (error: any) {
+      // displayOrderカラムが存在しない場合は、positionでソート
+      if (error?.code === '42703' || error?.message?.includes('displayOrder does not exist')) {
+        console.warn('⚠️ [getOrgMembers] displayOrderカラムが存在しないため、positionでソートします');
+        result = await dataSource.collection_get('organizationMembers', {
+          filters: [
+            { field: 'organizationId', operator: 'eq', value: organizationId }
+          ],
+          orderBy: 'position',
+          orderDirection: 'asc'
+        });
+      } else {
+        throw error;
+      }
+    }
+    
+    // displayOrderがnullの場合は、positionでソート（後方互換性のため）
+    if (result && result.length > 0) {
+      const hasDisplayOrder = result.some((m: any) => m.displayOrder !== null && m.displayOrder !== undefined);
+      if (!hasDisplayOrder) {
+        // displayOrderが設定されていない場合は、positionでソート
+        result.sort((a: any, b: any) => {
+          const posA = a.position || '';
+          const posB = b.position || '';
+          if (posA !== posB) {
+            return posA.localeCompare(posB, 'ja');
+          }
+          const nameA = a.name || '';
+          const nameB = b.name || '';
+          return nameA.localeCompare(nameB, 'ja');
+        });
+      } else {
+        // displayOrderでソート（nullは最後に）
+        result.sort((a: any, b: any) => {
+          const orderA = a.displayOrder !== null && a.displayOrder !== undefined ? a.displayOrder : 999999;
+          const orderB = b.displayOrder !== null && b.displayOrder !== undefined ? b.displayOrder : 999999;
+          return orderA - orderB;
+        });
+      }
+    }
     
     console.log('✅ [getOrgMembers] Supabase経由でメンバー取得成功:', { 
       organizationId, 

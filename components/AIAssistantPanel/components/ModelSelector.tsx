@@ -72,12 +72,12 @@ export function ModelSelector({
             e.currentTarget.style.borderColor = 'transparent';
           }
         }}
-        title={`AIモデル: ${modelType === 'gpt' ? 'GPT' : modelType === 'gemini' ? 'Gemini' : modelType === 'claude' ? 'Claude' : 'ローカル'} - ${availableModels.find(m => m.value === selectedModel)?.label || selectedModel}`}
+        title={`AIモデル: ${modelType === 'gpt' ? 'GPT' : modelType === 'gemini' ? 'Gemini' : modelType === 'claude' ? 'Claude' : modelType === 'local-lfm' ? 'ローカル（LFM）' : 'ローカル'} - ${availableModels.find(m => m.value === selectedModel)?.label || selectedModel}`}
       >
         <FiCpu size={16} />
         {showModelSelector && (
           <span style={{ fontSize: '10px', fontWeight: 500 }}>
-            {modelType === 'gpt' ? 'GPT' : modelType === 'gemini' ? 'Gemini' : modelType === 'claude' ? 'Claude' : 'Local'}
+            {modelType === 'gpt' ? 'GPT' : modelType === 'gemini' ? 'Gemini' : modelType === 'claude' ? 'Claude' : modelType === 'local-lfm' ? 'LFM' : 'Local'}
           </span>
         )}
       </button>
@@ -118,7 +118,7 @@ export function ModelSelector({
               gap: '8px',
               flexWrap: 'wrap',
             }}>
-              {(['gpt', 'gemini', 'claude', 'local'] as const).map((type) => (
+              {(['gpt', 'gemini', 'claude', 'local', 'local-lfm'] as const).map((type) => (
                 <label
                   key={type}
                   style={{
@@ -144,7 +144,7 @@ export function ModelSelector({
                     style={{ cursor: 'pointer' }}
                   />
                   <span style={{ fontSize: '12px', fontWeight: 500, color: '#ffffff' }}>
-                    {type === 'gpt' ? 'GPT' : type === 'gemini' ? 'Gemini' : type === 'claude' ? 'Claude' : 'ローカル'}
+                    {type === 'gpt' ? 'GPT' : type === 'gemini' ? 'Gemini' : type === 'claude' ? 'Claude' : type === 'local-lfm' ? 'ローカル（LFM）' : 'ローカル'}
                   </span>
                 </label>
               ))}
@@ -166,7 +166,7 @@ export function ModelSelector({
                 <FiCpu size={14} />
                 <span>使用するAIモデル</span>
               </label>
-              {modelType === 'local' && loadingLocalModels && (
+              {(modelType === 'local' || modelType === 'local-lfm') && loadingLocalModels && (
                 <div style={{
                   padding: '8px',
                   backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -180,7 +180,7 @@ export function ModelSelector({
                   </p>
                 </div>
               )}
-              {modelType === 'local' && !loadingLocalModels && availableModels.length === 0 && (
+              {(modelType === 'local' || modelType === 'local-lfm') && !loadingLocalModels && availableModels.length === 0 && (
                 <div style={{
                   padding: '8px',
                   backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -188,9 +188,47 @@ export function ModelSelector({
                   borderRadius: '6px',
                   marginBottom: '8px',
                 }}>
-                  <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.7)', margin: 0 }}>
+                  <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.7)', margin: 0, marginBottom: '8px' }}>
                     ⚠️ 利用可能なローカルモデルが見つかりませんでした
                   </p>
+                  {modelType === 'local-lfm' && (
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '8px',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      borderRadius: '4px',
+                    }}>
+                      <p style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.8)', margin: 0, marginBottom: '4px', fontWeight: 600 }}>
+                        💡 注意: llama-serverが起動していない可能性があります
+                      </p>
+                      <p style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.7)', margin: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        起動方法:
+                        <br />
+                        cd /Users/gaikondo/Desktop/test-app/app50_LFM2
+                        <br />
+                        ./ai/bin/run_lfm2_server.sh ./ai/models/LFM2-8B-A1B-Q4_K_M.gguf
+                      </p>
+                    </div>
+                  )}
+                  {modelType === 'local' && (
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '8px',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      borderRadius: '4px',
+                    }}>
+                      <p style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.8)', margin: 0, marginBottom: '4px', fontWeight: 600 }}>
+                        💡 注意: Ollamaが起動していない可能性があります
+                      </p>
+                      <p style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.7)', margin: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        起動方法:
+                        <br />
+                        ollama serve
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
               {availableModels.length > 0 && (

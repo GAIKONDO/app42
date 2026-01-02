@@ -510,36 +510,31 @@ export async function deleteOrg(id: string): Promise<void> {
 }
 
 /**
- * メンバーを追加（詳細情報対応）
+ * メンバーを追加（詳細情報対応、Supabase対応）
  */
 export async function addOrgMember(
   organizationId: string,
   memberInfo: MemberInfo
 ): Promise<any> {
+  // Supabase専用（環境変数チェック不要）
+  console.log('🔄 [addOrgMember] メンバーを追加開始（Supabase経由）:', {
+    organizationId,
+    name: memberInfo.name,
+  });
+  
   try {
-    // Rust API経由で追加
-    return await apiPost<any>(`/api/organizations/${organizationId}/members`, {
-      name: memberInfo.name,
-      position: memberInfo.title || null,
-      name_romaji: memberInfo.nameRomaji || null,
-      department: memberInfo.department || null,
-      extension: memberInfo.extension || null,
-      company_phone: memberInfo.companyPhone || null,
-      mobile_phone: memberInfo.mobilePhone || null,
-      email: memberInfo.email || null,
-      itochu_email: memberInfo.itochuEmail || null,
-      teams: memberInfo.teams || null,
-      employee_type: memberInfo.employeeType || null,
-      role_name: memberInfo.roleName || null,
-      indicator: memberInfo.indicator || null,
-      location: memberInfo.location || null,
-      floor_door_no: memberInfo.floorDoorNo || null,
-      previous_name: memberInfo.previousName || null,
-    });
-  } catch (error) {
-    // フォールバック: Tauriコマンド経由
-    console.warn('Rust API経由の追加に失敗、Tauriコマンドにフォールバック:', error);
-    return callTauriCommand('add_org_member', {
+    const { getDataSourceInstance } = await import('./dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // メンバーIDを生成（crypto.randomUUIDを使用、フォールバックとしてDateベースのID）
+    const memberId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    
+    // メンバーデータを準備
+    // createdAtとupdatedAtはdoc_set関数内で自動設定されるため、ここでは設定しない
+    const memberData: any = {
+      id: memberId,
       organizationId,
       name: memberInfo.name,
       position: memberInfo.title || null,
@@ -557,7 +552,23 @@ export async function addOrgMember(
       location: memberInfo.location || null,
       floorDoorNo: memberInfo.floorDoorNo || null,
       previousName: memberInfo.previousName || null,
-    });
+    };
+    
+    console.log('💾 [addOrgMember] Supabaseに追加するデータ:', memberData);
+    console.log('🔍 [addOrgMember] テーブル名: organizationMembers, メンバーID:', memberId);
+    
+    // SupabaseDataSource経由で追加
+    await dataSource.doc_set('organizationMembers', memberId, memberData);
+    console.log('✅ [addOrgMember] Supabase経由でメンバーを追加成功:', memberId);
+    
+    // 追加されたメンバーを確認
+    const addedMember = await dataSource.doc_get('organizationMembers', memberId);
+    console.log('🔍 [addOrgMember] 追加されたメンバーを確認:', addedMember);
+    
+    return memberData;
+  } catch (error: any) {
+    console.error('❌ [addOrgMember] Supabase経由の追加に失敗:', error);
+    throw error;
   }
 }
 
@@ -930,6 +941,7 @@ export interface Startup {
   categoryIds?: string[]; // 関連するカテゴリーIDの配列（複数選択可能）
   relatedVCS?: string[]; // 関連VCの配列（複数選択可能）
   responsibleDepartments?: string[]; // 主管事業部署の配列（複数選択可能）
+  isFavorite?: boolean; // お気に入りフラグ
   createdAt?: any;
   updatedAt?: any;
 }
@@ -1134,6 +1146,7 @@ export {
   saveStartup,
   getStartupById,
   deleteStartup,
+  toggleStartupFavorite,
 } from './orgApi/startups';
 
 // テーマ関連

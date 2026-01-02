@@ -84,6 +84,15 @@ export class SupabaseDataSource implements DataSource {
     
     const normalizedTableName = tableName ? this.normalizeTableName(tableName) : '';
     
+    // organizationsテーブルは引用符付きカラム（"levelName", "parentId", "createdAt", "updatedAt"）を持つ
+    // これらのフィールドはそのまま返す
+    if (normalizedTableName === 'organizations') {
+      const organizationsQuotedFields = ['levelName', 'parentId', 'createdAt', 'updatedAt'];
+      if (organizationsQuotedFields.includes(fieldName)) {
+        return fieldName;
+      }
+    }
+    
     // 引用符付きのカラム名を持つテーブルの場合、フィールド名をそのまま返す
     if (normalizedTableName && tablesWithQuotedColumns.includes(normalizedTableName)) {
       // 引用符付きテーブルでは、quotedFieldsに含まれるフィールドはそのまま返す
@@ -233,6 +242,7 @@ export class SupabaseDataSource implements DataSource {
 
   async doc_set(collectionName: string, docId: string, data: any): Promise<void> {
     const normalizedTableName = this.normalizeTableName(collectionName);
+    console.log(`🔍 [doc_set] テーブル名の正規化: ${collectionName} -> ${normalizedTableName}, docId: ${docId}`);
     // パフォーマンス最適化: doc_getを削除し、upsertを使用して1回のリクエストで処理
     // 既存レコードのチェックは不要（upsertが自動的に処理する）
     
@@ -240,8 +250,11 @@ export class SupabaseDataSource implements DataSource {
     
     // データを準備（undefinedのフィールドを除外、nullは保持）
     // 引用符なしで定義されているテーブルでは、キャメルケースのフィールド名を小文字に変換
-    const tablesWithLowercaseColumns = ['entities', 'relations', 'topics', 'organizations', 'organizationMembers', 'organizationContents', 'meetingNotes', 'focusInitiatives', 'themes'];
+    // organizationsテーブルは引用符付きカラム（"parentId", "levelName", "createdAt", "updatedAt"）と
+    // 小文字カラム（name, title, description, level, position, type）が混在しているため、除外
+    const tablesWithLowercaseColumns = ['entities', 'relations', 'topics', 'organizationMembers', 'organizationContents', 'meetingNotes', 'focusInitiatives', 'themes'];
     const useLowercaseColumns = tablesWithLowercaseColumns.includes(normalizedTableName);
+    const isOrganizationsTable = normalizedTableName === 'organizations';
     
     const cleanedData: any = {};
     for (const [key, value] of Object.entries(data)) {
@@ -251,9 +264,12 @@ export class SupabaseDataSource implements DataSource {
         if (normalizedTableName === 'relations' && (key === 'yamlFileId' || key === 'yamlfileid')) {
           continue;
         }
-        // 引用符なしで定義されているテーブルでは、キャメルケースのフィールド名を小文字に変換
-        // ただし、idはそのまま
-        if (useLowercaseColumns && key !== 'id') {
+        // organizationsテーブルの場合は、normalizeFieldNameで適切に処理（引用符付きカラムはそのまま、小文字カラムは小文字に変換）
+        if (isOrganizationsTable && key !== 'id') {
+          const normalizedKey = this.normalizeFieldName(key, normalizedTableName);
+          cleanedData[normalizedKey] = value;
+        } else if (useLowercaseColumns && key !== 'id') {
+          // 引用符なしで定義されているテーブルでは、キャメルケースのフィールド名を小文字に変換
           // createdAt, updatedAt, organizationId, companyIdなどを小文字に変換
           const normalizedKey = this.normalizeFieldName(key, normalizedTableName);
           cleanedData[normalizedKey] = value;
@@ -271,12 +287,17 @@ export class SupabaseDataSource implements DataSource {
     // createdAtとupdatedAtを適切な形式で設定
     // 既存のcreatedAt/updatedAtを削除してから設定
     // topicsテーブルはfix_column_names.sqlで引用符付きにリネームされているため、createdAt/updatedAtを使用
+    // organizationsテーブルは引用符付きカラム（"createdAt", "updatedAt", "levelName", "parentId"）を持つ
     const isTopicsTable = normalizedTableName === 'topics';
-    // データにcreatedAtが含まれている場合はそれを使用、含まれていない場合は現在時刻を設定
-    const hasCreatedAt = record.createdat !== undefined || record.createdAt !== undefined;
-    if (useLowercaseColumns && !isTopicsTable) {
+    const isOrganizationMembersTable = normalizedTableName === 'organizationmembers';
+    
+    if (useLowercaseColumns && !isTopicsTable && !isOrganizationsTable) {
+      // organizationMembersテーブルを含む小文字カラムテーブルの場合
+      // まず、キャメルケースのcreatedAt/updatedAtを削除（念のため複数回削除）
       delete record.createdAt;
       delete record.updatedAt;
+      // データにcreatedatが含まれている場合はそれを使用、含まれていない場合は現在時刻を設定
+      const hasCreatedAt = record.createdat !== undefined;
       record.updatedat = now;
       if (!hasCreatedAt) {
         record.createdat = now;
@@ -297,9 +318,15 @@ export class SupabaseDataSource implements DataSource {
         record[lowerKey] = record[key];
         delete record[key];
       });
+      // 最後に、createdAt/updatedAtが残っていないか確認して削除
+      delete record.createdAt;
+      delete record.updatedAt;
     } else {
+      // topicsテーブルまたはorganizationsテーブルの場合、引用符付きカラムを使用
       delete record.createdat;
       delete record.updatedat;
+      // データにcreatedAtが含まれている場合はそれを使用、含まれていない場合は現在時刻を設定
+      const hasCreatedAt = record.createdAt !== undefined;
       record.updatedAt = now;
       if (!hasCreatedAt) {
         record.createdAt = now;
@@ -315,10 +342,18 @@ export class SupabaseDataSource implements DataSource {
         hasCreatedAt: 'createdAt' in record,
         hasCreatedat: 'createdat' in record,
         useLowercaseColumns,
+        isOrganizationMembersTable,
       });
     }
 
+    // organizationMembersテーブルの場合、createdAt/updatedAtが残っていないか最終確認
+    if (isOrganizationMembersTable) {
+      delete record.createdAt;
+      delete record.updatedAt;
+    }
+
     // upsertを使用して1回のリクエストで挿入または更新を実行（パフォーマンス最適化）
+    console.log(`🔍 [doc_set] Supabaseにupsert実行: テーブル=${normalizedTableName}, docId=${docId}, レコードキー=${Object.keys(record).join(', ')}`);
     let { error } = await this.supabase
       .from(normalizedTableName)
       .upsert(record, { onConflict: 'id' });

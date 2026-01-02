@@ -479,7 +479,9 @@ export async function updateOrg(
     // 既存データがある場合はマージ、ない場合は新規作成として扱う
     if (existingOrg) {
       // 既存データを保持しつつ、指定されたフィールドのみ更新
-      Object.assign(updateData, existingOrg, { updatedAt: now });
+      // levelNameは更新対象外のため、除外する（Supabaseスキーマの引用符付きカラムとの不整合を避ける）
+      const { levelName, levelname, ...existingOrgWithoutLevelName } = existingOrg;
+      Object.assign(updateData, existingOrgWithoutLevelName, { updatedAt: now });
     } else {
       // 既存データがない場合は、最低限のデータを設定
       updateData.createdAt = now;

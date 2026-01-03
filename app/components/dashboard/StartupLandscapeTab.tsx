@@ -1073,7 +1073,7 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
           </div>
         </div>
 
-        {/* スタートアップ件数 */}
+        {/* 全企業数 */}
         <div style={{
           padding: '24px',
           backgroundColor: '#FFFFFF',
@@ -1113,7 +1113,7 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
             position: 'relative',
             zIndex: 1,
           }}>
-            スタートアップ件数
+            全企業数
           </div>
           <div style={{
             fontSize: '40px',
@@ -1134,11 +1134,11 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
             position: 'relative',
             zIndex: 1,
           }}>
-            件のスタートアップ
+            件の企業
           </div>
         </div>
 
-        {/* お気に入りスタートアップ件数 */}
+        {/* お気に入り企業数 */}
         <div style={{
           padding: '24px',
           backgroundColor: '#FFFFFF',
@@ -1178,7 +1178,7 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
             position: 'relative',
             zIndex: 1,
           }}>
-            お気に入りスタートアップ
+            お気に入り企業数
           </div>
           <div style={{
             fontSize: '40px',
@@ -1199,7 +1199,7 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
             position: 'relative',
             zIndex: 1,
           }}>
-            件のお気に入り
+            件の企業
           </div>
         </div>
       </div>
@@ -1925,13 +1925,50 @@ function CompactStartupItem({ startup, bizDevPhases }: CompactStartupItemProps) 
     }
   };
 
+  // Biz-Devフェーズを取得
+  const bizDevPhase = startup.bizDevPhase 
+    ? bizDevPhases.find(p => p.id === startup.bizDevPhase)
+    : null;
+  
+  // 特定のBiz-Devフェーズかどうかを判定
+  const isSpecialPhase = bizDevPhase && (
+    bizDevPhase.title.includes('全社取扱商材') || 
+    bizDevPhase.title.includes('CTCA関連')
+  );
+
+  const isFavorite = startup.isFavorite === true;
+  
+  // 色の決定ロジック
+  let defaultBgColor: string;
+  let defaultBorderColor: string;
+  let hoverBgColor: string;
+  let hoverBorderColor: string;
+  
+  if (isFavorite) {
+    defaultBgColor = '#FEF3C7';
+    defaultBorderColor = '#F59E0B';
+    hoverBgColor = '#FDE68A';
+    hoverBorderColor = '#F59E0B';
+  } else if (isSpecialPhase) {
+    // 全社取扱商材またはCTCA関連の場合は青色系
+    defaultBgColor = '#EFF6FF';
+    defaultBorderColor = '#3B82F6';
+    hoverBgColor = '#DBEAFE';
+    hoverBorderColor = '#2563EB';
+  } else {
+    defaultBgColor = '#FFFFFF';
+    defaultBorderColor = '#E5E7EB';
+    hoverBgColor = '#EFF6FF';
+    hoverBorderColor = '#3B82F6';
+  }
+
   return (
     <div
       onClick={handleClick}
       style={{
         padding: '10px 14px',
-        backgroundColor: '#FFFFFF',
-        border: '1px solid #E5E7EB',
+        backgroundColor: defaultBgColor,
+        border: `1px solid ${defaultBorderColor}`,
         borderRadius: '8px',
         cursor: startup.organizationId ? 'pointer' : 'default',
         transition: 'all 0.2s ease',
@@ -1943,20 +1980,33 @@ function CompactStartupItem({ startup, bizDevPhases }: CompactStartupItemProps) 
         justifyContent: 'center',
         minHeight: '44px',
         textAlign: 'center',
+        boxShadow: isFavorite 
+          ? '0 2px 4px rgba(245, 158, 11, 0.1)' 
+          : isSpecialPhase 
+            ? '0 2px 4px rgba(59, 130, 246, 0.15)' 
+            : 'none',
       }}
       onMouseEnter={(e) => {
         if (startup.organizationId) {
-          e.currentTarget.style.borderColor = '#3B82F6';
-          e.currentTarget.style.backgroundColor = '#EFF6FF';
+          e.currentTarget.style.borderColor = hoverBorderColor;
+          e.currentTarget.style.backgroundColor = hoverBgColor;
           e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.2)';
+          e.currentTarget.style.boxShadow = isFavorite 
+            ? '0 4px 12px rgba(245, 158, 11, 0.3)' 
+            : isSpecialPhase
+              ? '0 4px 12px rgba(59, 130, 246, 0.25)'
+              : '0 4px 12px rgba(59, 130, 246, 0.2)';
         }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = '#E5E7EB';
-        e.currentTarget.style.backgroundColor = '#FFFFFF';
+        e.currentTarget.style.borderColor = defaultBorderColor;
+        e.currentTarget.style.backgroundColor = defaultBgColor;
         e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.boxShadow = isFavorite 
+          ? '0 2px 4px rgba(245, 158, 11, 0.1)' 
+          : isSpecialPhase 
+            ? '0 2px 4px rgba(59, 130, 246, 0.15)' 
+            : 'none';
       }}
     >
       <span style={{

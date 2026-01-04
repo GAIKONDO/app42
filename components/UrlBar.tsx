@@ -1,22 +1,50 @@
 'use client';
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTabs } from './TabProvider';
+import { useSplitView } from './SplitViewProvider';
 
 interface UrlBarProps {
   sidebarOpen?: boolean;
   user?: any;
+  panelId?: 'left' | 'right' | 'main';
 }
 
-export default function UrlBar({ sidebarOpen = false, user }: UrlBarProps) {
+export default function UrlBar({ sidebarOpen = false, user, panelId = 'main' }: UrlBarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { activeTabId, navigateTab } = useTabs();
+  const { activeTabId, navigateTab, getActiveTabByPanel } = useTabs();
+  const panelActiveTab = getActiveTabByPanel(panelId);
+  const panelActiveTabId = panelActiveTab?.id || null;
+  const { isSplitViewEnabled, toggleSplitView } = useSplitView();
   const [inputValue, setInputValue] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // メニュー外をクリックしたら閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        const buttonElement = event.target as HTMLElement;
+        if (!buttonElement.closest('button[title="その他"]')) {
+          setShowMenu(false);
+        }
+      }
+    };
+
+    if (showMenu) {
+      setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside);
+      }, 0);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showMenu]);
   
   // 環境検出（クライアントサイドでのみ実行、同期的にチェック）
   const isElectron = typeof window !== 'undefined' && 'electronAPI' in window;
@@ -155,9 +183,11 @@ export default function UrlBar({ sidebarOpen = false, user }: UrlBarProps) {
         const url = new URL(targetUrl);
         const path = url.pathname + url.search + url.hash;
         
-        // アクティブなタブのURLを更新
-        if (activeTabId && (isElectron || isTauri)) {
+        // アクティブなタブのURLを更新（メインパネルの場合のみ）
+        if (panelId === 'main' && activeTabId && (isElectron || isTauri)) {
           navigateTab(activeTabId, targetUrl);
+        } else if (panelId !== 'main' && panelActiveTabId && (isElectron || isTauri)) {
+          navigateTab(panelActiveTabId, targetUrl);
         }
         
         // Next.jsのルーターでナビゲート
@@ -465,36 +495,131 @@ export default function UrlBar({ sidebarOpen = false, user }: UrlBarProps) {
         )}
 
         {/* その他のメニュー */}
-        <button
-          style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: '50%',
-            border: 'none',
-            backgroundColor: 'transparent',
-            color: '#9ca3af',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background-color 0.2s ease',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#3d3d3d';
-            e.currentTarget.style.color = '#ffffff';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent';
-            e.currentTarget.style.color = '#9ca3af';
-          }}
-          title="その他"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="12" cy="12" r="1.5" />
-            <circle cx="12" cy="5" r="1.5" />
-            <circle cx="12" cy="19" r="1.5" />
-          </svg>
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+            }}
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              border: 'none',
+              backgroundColor: showMenu ? '#3d3d3d' : 'transparent',
+              color: showMenu ? '#ffffff' : '#9ca3af',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background-color 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (!showMenu) {
+                e.currentTarget.style.backgroundColor = '#3d3d3d';
+                e.currentTarget.style.color = '#ffffff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showMenu) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#9ca3af';
+              }
+            }}
+            title="その他"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="12" r="1.5" />
+              <circle cx="12" cy="5" r="1.5" />
+              <circle cx="12" cy="19" r="1.5" />
+            </svg>
+          </button>
+          
+          {/* メニュー */}
+          {showMenu && (
+            <div
+              ref={menuRef}
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                marginTop: '4px',
+                backgroundColor: '#1e1e1e',
+                border: '1px solid #3d3d3d',
+                borderRadius: '4px',
+                padding: '4px',
+                zIndex: 10000,
+                minWidth: '180px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  color: '#9ca3af',
+                  borderBottom: '1px solid #3d3d3d',
+                  marginBottom: '4px',
+                }}
+              >
+                表示オプション
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSplitView();
+                  setShowMenu(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  textAlign: 'left',
+                  backgroundColor: isSplitViewEnabled ? '#3b82f6' : 'transparent',
+                  color: isSplitViewEnabled ? '#ffffff' : '#d1d5db',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSplitViewEnabled) {
+                    e.currentTarget.style.backgroundColor = '#3d3d3d';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSplitViewEnabled) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {isSplitViewEnabled ? (
+                    // 分割ビュー無効化アイコン（結合）
+                    <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3M12 8v8M8 12h8" />
+                  ) : (
+                    // 分割ビュー有効化アイコン（分割）
+                    <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3M12 8v8" />
+                  )}
+                </svg>
+                {isSplitViewEnabled ? '分割ビューを無効化' : '分割ビューを有効化'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,20 +1,54 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTabs } from './TabProvider';
 
 interface TabBarProps {
   sidebarOpen?: boolean;
   user?: any;
+  panelId?: 'left' | 'right' | 'main';
 }
 
-export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
-  const { tabs, activeTabId, createTab, closeTab, switchTab, loading } = useTabs();
+export default function TabBar({ sidebarOpen = false, user, panelId = 'main' }: TabBarProps) {
+  const { tabs, activeTabId, createTab, closeTab, switchTab, loading, getTabsByPanel, getActiveTabByPanel, setTabPanelId } = useTabs();
+  // パネルごとのタブを取得
+  const panelTabs = getTabsByPanel(panelId);
+  const panelActiveTab = getActiveTabByPanel(panelId);
+  const panelActiveTabId = panelActiveTab?.id || null;
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const [pinnedTabs, setPinnedTabs] = useState<Set<string>>(new Set());
   const [localSidebarOpen, setLocalSidebarOpen] = useState(sidebarOpen);
+  const [showPanelMenuForTab, setShowPanelMenuForTab] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const pathname = usePathname();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+
+  // メニュー外をクリックしたら閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        const buttonElement = Object.values(buttonRefs.current).find(btn => 
+          btn && btn.contains(event.target as Node)
+        );
+        if (!buttonElement) {
+          setShowPanelMenuForTab(null);
+          setMenuPosition(null);
+        }
+      }
+    };
+
+    if (showPanelMenuForTab) {
+      // 少し遅延させてイベントリスナーを追加（メニューが表示される前にクリックイベントが発火しないように）
+      setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside);
+      }, 0);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showPanelMenuForTab]);
   
   // 環境検出（クライアントサイドでのみ実行、同期的にチェック）
   const isElectron = typeof window !== 'undefined' && 'electronAPI' in window;
@@ -84,10 +118,10 @@ export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
   }, [localSidebarOpen, user]);
 
   const handleCreateTab = () => {
-    console.log('TabBar: 新しいタブボタンがクリックされました');
+    console.log('TabBar: 新しいタブボタンがクリックされました', { panelId });
     console.log('TabBar: createTab関数を呼び出します', { createTab: typeof createTab });
     try {
-      createTab();
+      createTab(undefined, panelId);
       console.log('TabBar: createTab関数の呼び出しが完了しました');
     } catch (error) {
       console.error('TabBar: createTab関数の呼び出しでエラーが発生しました', error);
@@ -165,9 +199,8 @@ export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
     }
   };
 
-  // 固定タブと通常タブを分離
-  const pinnedTabsList = tabs.filter(tab => pinnedTabs.has(tab.id));
-  const normalTabsList = tabs.filter(tab => !pinnedTabs.has(tab.id));
+  // 固定タブと通常タブを分離（パネルごとのタブから）
+  const pinnedTabsList = panelTabs.filter(tab => pinnedTabs.has(tab.id));
 
   return (
     <div 
@@ -231,13 +264,13 @@ export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
 
       {/* 通常タブリスト */}
       <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-        {tabs.length === 0 && loading ? (
+        {panelTabs.length === 0 && loading ? (
           <div style={{ padding: '8px 16px', color: '#9ca3af', fontSize: '12px' }}>タブを読み込み中...</div>
-        ) : tabs.length === 0 ? (
+        ) : panelTabs.length === 0 ? (
           <div style={{ padding: '8px 16px', color: '#9ca3af', fontSize: '12px' }}>タブがありません</div>
         ) : (
-          normalTabsList.map((tab) => {
-            const isActive = tab.id === activeTabId;
+          panelTabs.filter(tab => !pinnedTabs.has(tab.id)).map((tab) => {
+            const isActive = tab.id === panelActiveTabId;
             const isHovered = hoveredTabId === tab.id;
             
             return (
@@ -275,6 +308,73 @@ export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
                 >
                   {getTabTitle(tab)}
                 </span>
+                
+                {/* パネル設定ボタン */}
+                <button
+                  ref={(el) => {
+                    buttonRefs.current[tab.id] = el;
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    console.log('パネル設定ボタンがクリックされました', { tabId: tab.id, currentMenu: showPanelMenuForTab });
+                    if (showPanelMenuForTab === tab.id) {
+                      setShowPanelMenuForTab(null);
+                      setMenuPosition(null);
+                    } else {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const position = {
+                        x: rect.left,
+                        y: rect.bottom + 4,
+                      };
+                      console.log('メニュー位置を設定', position);
+                      setMenuPosition(position);
+                      setShowPanelMenuForTab(tab.id);
+                    }
+                  }}
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: (isHovered || isActive) ? 1 : 0,
+                    transition: 'opacity 0.15s ease, background-color 0.15s ease',
+                    backgroundColor: showPanelMenuForTab === tab.id ? '#3b82f6' : 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    position: 'relative',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.stopPropagation();
+                    if (showPanelMenuForTab !== tab.id) {
+                      e.currentTarget.style.backgroundColor = '#4d4d4d';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.stopPropagation();
+                    if (showPanelMenuForTab !== tab.id) {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                  title="パネルを設定"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: '#9ca3af' }}
+                  >
+                    <path d="M12 2v20M2 12h20" />
+                  </svg>
+                </button>
                 
                 {/* 固定ボタン */}
                 <button
@@ -314,7 +414,7 @@ export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
                 </button>
                 
                 {/* 閉じるボタン */}
-                {tabs.length > 1 && (
+                {panelTabs.length > 1 && (
                   <button
                     onClick={(e) => handleCloseTab(e, tab.id)}
                     style={{
@@ -361,6 +461,77 @@ export default function TabBar({ sidebarOpen = false, user }: TabBarProps) {
         )}
       </div>
       
+      {/* パネル選択メニュー（全タブ共通、固定位置で表示） */}
+      {showPanelMenuForTab && menuPosition && (
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            top: `${menuPosition.y}px`,
+            left: `${menuPosition.x}px`,
+            backgroundColor: '#1e1e1e',
+            border: '1px solid #3d3d3d',
+            borderRadius: '4px',
+            padding: '4px',
+            zIndex: 10000,
+            minWidth: '140px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              color: '#9ca3af',
+              borderBottom: '1px solid #3d3d3d',
+              marginBottom: '4px',
+            }}
+          >
+            パネルを選択
+          </div>
+          {(['main', 'left', 'right'] as const).map((pid) => {
+            const targetTab = tabs.find(t => t.id === showPanelMenuForTab);
+            if (!targetTab) return null;
+            return (
+              <button
+                key={pid}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setTabPanelId(showPanelMenuForTab, pid);
+                  setShowPanelMenuForTab(null);
+                  setMenuPosition(null);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 12px',
+                  textAlign: 'left',
+                  backgroundColor: (targetTab.panelId || 'main') === pid ? '#3b82f6' : 'transparent',
+                  color: (targetTab.panelId || 'main') === pid ? '#ffffff' : '#d1d5db',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+                onMouseEnter={(e) => {
+                  if ((targetTab.panelId || 'main') !== pid) {
+                    e.currentTarget.style.backgroundColor = '#3d3d3d';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if ((targetTab.panelId || 'main') !== pid) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                {pid === 'main' ? '通常' : pid === 'left' ? '画面1（左）' : '画面2（右）'}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* 新しいタブボタン */}
       <button
         onClick={(e) => {

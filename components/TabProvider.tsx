@@ -9,16 +9,21 @@ interface Tab {
   title: string;
   active: boolean;
   isMainWindow?: boolean;
+  panelId?: 'left' | 'right' | 'main'; // パネルIDを追加
 }
 
 interface TabContextType {
   tabs: Tab[];
   activeTabId: string | null;
-  createTab: (url?: string) => Promise<void>;
+  createTab: (url?: string, panelId?: 'left' | 'right' | 'main') => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   switchTab: (tabId: string) => Promise<void>;
   navigateTab: (tabId: string, url: string) => Promise<void>;
+  setTabPanelId: (tabId: string, panelId: 'left' | 'right' | 'main') => Promise<void>;
   loading: boolean;
+  // パネルごとのタブ取得
+  getTabsByPanel: (panelId: 'left' | 'right' | 'main') => Tab[];
+  getActiveTabByPanel: (panelId: 'left' | 'right' | 'main') => Tab | null;
 }
 
 const TabContext = createContext<TabContextType | undefined>(undefined);
@@ -192,9 +197,64 @@ export function TabProvider({ children }: TabProviderProps) {
     return tabs.find(tab => tab.active)?.id || null;
   }, [tabs]);
 
+  // URLからタイトルを生成する関数（createTabより前に定義）
+  const getTitleFromUrl = useCallback((url: string): string => {
+    try {
+      const urlObj = new URL(url);
+      const path = urlObj.pathname;
+      
+      // 新規タブページの場合は「新しいタブ」を返す
+      if (path.includes('/newtab')) {
+        return '新しいタブ';
+      }
+      
+      if (path === '/' || path === '') {
+        return 'ダッシュボード';
+      }
+      
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length > 0) {
+        const lastSegment = segments[segments.length - 1];
+        // 日本語のラベルに変換
+        const labels: { [key: string]: string } = {
+          'business-plan': '事業計画',
+          'analytics': '分析',
+          'reports': 'レポート',
+          'settings': '設定',
+          'visualizations': 'データ可視化',
+          'specification': '仕様書',
+          'markdown-demo': 'Markdownデモ',
+        };
+        
+        return labels[lastSegment] || lastSegment;
+      }
+      
+      return '新しいタブ';
+    } catch {
+      return '新しいタブ';
+    }
+  }, []);
+
+  // パネルごとのタブを取得
+  const getTabsByPanel = useCallback((panelId: 'left' | 'right' | 'main') => {
+    return tabs.filter(tab => (tab.panelId || 'main') === panelId);
+  }, [tabs]);
+
+  // パネルごとのアクティブタブを取得
+  const getActiveTabByPanel = useCallback((panelId: 'left' | 'right' | 'main') => {
+    // まず、アクティブなタブを探す
+    const activeTab = tabs.find(tab => (tab.panelId || 'main') === panelId && tab.active);
+    if (activeTab) {
+      return activeTab;
+    }
+    // アクティブなタブがない場合は、そのパネルの最初のタブを返す
+    const panelTabs = tabs.filter(tab => (tab.panelId || 'main') === panelId);
+    return panelTabs.length > 0 ? panelTabs[0] : null;
+  }, [tabs]);
+
   // 新しいタブを作成
-  const createTab = useCallback(async (url?: string) => {
-    console.log('TabProvider: createTabが呼び出されました', { url, isElectron, isTauri, tabsCount: tabs.length });
+  const createTab = useCallback(async (url?: string, panelId: 'left' | 'right' | 'main' = 'main') => {
+    console.log('TabProvider: createTabが呼び出されました', { url, panelId, isElectron, isTauri, tabsCount: tabs.length });
     
     if (isElectron) {
       try {
@@ -215,29 +275,38 @@ export function TabProvider({ children }: TabProviderProps) {
         // 現在のタブのURLを保存（新しいタブを作成する前に）
         let tabsToUpdate = [...tabs];
         const currentActiveTab = tabsToUpdate.find(tab => tab.active);
+        let currentUrl = typeof window !== 'undefined' ? window.location.href : '/';
+        
         if (currentActiveTab && typeof window !== 'undefined') {
-          const currentUrl = window.location.href;
+          currentUrl = window.location.href;
           tabsToUpdate = tabsToUpdate.map(tab => 
             tab.id === currentActiveTab.id ? { ...tab, url: currentUrl } : tab
           );
           console.log('TabProvider: 現在のタブのURLを保存しました', { tabId: currentActiveTab.id, url: currentUrl });
         }
         
+        // URLが指定されていない場合は、現在アクティブなタブのURLを複製
         const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-        const targetUrl = url || `${baseUrl}/newtab`;
-        console.log('TabProvider: 新しいタブのURL', { targetUrl, baseUrl });
+        const targetUrl = url || currentUrl || `${baseUrl}/`;
+        console.log('TabProvider: 新しいタブのURL', { targetUrl, baseUrl, currentUrl, url });
+        
+        // 新しいタブのタイトルを取得
+        const newTabTitle = getTitleFromUrl(targetUrl);
         
         const newTab: Tab = {
           id: `tab-${Date.now()}`,
           url: targetUrl,
-          title: '新しいタブ',
+          title: newTabTitle,
           active: true,
           isMainWindow: true,
+          panelId: panelId,
         };
         console.log('TabProvider: 新しいタブオブジェクト', newTab);
         
-        // 既存のタブを非アクティブにして、新しいタブを追加
-        const updatedTabs = tabsToUpdate.map(tab => ({ ...tab, active: false }));
+        // 同じパネルの既存のタブを非アクティブにして、新しいタブを追加
+        const updatedTabs = tabsToUpdate.map(tab => 
+          (tab.panelId || 'main') === panelId ? { ...tab, active: false } : tab
+        );
         updatedTabs.push(newTab);
         console.log('TabProvider: 更新後のタブ一覧', updatedTabs);
         
@@ -245,16 +314,25 @@ export function TabProvider({ children }: TabProviderProps) {
         localStorage.setItem('tauri_tabs', JSON.stringify(updatedTabs));
         console.log('TabProvider: ローカルストレージに保存しました');
         
-        // 新しいタブページにナビゲート
-        if (typeof window !== 'undefined') {
-          const targetPath = url ? new URL(url).pathname : '/newtab';
-          console.log('TabProvider: ナビゲートします', { targetPath });
-          router.push(targetPath);
-          // ナビゲーション完了を待つ
-          setTimeout(() => {
-            console.log('TabProvider: ナビゲーション完了、isNavigatingをfalseにします');
-            setIsNavigating(false);
-          }, 2000);
+        // 新しいタブのURLにナビゲート（メインパネルの場合のみ）
+        if (panelId === 'main' && typeof window !== 'undefined') {
+          try {
+            const urlObj = new URL(targetUrl);
+            const targetPath = urlObj.pathname + urlObj.search + urlObj.hash;
+            console.log('TabProvider: ナビゲートします', { targetPath, targetUrl });
+            router.push(targetPath);
+            // ナビゲーション完了を待つ
+            setTimeout(() => {
+              console.log('TabProvider: ナビゲーション完了、isNavigatingをfalseにします');
+              setIsNavigating(false);
+            }, 2000);
+          } catch (urlError) {
+            console.error('TabProvider: URL解析エラー、デフォルトパスにナビゲートします', urlError);
+            router.push('/');
+            setTimeout(() => {
+              setIsNavigating(false);
+            }, 2000);
+          }
         } else {
           setIsNavigating(false);
         }
@@ -265,7 +343,7 @@ export function TabProvider({ children }: TabProviderProps) {
     } else {
       console.warn('TabProvider: Electron環境でもTauri環境でもありません', { isElectron, isTauri });
     }
-  }, [isElectron, isTauri, tabs]);
+  }, [isElectron, isTauri, tabs, getTitleFromUrl, router]);
 
   // タブを閉じる
   const closeTab = useCallback(async (tabId: string) => {
@@ -450,43 +528,48 @@ export function TabProvider({ children }: TabProviderProps) {
     }
   }, [isElectron, isTauri, tabs]);
 
-  // URLからタイトルを生成する関数
-  const getTitleFromUrl = useCallback((url: string): string => {
-    try {
-      const urlObj = new URL(url);
-      const path = urlObj.pathname;
-      
-      // 新規タブページの場合は「新しいタブ」を返す
-      if (path.includes('/newtab')) {
-        return '新しいタブ';
+  // タブのパネルIDを設定
+  const setTabPanelId = useCallback(async (tabId: string, panelId: 'left' | 'right' | 'main') => {
+    if (isElectron) {
+      try {
+        const electronAPI = (window as any).electronAPI;
+        // Electron環境では、タブのパネルIDを設定するAPIがある場合
+        // 現時点では未実装のため、Tauri環境と同じ処理を行う
+        const updatedTabs = tabs.map(tab => {
+          if (tab.id === tabId) {
+            // パネルIDを設定し、そのパネルでアクティブにする
+            return { ...tab, panelId, active: true };
+          } else if ((tab.panelId || 'main') === panelId) {
+            // 同じパネルの他のタブは非アクティブにする
+            return { ...tab, active: false };
+          }
+          return tab;
+        });
+        setTabs(updatedTabs);
+      } catch (error) {
+        console.error('タブのパネルID設定に失敗しました:', error);
       }
-      
-      if (path === '/' || path === '') {
-        return 'ダッシュボード';
+    } else if (isTauri) {
+      // Tauri環境の場合、ローカルストレージベースでタブのパネルIDを更新
+      try {
+        const updatedTabs = tabs.map(tab => {
+          if (tab.id === tabId) {
+            // パネルIDを設定し、そのパネルでアクティブにする
+            return { ...tab, panelId, active: true };
+          } else if ((tab.panelId || 'main') === panelId) {
+            // 同じパネルの他のタブは非アクティブにする
+            return { ...tab, active: false };
+          }
+          return tab;
+        });
+        setTabs(updatedTabs);
+        localStorage.setItem('tauri_tabs', JSON.stringify(updatedTabs));
+        console.log('TabProvider: タブのパネルIDを設定しました', { tabId, panelId, updatedTabs });
+      } catch (error) {
+        console.error('タブのパネルID設定に失敗しました:', error);
       }
-      
-      const segments = path.split('/').filter(Boolean);
-      if (segments.length > 0) {
-        const lastSegment = segments[segments.length - 1];
-        // 日本語のラベルに変換
-        const labels: { [key: string]: string } = {
-          'business-plan': '事業計画',
-          'analytics': '分析',
-          'reports': 'レポート',
-          'settings': '設定',
-          'visualizations': 'データ可視化',
-          'specification': '仕様書',
-          'markdown-demo': 'Markdownデモ',
-        };
-        
-        return labels[lastSegment] || lastSegment;
-      }
-      
-      return '新しいタブ';
-    } catch {
-      return '新しいタブ';
     }
-  }, []);
+  }, [isElectron, isTauri, tabs]);
 
   // URL変更を監視してアクティブなタブのURLを更新（無限ループを防ぐ）
   // メインウィンドウのタブがアクティブな場合のみ実行
@@ -671,7 +754,10 @@ export function TabProvider({ children }: TabProviderProps) {
     closeTab,
     switchTab,
     navigateTab,
+    setTabPanelId,
     loading,
+    getTabsByPanel,
+    getActiveTabByPanel,
   };
 
   return <TabContext.Provider value={value}>{children}</TabContext.Provider>;

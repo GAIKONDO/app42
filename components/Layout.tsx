@@ -12,6 +12,10 @@ import AIAssistantPanel from './AIAssistantPanel';
 import { TabProvider, useTabs } from './TabProvider';
 import TabBar from './TabBar';
 import UrlBar from './UrlBar';
+import { SplitViewProvider, useSplitView } from './SplitViewProvider';
+import SplitViewLayout from './SplitViewLayout';
+import SplitViewConditionalTabBar from './SplitViewConditionalTabBar';
+import SplitViewConditionalUrlBar from './SplitViewConditionalUrlBar';
 import { FiMessageSquare } from 'react-icons/fi';
 
 const ADMIN_UID = 'PktGlRBWVZc9E0Y3OLSQ4TeRg0P2';
@@ -575,24 +579,26 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <TabProvider>
-      <LayoutContent
-        user={user}
-        loading={loading}
-        firebaseError={firebaseError}
-        isPresentationMode={isPresentationMode}
-        sidebarOpen={sidebarOpen}
-        handleToggleSidebar={handleToggleSidebar}
-        currentPage={currentPage}
-        containerStyle={containerStyle}
-        aiAssistantOpen={aiAssistantOpen}
-        handleAIAssistantToggle={handleAIAssistantToggle}
-        handleAIAssistantClose={handleAIAssistantClose}
-        pathname={pathname}
-        isNewTabPage={isNewTabPage}
-        totalTopOffset={totalTopOffset}
-      >
-        {children}
-      </LayoutContent>
+      <SplitViewProvider>
+        <LayoutContent
+          user={user}
+          loading={loading}
+          firebaseError={firebaseError}
+          isPresentationMode={isPresentationMode}
+          sidebarOpen={sidebarOpen}
+          handleToggleSidebar={handleToggleSidebar}
+          currentPage={currentPage}
+          containerStyle={containerStyle}
+          aiAssistantOpen={aiAssistantOpen}
+          handleAIAssistantToggle={handleAIAssistantToggle}
+          handleAIAssistantClose={handleAIAssistantClose}
+          pathname={pathname}
+          isNewTabPage={isNewTabPage}
+          totalTopOffset={totalTopOffset}
+        >
+          {children}
+        </LayoutContent>
+      </SplitViewProvider>
     </TabProvider>
   );
 }
@@ -700,10 +706,9 @@ function LayoutContent({
     return <main style={{ display: 'none' }} />;
   }
 
-  return (
-    <main>
-      {shouldShowTabBarAndUrlBar && !isPresentationMode && user && <TabBar sidebarOpen={sidebarOpen} user={user} />}
-      {shouldShowTabBarAndUrlBar && !isPresentationMode && user && <UrlBar sidebarOpen={sidebarOpen} user={user} />}
+  // 分割ビューコンテンツ
+  const mainContent = (
+    <>
       {shouldShowContent && !isPresentationMode && user && (
         <Sidebar isOpen={sidebarOpen} onToggle={handleToggleSidebar} currentPage={currentPage} user={user} />
       )}
@@ -719,6 +724,21 @@ function LayoutContent({
             {user ? children : <Login />}
           </ErrorBoundary>
         </div>
+      )}
+    </>
+  );
+
+  return (
+    <main>
+      <SplitViewLayout sidebarOpen={sidebarOpen} user={user}>
+        {mainContent}
+      </SplitViewLayout>
+      {shouldShowTabBarAndUrlBar && !isPresentationMode && user && (
+        <>
+          {/* 分割ビューが無効な場合のみ通常のTabBarとUrlBarを表示 */}
+          <SplitViewConditionalTabBar sidebarOpen={sidebarOpen} user={user} />
+          <SplitViewConditionalUrlBar sidebarOpen={sidebarOpen} user={user} />
+        </>
       )}
       {shouldShowContent && !isPresentationMode && user && (
         <>

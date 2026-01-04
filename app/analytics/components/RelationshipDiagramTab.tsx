@@ -208,9 +208,8 @@ export function RelationshipDiagramTab({
         type: 'bar',
         tooltip: true,
         cursor: 'pointer',
-        cornerRadiusTopLeft: 4,
-        cornerRadiusTopRight: 4,
-        color: '#4262FF',
+        cornerRadiusTopLeft: 8,
+        cornerRadiusTopRight: 8,
       },
       encoding: {
         x: {
@@ -258,6 +257,14 @@ export function RelationshipDiagramTab({
             domainWidth: 1,
             tickSize: 0,
           },
+        },
+        color: {
+          field: 'theme',
+          type: 'nominal',
+          scale: {
+            scheme: 'category10',
+          },
+          legend: null,
         },
         tooltip: [
           { field: 'theme', type: 'nominal', title: 'テーマ' },

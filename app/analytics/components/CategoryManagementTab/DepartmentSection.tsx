@@ -70,11 +70,11 @@ export function DepartmentSection({
     // 使用するスタートアップデータ（フィルター適用後）
     const startupsToUse = viewMode === 'bar' ? filteredStartups : startups;
     
-    // 全スタートアップ数（フィルター適用後の全スタートアップ数）
+    // 全企業数（フィルター適用後の全企業数）
     const totalStartupCount = startupsToUse.length;
     const totalStartups = startupsToUse;
     
-    // 該当スタートアップ数（部署に紐づくスタートアップ、重複除去）
+    // 該当企業数（部署に紐づく企業、重複除去）
     const uniqueStartupIds = new Set<string>();
     const matchingStartups: Startup[] = [];
     startupsToUse.forEach(startup => {
@@ -174,9 +174,8 @@ export function DepartmentSection({
         type: 'bar',
         tooltip: true,
         cursor: 'pointer',
-        cornerRadiusTopLeft: 4,
-        cornerRadiusTopRight: 4,
-        color: '#4262FF',
+        cornerRadiusTopLeft: 8,
+        cornerRadiusTopRight: 8,
         stroke: '#FFFFFF',
         strokeWidth: 1,
       },
@@ -227,6 +226,14 @@ export function DepartmentSection({
             domainWidth: 1,
             tickSize: 0,
           },
+        },
+        color: {
+          field: 'department',
+          type: 'nominal',
+          scale: {
+            scheme: 'category10',
+          },
+          legend: null,
         },
         tooltip: [
           { field: 'department', title: '主管事業部署' },
@@ -633,7 +640,7 @@ export function DepartmentSection({
               </div>
             </div>
 
-            {/* 全スタートアップ数カード */}
+            {/* 全企業数カード */}
             <div 
               onClick={() => setShowTotalStartupModal(true)}
               style={{
@@ -679,7 +686,7 @@ export function DepartmentSection({
                 alignItems: 'center',
                 gap: '8px',
               }}>
-                全スタートアップ数
+                全企業数
                 {viewMode === 'bar' && selectedBizDevPhaseIds.length > 0 && (
                   <span style={{
                     padding: '2px 8px',
@@ -718,7 +725,7 @@ export function DepartmentSection({
               </div>
             </div>
 
-            {/* 該当スタートアップ数カード */}
+            {/* 該当企業数カード */}
             <div 
               onClick={() => setShowMatchingStartupModal(true)}
               style={{
@@ -764,7 +771,7 @@ export function DepartmentSection({
                 alignItems: 'center',
                 gap: '8px',
               }}>
-                該当スタートアップ数
+                該当企業数
                 {viewMode === 'bar' && selectedBizDevPhaseIds.length > 0 && (
                   <span style={{
                     padding: '2px 8px',

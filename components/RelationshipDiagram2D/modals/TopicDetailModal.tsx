@@ -97,8 +97,8 @@ interface TopicDetailModalProps {
   exportSuccess: boolean;
   setExportSuccess: (value: boolean) => void;
   // AI生成関連
-  modelType: 'gpt' | 'local';
-  setModelType: (type: 'gpt' | 'local') => void;
+  modelType: 'gpt' | 'local' | 'local-lfm';
+  setModelType: (type: 'gpt' | 'local' | 'local-lfm') => void;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
   metadataMode: 'overwrite' | 'merge';
@@ -649,7 +649,7 @@ export default function TopicDetailModal({
                   <select
                     value={modelType}
                     onChange={(e) => {
-                      const newType = e.target.value as 'gpt' | 'local';
+                      const newType = e.target.value as 'gpt' | 'local' | 'local-lfm';
                       setModelType(newType);
                       if (typeof window !== 'undefined') {
                         localStorage.setItem('topicMetadataGenerationModelType', newType);
@@ -674,6 +674,7 @@ export default function TopicDetailModal({
                   >
                     <option value="gpt">GPT</option>
                     <option value="local">ローカル</option>
+                    <option value="local-lfm">ローカル（LFM）</option>
                   </select>
                 </label>
                 <label style={{ fontSize: '12px', color: '#6B7280', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>

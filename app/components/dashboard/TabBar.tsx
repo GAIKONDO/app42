@@ -11,9 +11,9 @@ interface TabBarProps {
 
 export function DashboardTabBar({ activeTab, onTabChange }: TabBarProps) {
   const tabs = [
+    { id: 'tab3' as const, label: 'ランドスケープ' },
     { id: 'tab2' as const, label: '時系列分析' },
     { id: 'theme-analysis' as const, label: 'テーマ別施策分析' },
-    { id: 'tab3' as const, label: '機能3（準備中）' },
     { id: 'tab4' as const, label: '機能4（準備中）' },
   ];
 

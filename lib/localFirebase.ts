@@ -80,17 +80,32 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
         } catch (invokeError: any) {
           // 「no rows」エラーは正常な状態（レコードが存在しない）として扱う
           const errorMessage = invokeError?.message || invokeError?.error || invokeError?.errorString || String(invokeError || '');
+          const errorString = String(invokeError || '');
+          const errorStack = invokeError?.stack || '';
+          const errorName = invokeError?.name || '';
+          
           const isNoRowsError = errorMessage.includes('no rows') || 
                                 errorMessage.includes('Query returned no rows') ||
                                 (command === 'doc_get' && errorMessage.includes('ドキュメント取得エラー'));
           
           // IPCプロトコル関連のエラーは無視（postMessageインターフェースにフォールバックするため）
-          const isIPCProtocolError = errorMessage.includes('IPC custom protocol failed') ||
-                                     errorMessage.includes('Load failed') ||
-                                     errorMessage.includes('TypeError: Load failed') ||
-                                     errorMessage.includes('access control checks') ||
-                                     errorMessage.includes('ipc://localhost') ||
-                                     (invokeError?.name === 'TypeError' && errorMessage.includes('Load failed'));
+          // エラーメッセージがundefinedの場合でも、エラー名やスタックから検出
+          const isIPCProtocolError = 
+            errorMessage.includes('IPC custom protocol failed') ||
+            errorMessage.includes('Load failed') ||
+            errorMessage.includes('TypeError: Load failed') ||
+            errorMessage.includes('access control checks') ||
+            errorMessage.includes('ipc://localhost') ||
+            errorString.includes('IPC custom protocol failed') ||
+            errorString.includes('Load failed') ||
+            errorString.includes('access control checks') ||
+            errorString.includes('ipc://localhost') ||
+            errorStack.includes('IPC custom protocol failed') ||
+            errorStack.includes('Load failed') ||
+            errorStack.includes('access control checks') ||
+            errorStack.includes('ipc://localhost') ||
+            errorName === 'TypeError' ||
+            (errorName === 'TypeError' && (errorMessage.includes('Load failed') || errorString.includes('Load failed')));
           
           if (!isNoRowsError && !isIPCProtocolError && isDev) {
             console.error('[callTauriCommand] ❌ invoke実行エラー', {
@@ -107,6 +122,14 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
           
           // IPCプロトコルエラーやCORSエラーの場合は、下のフォールバック処理に進む
           if (isIPCProtocolError) {
+            if (isDev) {
+              console.debug('[callTauriCommand] IPCプロトコルエラーを検出、postMessageインターフェースにフォールバック', {
+                command,
+                errorMessage,
+                errorName,
+                errorString: errorString.substring(0, 200)
+              });
+            }
             throw new Error('IPC_PROTOCOL_FALLBACK');
           }
           
@@ -124,18 +147,37 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
       // IPCプロトコルエラーの場合は、フォールバック処理に進む
       if (error?.message === 'IPC_PROTOCOL_FALLBACK') {
         // 下のフォールバック処理に進む
+        if (isDev) {
+          console.debug('[callTauriCommand] IPC_PROTOCOL_FALLBACKエラー、postMessageインターフェースにフォールバック', { command });
+        }
       } else {
         // 「no rows」エラーは正常な状態（レコードが存在しない）として扱う
         const errorMessage = error?.message || error?.error || error?.errorString || String(error || '');
+        const errorString = String(error || '');
+        const errorStack = error?.stack || '';
+        const errorName = error?.name || '';
+        
         const isNoRowsError = errorMessage.includes('no rows') || 
                               errorMessage.includes('Query returned no rows') ||
                               (command === 'doc_get' && errorMessage.includes('ドキュメント取得エラー'));
         
-        // IPCプロトコル関連のエラーは無視
-        const isIPCProtocolError = errorMessage.includes('IPC custom protocol failed') ||
-                                   errorMessage.includes('Load failed') ||
-                                   errorMessage.includes('TypeError: Load failed') ||
-                                   (error?.name === 'TypeError' && errorMessage.includes('Load failed'));
+        // IPCプロトコル関連のエラーは無視（エラーメッセージがundefinedの場合でも検出）
+        const isIPCProtocolError = 
+          errorMessage.includes('IPC custom protocol failed') ||
+          errorMessage.includes('Load failed') ||
+          errorMessage.includes('TypeError: Load failed') ||
+          errorMessage.includes('access control checks') ||
+          errorMessage.includes('ipc://localhost') ||
+          errorString.includes('IPC custom protocol failed') ||
+          errorString.includes('Load failed') ||
+          errorString.includes('access control checks') ||
+          errorString.includes('ipc://localhost') ||
+          errorStack.includes('IPC custom protocol failed') ||
+          errorStack.includes('Load failed') ||
+          errorStack.includes('access control checks') ||
+          errorStack.includes('ipc://localhost') ||
+          errorName === 'TypeError' ||
+          (errorName === 'TypeError' && (errorMessage.includes('Load failed') || errorString.includes('Load failed')));
         
         if (!isNoRowsError && !isIPCProtocolError && isDev) {
           console.error('[callTauriCommand] ❌ window.__TAURI__使用時にエラー', {
@@ -148,8 +190,19 @@ export async function callTauriCommand(command: string, args?: any): Promise<any
           });
         }
         
-        // IPCプロトコルエラーでない場合は、エラーを再スロー
-        if (!isIPCProtocolError) {
+        // IPCプロトコルエラーの場合は、フォールバック処理に進む
+        if (isIPCProtocolError) {
+          if (isDev) {
+            console.debug('[callTauriCommand] IPCプロトコルエラーを検出（外側のcatch）、postMessageインターフェースにフォールバック', {
+              command,
+              errorMessage,
+              errorName,
+              errorString: errorString.substring(0, 200)
+            });
+          }
+          // フォールバック処理に進む（下の静的インポートを試す）
+        } else {
+          // IPCプロトコルエラーでない場合は、エラーを再スロー
           throw error;
         }
       }

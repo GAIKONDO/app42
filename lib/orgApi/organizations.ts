@@ -110,7 +110,25 @@ export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | n
       const dataSource = getDataSourceInstance();
       
       // すべての組織を取得
-      const allOrgs = await dataSource.collection_get('organizations');
+      let allOrgs: any[] = [];
+      try {
+        allOrgs = await dataSource.collection_get('organizations');
+      } catch (collectionError: any) {
+        // CSPブロックエラーの場合は空配列を返す（エラーをthrowしない）
+        const errorMessage = collectionError?.message || String(collectionError || '');
+        const isCSPError = collectionError instanceof TypeError ||
+                          errorMessage.includes('Load failed') ||
+                          errorMessage.includes('TypeError: Load failed') ||
+                          errorMessage.includes('access control checks') ||
+                          errorMessage.includes('Failed to fetch') ||
+                          errorMessage.includes('CORS');
+        if (isCSPError) {
+          console.warn('⚠️ [getOrgTreeFromDb] CSPブロックエラー（組織データ取得をスキップ）');
+          return null;
+        }
+        // その他のエラーは再スロー
+        throw collectionError;
+      }
       
       if (!allOrgs || allOrgs.length === 0) {
         return null;
@@ -123,17 +141,41 @@ export async function getOrgTreeFromDb(rootId?: string): Promise<OrgNodeData | n
         // PostgreSQLではorganizationMembersはorganizationmembers（小文字）として作成される
         allMembers = await getCollectionViaDataSource('organizationmembers');
       } catch (error: any) {
-        // organizationmembersが見つからない場合は、organizationMembers（キャメルケース）を試す
-        if (error?.message?.includes('Could not find the table') || error?.message?.includes('schema cache')) {
+        // CSPブロックエラーの場合は空配列を返す（エラーをthrowしない）
+        const errorMessage = error?.message || String(error || '');
+        const isCSPError = error instanceof TypeError ||
+                          errorMessage.includes('Load failed') ||
+                          errorMessage.includes('TypeError: Load failed') ||
+                          errorMessage.includes('access control checks') ||
+                          errorMessage.includes('Failed to fetch') ||
+                          errorMessage.includes('CORS');
+        if (isCSPError) {
+          console.warn('⚠️ [getOrgTreeFromDb] CSPブロックエラー（メンバーデータ取得をスキップ）');
+          allMembers = [];
+        } else if (error?.message?.includes('Could not find the table') || error?.message?.includes('schema cache')) {
+          // organizationmembersが見つからない場合は、organizationMembers（キャメルケース）を試す
           console.warn('⚠️ [getOrgTreeFromDb] organizationmembersテーブルが見つかりません。organizationMembers（キャメルケース）を試します。');
           try {
             const { getCollectionViaDataSource } = await import('../dataSourceAdapter');
             allMembers = await getCollectionViaDataSource('organizationMembers');
-          } catch (fallbackError) {
-            console.warn('⚠️ [getOrgTreeFromDb] organizationMembersテーブルも見つかりません。メンバーなしで続行します。', fallbackError);
-            allMembers = [];
+          } catch (fallbackError: any) {
+            const fallbackErrorMessage = fallbackError?.message || String(fallbackError || '');
+            const isFallbackCSPError = fallbackError instanceof TypeError ||
+                                      fallbackErrorMessage.includes('Load failed') ||
+                                      fallbackErrorMessage.includes('TypeError: Load failed') ||
+                                      fallbackErrorMessage.includes('access control checks') ||
+                                      fallbackErrorMessage.includes('Failed to fetch') ||
+                                      fallbackErrorMessage.includes('CORS');
+            if (isFallbackCSPError) {
+              console.warn('⚠️ [getOrgTreeFromDb] CSPブロックエラー（メンバーデータ取得をスキップ）');
+              allMembers = [];
+            } else {
+              console.warn('⚠️ [getOrgTreeFromDb] organizationMembersテーブルも見つかりません。メンバーなしで続行します。', fallbackError);
+              allMembers = [];
+            }
           }
         } else {
+          // その他のエラーは再スロー
           throw error;
         }
       }

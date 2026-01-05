@@ -197,7 +197,8 @@ export function RAGSearchTab() {
       console.log('[RAGSearchTab] organizationIdが未指定のため、全組織横断検索を実行します。');
     }
 
-    await ragSearchHook.search(query, searchFilters, 10);
+    // トピック検索が40件取得できるように、limitを50に設定（トピック40件 + 他のタイプ10件）
+    await ragSearchHook.search(query, searchFilters, 50);
   };
 
   // RAG検索の実行（公開関数）

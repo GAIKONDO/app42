@@ -28,13 +28,6 @@ export function useOrganizationData() {
         
         const startTime = performance.now();
         
-        // 情報・通信部門の重複メンバーを削除（開発時のみ、非ブロッキング）
-        if (process.env.NODE_ENV === 'development') {
-          removeIctDivisionDuplicates().catch((error: any) => {
-            devWarn('情報・通信部門の重複削除でエラーが発生しました:', error.message);
-          });
-        }
-        
         // データベースから組織データを取得（Supabase最適化）
         const data = await getOrgTreeFromDb();
         const orgLoadTime = performance.now() - startTime;
@@ -54,7 +47,11 @@ export function useOrganizationData() {
               
               // メンバー情報をMemberInfo形式に変換（ID付き）
               const memberInfos = mapMembersToMemberInfo(members);
-              const sortedMembers = sortMembersByPosition(memberInfos, data.name);
+              // displayOrderでソートされている場合はその順序を保持
+              const hasDisplayOrder = memberInfos.some((m: any) => m.displayOrder !== null && m.displayOrder !== undefined);
+              const sortedMembers = hasDisplayOrder 
+                ? memberInfos // displayOrderで既にソートされているのでそのまま使用
+                : sortMembersByPosition(memberInfos, data.name); // displayOrderがない場合のみ役職順にソート
               // ID付きメンバー情報を保存（編集モーダル用）
               setSelectedNodeMembers(sortedMembers);
               // ノードにメンバー情報を追加（IDなし、表示用）

@@ -81,6 +81,7 @@ export {
   saveStartup,
   getStartupById,
   deleteStartup,
+  toggleStartupFavorite,
 } from './startups';
 
 // テーマ関連

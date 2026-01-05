@@ -44,12 +44,70 @@ import { useAIGeneration } from './hooks/useAIGeneration';
 import { useEntityRelationManagement } from './hooks/useEntityRelationManagement';
 
 function MeetingNoteDetailPageContent() {
+  // ページ読み込み開始時刻を記録（10秒間読み込み中画面を維持するため）
+  const [pageLoadStartTime] = useState(() => Date.now());
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  
+  // 10秒間は必ず読み込み中画面を表示する
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setInitialLoadComplete(true);
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, []);
+  
   const searchParams = useSearchParams();
   const router = useRouter();
   // organizationIdは'id'または'organizationId'パラメータから取得（後方互換性のため）
   const organizationId = (searchParams?.get('organizationId') || searchParams?.get('id')) as string;
   const meetingId = searchParams?.get('meetingId') as string;
   const topicIdFromUrl = searchParams?.get('topicId') as string | null;
+  
+  // 遷移前の情報をlocalStorageから取得してログに出力（デバッグ用）
+  useEffect(() => {
+    try {
+      const lastNav = localStorage.getItem('lastMeetingNavigation');
+      if (lastNav) {
+        const navInfo = JSON.parse(lastNav);
+        console.log('[議事録ページ] 遷移情報:', navInfo);
+        console.log('[議事録ページ] 現在のURLパラメータ:', {
+          organizationId,
+          meetingId,
+          topicIdFromUrl,
+          searchParamsString: searchParams?.toString(),
+        });
+        // 確認後は削除
+        localStorage.removeItem('lastMeetingNavigation');
+      }
+      
+      // URLパラメータをalertで表示（デバッグ用）
+      if (organizationId && meetingId) {
+        const debugInfo = `議事録ページに遷移しました\n\n` +
+          `組織ID: ${organizationId}\n` +
+          `議事録ID: ${meetingId}\n` +
+          `トピックID: ${topicIdFromUrl || 'なし'}\n` +
+          `URL: ${window.location.href}`;
+        console.log('[議事録ページ] デバッグ情報:', debugInfo);
+        // alert(debugInfo); // 必要に応じてコメントアウトを外す
+      }
+      
+      // 404エラーを監視（デバッグ用）
+      const originalError = console.error;
+      console.error = (...args: any[]) => {
+        const errorMessage = args.join(' ');
+        if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+          console.warn('[議事録ページ] 404エラーを検出:', errorMessage);
+        }
+        originalError.apply(console, args);
+      };
+      
+      return () => {
+        console.error = originalError;
+      };
+    } catch (e) {
+      // エラーは無視
+    }
+  }, [organizationId, meetingId, topicIdFromUrl, searchParams]);
   
   const [activeTab, setActiveTab] = useState<TabType>('april');
   const [activeSection, setActiveSection] = useState<string>('summary');
@@ -90,6 +148,30 @@ function MeetingNoteDetailPageContent() {
     onSetActiveSection: setActiveSection,
     tabOrder,
   });
+
+  // デバッグログ（早期リターンの前に配置する必要がある）
+  useEffect(() => {
+    console.log('[議事録ページ] 状態:', {
+      organizationId,
+      meetingId,
+      loading,
+      error,
+      hasMeetingNote: !!meetingNote,
+      meetingNoteId: meetingNote?.id,
+    });
+  }, [organizationId, meetingId, loading, error, meetingNote]);
+
+  // デバッグ: 状態をログに出力（早期リターンの前に配置する必要がある）
+  useEffect(() => {
+    console.log('[議事録ページ] 状態更新:', {
+      loading,
+      error,
+      hasMeetingNote: !!meetingNote,
+      meetingNoteId: meetingNote?.id,
+      organizationId,
+      meetingId,
+    });
+  }, [loading, error, meetingNote, organizationId, meetingId]);
 
   // 組織変更ハンドラー
   const handleOrganizationChange = async (newOrganizationId: string) => {
@@ -466,7 +548,7 @@ function MeetingNoteDetailPageContent() {
           const newParams = new URLSearchParams(searchParams?.toString() || '');
           newParams.delete('topicId');
           const newUrl = newParams.toString() ? `?${newParams.toString()}` : '';
-          router.replace(`/organization/meeting${newUrl}`, { scroll: false });
+          router.replace(`/organization/detail/meeting${newUrl}`, { scroll: false });
           
           return;
         }
@@ -787,50 +869,121 @@ function MeetingNoteDetailPageContent() {
     }, 300);
   }, [meetingNote, monthContents, setMonthContents, setActiveSection, setEditingMonth, setEditingSection, setEditingContent, setEditingItemTitle, setHasUnsavedChanges]);
 
-  if (loading) {
+  // 読み込みタイムアウト（30秒）
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
+  useEffect(() => {
+    if (loading) {
+      const timer = setTimeout(() => {
+        console.error('[議事録ページ] 読み込みタイムアウト');
+        setLoadingTimeout(true);
+      }, 30000);
+      return () => clearTimeout(timer);
+    } else {
+      setLoadingTimeout(false);
+    }
+  }, [loading]);
+
+  // 10秒間は必ず読み込み中画面を表示
+  const shouldShowLoading = loading || !initialLoadComplete;
+  
+  if (shouldShowLoading && !loadingTimeout) {
+    // Layoutコンポーネントを使わずに、シンプルなdivを返す（クラッシュを防ぐため）
     return (
-      <Layout>
-        <div style={{ padding: '40px', textAlign: 'center' }}>
-          <p>読み込み中...</p>
-        </div>
-      </Layout>
+      <div style={{ padding: '40px', textAlign: 'center', backgroundColor: '#fff', minHeight: '100vh' }}>
+        <p>読み込み中...</p>
+        <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+          組織ID: {organizationId || 'なし'}<br />
+          議事録ID: {meetingId || 'なし'}<br />
+          経過時間: {Math.floor((Date.now() - pageLoadStartTime) / 1000)}秒
+        </p>
+      </div>
     );
   }
 
-  if (error || !meetingNote) {
+  if (loadingTimeout) {
     return (
       <Layout>
         <div style={{ padding: '40px' }}>
           <h2 style={{ marginBottom: '8px' }}>議事録詳細</h2>
           <p style={{ color: 'var(--color-error)' }}>
-            {error || 'データが見つかりませんでした。'}
+            データの読み込みがタイムアウトしました。ページを再読み込みしてください。
           </p>
           <button
-            onClick={async () => {
-              if (hasUnsavedChanges) {
-                const { tauriConfirm } = await import('@/lib/orgApi');
-                const confirmed = await tauriConfirm('保存されていない変更があります。このページを離れますか？', 'ページを離れる確認');
-                if (!confirmed) {
-                  return;
-                }
-              }
-              router.push(`/organization/detail?id=${organizationId}&tab=meetingNotes`);
-            }}
+            onClick={() => window.location.reload()}
             style={{
               marginTop: '16px',
               padding: '8px 16px',
-              backgroundColor: 'var(--color-primary)',
-              color: '#fff',
+              backgroundColor: '#3B82F6',
+              color: 'white',
               border: 'none',
               borderRadius: '4px',
               cursor: 'pointer',
-              fontSize: '14px',
             }}
           >
-            組織ページに戻る
+            再読み込み
           </button>
         </div>
       </Layout>
+    );
+  }
+
+  // loadingがfalseになった後、エラーまたはmeetingNoteがない場合はエラー画面を表示
+  if (!loading && (error || !meetingNote)) {
+    console.log('[議事録ページ] エラー画面を表示:', { error, hasMeetingNote: !!meetingNote });
+    // Layoutコンポーネントを使わずに、シンプルなdivを返す（クラッシュを防ぐため）
+    return (
+      <div style={{ padding: '40px', backgroundColor: '#fff', minHeight: '100vh' }}>
+        <h2 style={{ marginBottom: '8px' }}>議事録詳細</h2>
+        <p style={{ color: '#ef4444', marginBottom: '16px', fontSize: '16px' }}>
+          {error || 'データが見つかりませんでした。'}
+        </p>
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666', padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
+          <p><strong>組織ID:</strong> {organizationId || 'なし'}</p>
+          <p><strong>議事録ID:</strong> {meetingId || 'なし'}</p>
+          <p><strong>エラーメッセージ:</strong> {error || 'なし'}</p>
+          <p><strong>議事録データ:</strong> {meetingNote ? 'あり' : 'なし'}</p>
+        </div>
+        <button
+          onClick={async () => {
+            if (hasUnsavedChanges) {
+              const { tauriConfirm } = await import('@/lib/orgApi');
+              const confirmed = await tauriConfirm('保存されていない変更があります。このページを離れますか？', 'ページを離れる確認');
+              if (!confirmed) {
+                return;
+              }
+            }
+            router.push(`/organization/detail?id=${organizationId}&tab=meetingNotes`);
+          }}
+          style={{
+            marginTop: '16px',
+            padding: '8px 16px',
+            backgroundColor: '#3B82F6',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '14px',
+          }}
+        >
+          組織ページに戻る
+        </button>
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            marginTop: '8px',
+            marginLeft: '8px',
+            padding: '8px 16px',
+            backgroundColor: '#6B7280',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '14px',
+          }}
+        >
+          ページを再読み込み
+        </button>
+      </div>
     );
   }
 

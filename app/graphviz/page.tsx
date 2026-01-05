@@ -117,7 +117,7 @@ function GraphvizPageContent() {
   // 戻るボタンのクリック処理
   const handleBack = () => {
     if (organizationId) {
-      router.push(`/organization/detail?id=${organizationId}&tab=graphviz`);
+      router.push(`/organization/detail?id=${organizationId}`);
     } else {
       router.push('/organization');
     }

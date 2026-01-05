@@ -16,6 +16,7 @@ import { createRelation } from '@/lib/relationApi';
 import { GPT_MODELS } from '../constants';
 import { GPT_MODELS as GPT_MODELS_FULL, GEMINI_MODELS, CLAUDE_MODELS } from '@/components/AIAssistantPanel/constants';
 import { getAvailableOllamaModels } from '@/lib/pageGeneration';
+import { getAvailableLFM2Models } from '@/lib/localModel/getAvailableLFM2Models';
 import type { ModelType } from '@/components/AIAssistantPanel/types';
 
 interface MeetingItemCardProps {
@@ -128,13 +129,14 @@ export default function MeetingItemCard({
       case 'claude':
         return CLAUDE_MODELS.map(m => ({ value: m.value, label: m.label }));
       case 'local':
+      case 'local-lfm':
         return bulkMetadataLocalModels;
       default:
         return GPT_MODELS_FULL.map(m => ({ value: m.value, label: m.label }));
     }
   };
 
-  // ローカルモデルを読み込む
+  // ローカルモデルを読み込む（Ollama）
   const loadLocalModels = useCallback(async () => {
     if (bulkMetadataModelType === 'local' && bulkMetadataLocalModels.length === 0 && !loadingBulkMetadataLocalModels) {
       setLoadingBulkMetadataLocalModels(true);
@@ -150,6 +152,28 @@ export default function MeetingItemCard({
         }
       } catch (error) {
         console.error('ローカルモデルの読み込みエラー:', error);
+      } finally {
+        setLoadingBulkMetadataLocalModels(false);
+      }
+    }
+  }, [bulkMetadataModelType, bulkMetadataLocalModels.length, loadingBulkMetadataLocalModels, bulkMetadataModel]);
+
+  // LFM2モデルを読み込む
+  const loadLFM2Models = useCallback(async () => {
+    if (bulkMetadataModelType === 'local-lfm' && bulkMetadataLocalModels.length === 0 && !loadingBulkMetadataLocalModels) {
+      setLoadingBulkMetadataLocalModels(true);
+      try {
+        const models = await getAvailableLFM2Models();
+        const formattedModels = models.map(model => ({
+          value: model.model,
+          label: model.name,
+        }));
+        setBulkMetadataLocalModels(formattedModels);
+        if (formattedModels.length > 0 && !formattedModels.some(m => m.value === bulkMetadataModel)) {
+          setBulkMetadataModel(formattedModels[0].value);
+        }
+      } catch (error) {
+        console.error('LFM2モデルの読み込みエラー:', error);
       } finally {
         setLoadingBulkMetadataLocalModels(false);
       }
@@ -175,13 +199,15 @@ export default function MeetingItemCard({
       setBulkMetadataModel(CLAUDE_MODELS[0].value);
     } else if (bulkMetadataModelType === 'local') {
       loadLocalModels();
+    } else if (bulkMetadataModelType === 'local-lfm') {
+      loadLFM2Models();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bulkMetadataModelType, loadLocalModels]);
+  }, [bulkMetadataModelType, loadLocalModels, loadLFM2Models]);
 
   // ローカルモデルが読み込まれたら最初のモデルを選択
   useEffect(() => {
-    if (bulkMetadataModelType === 'local' && bulkMetadataLocalModels.length > 0) {
+    if ((bulkMetadataModelType === 'local' || bulkMetadataModelType === 'local-lfm') && bulkMetadataLocalModels.length > 0) {
       if (!bulkMetadataLocalModels.some(m => m.value === bulkMetadataModel)) {
         setBulkMetadataModel(bulkMetadataLocalModels[0].value);
       }
@@ -556,7 +582,7 @@ export default function MeetingItemCard({
             onChange={(e) => onSetEditingContent(e.target.value)}
             style={{
               width: '100%',
-              minHeight: '300px',
+              minHeight: '500px',
               padding: '12px',
               border: '1px solid #D1D5DB',
               borderRadius: '6px',
@@ -784,6 +810,8 @@ export default function MeetingItemCard({
                     setBulkMetadataModelType(e.target.value as ModelType);
                     if (e.target.value === 'local') {
                       loadLocalModels();
+                    } else if (e.target.value === 'local-lfm') {
+                      loadLFM2Models();
                     }
                   }}
                   disabled={isGeneratingMetadata}
@@ -804,11 +832,12 @@ export default function MeetingItemCard({
                   <option value="gemini">Gemini</option>
                   <option value="claude">Claude</option>
                   <option value="local">ローカル</option>
+                  <option value="local-lfm">ローカル（LFM）</option>
                 </select>
                 <select
                   value={bulkMetadataModel}
                   onChange={(e) => setBulkMetadataModel(e.target.value)}
-                  disabled={isGeneratingMetadata || (bulkMetadataModelType === 'local' && loadingBulkMetadataLocalModels)}
+                  disabled={isGeneratingMetadata || ((bulkMetadataModelType === 'local' || bulkMetadataModelType === 'local-lfm') && loadingBulkMetadataLocalModels)}
                   style={{
                     padding: '6px 12px',
                     border: '1px solid #D1D5DB',
@@ -816,13 +845,13 @@ export default function MeetingItemCard({
                     fontSize: '0.9em',
                     backgroundColor: '#FFFFFF',
                     color: '#1E293B',
-                    cursor: isGeneratingMetadata || (bulkMetadataModelType === 'local' && loadingBulkMetadataLocalModels) ? 'not-allowed' : 'pointer',
-                    opacity: isGeneratingMetadata || (bulkMetadataModelType === 'local' && loadingBulkMetadataLocalModels) ? 0.6 : 1,
+                    cursor: isGeneratingMetadata || ((bulkMetadataModelType === 'local' || bulkMetadataModelType === 'local-lfm') && loadingBulkMetadataLocalModels) ? 'not-allowed' : 'pointer',
+                    opacity: isGeneratingMetadata || ((bulkMetadataModelType === 'local' || bulkMetadataModelType === 'local-lfm') && loadingBulkMetadataLocalModels) ? 0.6 : 1,
                     minWidth: '150px',
                   }}
                   title="メタデータ生成に使用するモデル"
                 >
-                  {loadingBulkMetadataLocalModels && bulkMetadataModelType === 'local' ? (
+                  {loadingBulkMetadataLocalModels && (bulkMetadataModelType === 'local' || bulkMetadataModelType === 'local-lfm') ? (
                     <option value="">読み込み中...</option>
                   ) : (
                     getAvailableModels().map(model => (

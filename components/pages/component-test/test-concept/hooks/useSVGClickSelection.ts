@@ -194,82 +194,69 @@ export function useSVGClickSelection({
   useEffect(() => {
     if (!svgContent || !containerRef.current) return;
 
-    // SVGが完全にレンダリングされるまで待つ
-    const checkAndApplySelection = () => {
-      const svgElement = containerRef.current?.querySelector('svg');
-      if (!svgElement) {
-        console.log('⏳ [PlantUMLDiagram] SVG要素を待機中...');
-        return false;
-      }
-      
-      // 既にイベントリスナーが設定されているかチェック
-      // 設定されていない場合、またはSVG要素が新しく挿入された場合は再設定
-      const hasListeners = (svgElement as any).__clickSelectionApplied;
-      if (!hasListeners) {
-        console.log('✅ [PlantUMLDiagram] SVG要素が見つかりました（新規または再挿入）');
-        return true;
-      }
-      
-      // 既に設定されている場合は、rect要素の数を確認して変更があれば再設定
-      const currentRectsCount = svgElement.querySelectorAll('rect').length;
-      const savedRectsCount = (svgElement as any).__savedRectsCount;
-      if (currentRectsCount !== savedRectsCount) {
-        console.log('✅ [PlantUMLDiagram] SVG要素のrect数が変更されました（再設定）:', {
-          current: currentRectsCount,
-          saved: savedRectsCount,
-        });
-        return true;
-      }
-      
-      return false;
-    };
-
-    // まず即座にチェック
-    if (!checkAndApplySelection()) {
-      // 既に設定されている場合は、MutationObserverで監視（SVG要素が再挿入された場合）
-      const observer = new MutationObserver((mutations, obs) => {
-        if (checkAndApplySelection()) {
-          obs.disconnect();
-          applyClickSelection();
-        }
-      });
-
-      observer.observe(containerRef.current, {
-        childList: true,
-        subtree: true,
-      });
-
-      // タイムアウトも設定（フォールバック）
-      const timeoutId = setTimeout(() => {
-        observer.disconnect();
-        if (checkAndApplySelection()) {
-          applyClickSelection();
-        }
-      }, 1000);
-
-      return () => {
-        observer.disconnect();
-        clearTimeout(timeoutId);
-        const svgElement = containerRef.current?.querySelector('svg');
-        if (svgElement && (svgElement as any).__cleanupFunctions) {
-          (svgElement as any).__cleanupFunctions.forEach((cleanup: () => void) => cleanup());
-          (svgElement as any).__cleanupFunctions = [];
-          (svgElement as any).__clickSelectionApplied = false;
-        }
-      };
-    } else {
-      // 見つかった場合は即座に適用
-      applyClickSelection();
-    }
-
-    // クリーンアップ関数を返す
-    return () => {
+    // まず既存のイベントリスナーをクリーンアップ
+    const cleanupExisting = () => {
       const svgElement = containerRef.current?.querySelector('svg');
       if (svgElement && (svgElement as any).__cleanupFunctions) {
         (svgElement as any).__cleanupFunctions.forEach((cleanup: () => void) => cleanup());
         (svgElement as any).__cleanupFunctions = [];
         (svgElement as any).__clickSelectionApplied = false;
       }
+    };
+
+    cleanupExisting();
+
+    // SVGが完全にレンダリングされるまで待つ（svgContentが変更された場合は少し遅延）
+    const applyWithDelay = () => {
+      // まず即座にチェック
+      const svgElement = containerRef.current?.querySelector('svg');
+      if (svgElement && !(svgElement as any).__clickSelectionApplied) {
+        console.log('✅ [PlantUMLDiagram] SVG要素が見つかりました（即座に適用）');
+        applyClickSelection();
+        return;
+      }
+
+      // SVG要素が見つからない場合、または既に設定されている場合は少し待ってから再チェック
+      const timeoutId = setTimeout(() => {
+        const svgElement = containerRef.current?.querySelector('svg');
+        if (svgElement) {
+          // 既存のイベントリスナーをクリーンアップしてから再設定
+          cleanupExisting();
+          if (!(svgElement as any).__clickSelectionApplied) {
+            console.log('✅ [PlantUMLDiagram] SVG要素が見つかりました（遅延適用）');
+            applyClickSelection();
+          }
+        }
+      }, 100);
+
+      return timeoutId;
+    };
+
+    // MutationObserverで監視（SVG要素が再挿入された場合）
+    const observer = new MutationObserver((mutations, obs) => {
+      const svgElement = containerRef.current?.querySelector('svg');
+      if (svgElement && !(svgElement as any).__clickSelectionApplied) {
+        console.log('✅ [PlantUMLDiagram] SVG要素が再挿入されました（MutationObserver検出）');
+        cleanupExisting();
+        applyClickSelection();
+      }
+    });
+
+    observer.observe(containerRef.current, {
+      childList: true,
+      subtree: true,
+    });
+
+    // 即座に適用を試みる
+    const timeoutId = applyWithDelay();
+
+    // クリーンアップ関数を返す
+    return () => {
+      observer.disconnect();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      cleanupExisting();
     };
   }, [svgContent, onNodeClick, orgNameToIdMap]);
 }

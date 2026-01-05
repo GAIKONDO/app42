@@ -52,3 +52,10 @@ ALTER TABLE focusinitiatives
     CHECK (("organizationId" IS NOT NULL AND "companyId" IS NULL) OR ("organizationId" IS NULL AND "companyId" IS NOT NULL));
 
 
+
+
+
+
+
+
+

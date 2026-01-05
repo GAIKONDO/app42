@@ -33,7 +33,7 @@ export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
 };
 
 export const DEFAULT_MODEL = 'gpt-5-mini';
-export const DEFAULT_MODEL_TYPE: 'gpt' | 'local' | 'gemini' | 'claude' = 'gpt';
+export const DEFAULT_MODEL_TYPE: 'gpt' | 'local' | 'local-lfm' | 'gemini' | 'claude' = 'gpt';
 export const DEFAULT_PANEL_WIDTH = 480;
 export const MIN_PANEL_WIDTH = 320;
 export const MAX_PANEL_WIDTH = 1200;

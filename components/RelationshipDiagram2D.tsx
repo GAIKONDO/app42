@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import type { TopicInfo } from '@/lib/orgApi';
 import type { TopicSemanticCategory } from '@/types/topicMetadata';
 import { getAvailableOllamaModels } from '@/lib/pageGeneration';
+import { getAvailableLFM2Models } from '@/lib/localModel/getAvailableLFM2Models';
 import { getRelationsByTopicId } from '@/lib/relationApi';
 import { getEntitiesByOrganizationId, getEntitiesByCompanyId } from '@/lib/entityApi';
 import type { Entity, EntityType } from '@/types/entity';
@@ -85,10 +86,10 @@ export default function RelationshipDiagram2D({
   const [bulkOperationMode, setBulkOperationMode] = useState<'none' | 'entities' | 'relations'>('none');
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
-  const [modelType, setModelType] = useState<'gpt' | 'local'>(() => {
+  const [modelType, setModelType] = useState<'gpt' | 'local' | 'local-lfm'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('topicMetadataGenerationModelType');
-      return (saved as 'gpt' | 'local') || 'gpt';
+      return (saved as 'gpt' | 'local' | 'local-lfm') || 'gpt';
     }
     return 'gpt';
   });
@@ -159,7 +160,7 @@ export default function RelationshipDiagram2D({
   // 現在選択されているモデルリスト
   const availableModels = modelType === 'gpt' ? gptModels : localModels;
 
-  // ローカルモデル一覧を取得
+  // ローカルモデル一覧を取得（Ollama）
   const loadLocalModels = async () => {
     setLoadingLocalModels(true);
     try {
@@ -198,9 +199,37 @@ export default function RelationshipDiagram2D({
     }
   };
 
+  // LFM2モデル一覧を取得
+  const loadLFM2Models = async () => {
+    setLoadingLocalModels(true);
+    try {
+      const models = await getAvailableLFM2Models();
+      if (models.length > 0) {
+        const formattedModels = models.map(model => ({
+          value: model.model,
+          label: model.name,
+        }));
+        setLocalModels(formattedModels);
+        // 最初のモデルを選択
+        if (formattedModels.length > 0 && !selectedModel.startsWith('gpt') && !selectedModel.includes('lfm2')) {
+          setSelectedModel(formattedModels[0].value);
+        }
+      } else {
+        setLocalModels([]);
+      }
+    } catch (error) {
+      console.error('LFM2モデルの取得エラー:', error);
+      setLocalModels([]);
+    } finally {
+      setLoadingLocalModels(false);
+    }
+  };
+
   useEffect(() => {
     if (modelType === 'local') {
       loadLocalModels();
+    } else if (modelType === 'local-lfm') {
+      loadLFM2Models();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelType]);

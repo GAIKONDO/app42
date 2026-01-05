@@ -2,8 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import type { KnowledgeGraphSearchResult } from '@/lib/knowledgeGraphRAG';
-import { getMeetingNoteById } from '@/lib/orgApi';
-import { callTauriCommand } from '@/lib/localFirebase';
 
 interface SearchResultItemProps {
   result: KnowledgeGraphSearchResult;
@@ -61,72 +59,75 @@ export default function SearchResultItem({
 
   const handleShowInMeeting = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (result.meetingNoteId) {
-      // Graphvizトピックの場合はGraphvizページへ
-      if (result.meetingNoteId.startsWith('graphviz_')) {
-        const yamlFileId = result.meetingNoteId.replace('graphviz_', '');
-        if (result.topic?.organizationId) {
-          router.push(`/graphviz?fileId=${yamlFileId}&organizationId=${result.topic.organizationId}&tab=tab0`);
-        } else {
-          alert('組織IDが取得できませんでした');
-        }
-        return;
-      }
-
-      // 通常の議事録トピックの場合
-      try {
-        // 議事録から組織IDを取得（タイムアウトを設定）
-        const meetingNotePromise = getMeetingNoteById(result.meetingNoteId);
-        const timeoutPromise = new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), 5000);
-        });
-        
-        const meetingNote = await Promise.race([meetingNotePromise, timeoutPromise]);
-        
-        if (meetingNote && meetingNote.organizationId) {
-          // topicIdがある場合はURLパラメータに追加
-          const params = new URLSearchParams();
-          params.append('organizationId', meetingNote.organizationId);
-          params.append('meetingId', result.meetingNoteId);
-          if (result.topicId) {
-            params.append('topicId', result.topicId);
-          }
-          router.push(`/organization/detail/meeting?${params.toString()}`);
-        } else if (result.topic?.organizationId) {
-          // 議事録が取得できなくても、トピックから組織IDを取得できる場合は使用
-          console.warn('[handleShowInMeeting] 議事録の取得に失敗しましたが、トピックから組織IDを取得します');
-          const params = new URLSearchParams();
-          params.append('organizationId', result.topic.organizationId);
-          params.append('meetingId', result.meetingNoteId);
-          if (result.topicId) {
-            params.append('topicId', result.topicId);
-          }
-          router.push(`/organization/detail/meeting?${params.toString()}`);
-        } else {
-          console.error('[handleShowInMeeting] 議事録の組織IDが取得できませんでした:', {
-            meetingNoteId: result.meetingNoteId,
-            hasMeetingNote: !!meetingNote,
-            hasTopicOrgId: !!result.topic?.organizationId,
-          });
-          alert('議事録の組織IDが取得できませんでした');
-        }
-      } catch (error) {
-        console.error('[handleShowInMeeting] 議事録の取得エラー:', error);
-        // エラーが発生しても、トピックから組織IDを取得できる場合は使用
-        if (result.topic?.organizationId) {
-          console.warn('[handleShowInMeeting] エラーが発生しましたが、トピックから組織IDを取得します');
-          const params = new URLSearchParams();
-          params.append('organizationId', result.topic.organizationId);
-          params.append('meetingId', result.meetingNoteId);
-          if (result.topicId) {
-            params.append('topicId', result.topicId);
-          }
-          router.push(`/organization/detail/meeting?${params.toString()}`);
-        } else {
-          alert('議事録の取得に失敗しました');
-        }
-      }
+    
+    console.log('[handleShowInMeeting] 開始:', {
+      hasMeetingNoteId: !!result.meetingNoteId,
+      meetingNoteId: result.meetingNoteId,
+      hasTopic: !!result.topic,
+      topicOrganizationId: result.topic?.organizationId,
+      topicId: result.topicId,
+    });
+    
+    if (!result.meetingNoteId) {
+      console.warn('[handleShowInMeeting] meetingNoteIdがありません');
+      return;
     }
+
+    // Graphvizトピックの場合はGraphvizページへ
+    if (result.meetingNoteId.startsWith('graphviz_')) {
+      const yamlFileId = result.meetingNoteId.replace('graphviz_', '');
+      if (result.topic?.organizationId) {
+        router.push(`/graphviz?fileId=${yamlFileId}&organizationId=${result.topic.organizationId}&tab=tab0`);
+      } else {
+        alert('組織IDが取得できませんでした');
+      }
+      return;
+    }
+
+    // meetingNoteIdが {meetingNoteId}-topic-{topicId} 形式の場合、パースする
+    let actualMeetingNoteId = result.meetingNoteId;
+    const topicIdMatch = result.meetingNoteId.match(/^(.+?)-topic-(.+)$/);
+    if (topicIdMatch) {
+      actualMeetingNoteId = topicIdMatch[1];
+      console.log('[handleShowInMeeting] meetingNoteIdをパース:', {
+        original: result.meetingNoteId,
+        parsed: actualMeetingNoteId,
+      });
+    }
+
+    // トピックから組織IDを取得できる場合は、それを使用して直接遷移
+    if (result.topic?.organizationId) {
+      const params = new URLSearchParams();
+      params.append('organizationId', result.topic.organizationId);
+      params.append('meetingId', actualMeetingNoteId);
+      if (result.topicId) {
+        params.append('topicId', result.topicId);
+      }
+      // Next.jsのrouter.pushを使用（window.location.hrefでは404エラーが発生するため）
+      const url = `/organization/detail/meeting?${params.toString()}`;
+      console.log('[handleShowInMeeting] 議事録ページに遷移:', url);
+      
+      try {
+        // router.pushで遷移
+        router.push(url);
+      } catch (routerError: any) {
+        console.error('[handleShowInMeeting] router.pushエラー:', routerError);
+        // フォールバック: window.location.hrefを使用
+        console.warn('[handleShowInMeeting] router.pushが失敗したため、window.location.hrefを使用します');
+        window.location.href = url;
+      }
+      return;
+    }
+
+    // 組織IDが取得できない場合はエラー
+    const errorMsg = `議事録の組織IDが取得できませんでした\n\nmeetingNoteId: ${result.meetingNoteId}\nactualMeetingNoteId: ${actualMeetingNoteId}\nhasTopic: ${!!result.topic}\ntopicOrganizationId: ${result.topic?.organizationId || 'undefined'}`;
+    console.error('[handleShowInMeeting] 組織IDが取得できませんでした:', {
+      meetingNoteId: result.meetingNoteId,
+      actualMeetingNoteId,
+      hasTopic: !!result.topic,
+      topicOrganizationId: result.topic?.organizationId,
+    });
+    alert(errorMsg);
   };
 
   const handleShowInRegulation = async (e: React.MouseEvent) => {
@@ -263,7 +264,14 @@ export default function SearchResultItem({
                 </h3>
                 {result.meetingNoteId && (
                   <button
-                    onClick={handleShowInMeeting}
+                    onClick={(e) => {
+                      console.log('[ボタンクリック] 議事録で表示ボタンがクリックされました', {
+                        meetingNoteId: result.meetingNoteId,
+                        topicOrganizationId: result.topic?.organizationId,
+                        topicId: result.topicId,
+                      });
+                      handleShowInMeeting(e);
+                    }}
                     style={{
                       padding: '4px 8px',
                       backgroundColor: 'transparent',

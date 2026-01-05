@@ -1,8 +1,8 @@
 import type { OrgNodeData, MemberInfo } from '@/components/OrgChart';
 
 // メンバー情報をMemberInfo形式に変換する共通関数
-export const mapMembersToMemberInfo = (members: any[]): (MemberInfo & { id?: string })[] => {
-  return members.map((member: any): MemberInfo & { id?: string } => ({
+export const mapMembersToMemberInfo = (members: any[]): (MemberInfo & { id?: string; displayOrder?: number })[] => {
+  return members.map((member: any): MemberInfo & { id?: string; displayOrder?: number } => ({
     id: member.id,
     name: member.name,
     title: member.position || undefined,
@@ -20,6 +20,7 @@ export const mapMembersToMemberInfo = (members: any[]): (MemberInfo & { id?: str
     location: member.location || undefined,
     floorDoorNo: member.floorDoorNo || undefined,
     previousName: member.previousName || undefined,
+    displayOrder: member.displayOrder !== null && member.displayOrder !== undefined ? member.displayOrder : undefined,
   }));
 };
 
@@ -72,4 +73,27 @@ export const calculateSimilarity = (str1: string, str2: string): number => {
   if (maxLen === 0) return 1;
   const distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
   return 1 - (distance / maxLen);
+};
+
+// 組織ツリーから指定された組織IDの親組織を取得する関数
+export const findParentOrg = (tree: OrgNodeData, targetId: string): OrgNodeData | null => {
+  // 再帰的に検索して親組織を見つける
+  const findParent = (node: OrgNodeData, childId: string): OrgNodeData | null => {
+    if (node.children) {
+      for (const child of node.children) {
+        if (child.id === childId) {
+          // virtual-rootの場合は親として返さない（ルート組織には親がない）
+          if (node.id === 'virtual-root') {
+            return null;
+          }
+          return node;
+        }
+        const found = findParent(child, childId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  
+  return findParent(tree, targetId);
 };

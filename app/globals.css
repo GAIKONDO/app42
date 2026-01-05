@@ -424,6 +424,7 @@ p {
 .markdown-content {
   color: #374151;
   line-height: 1.8;
+  font-size: 15px; /* フォントサイズを調整可能 */
 }
 
 .markdown-content > *:first-child {
@@ -505,6 +506,7 @@ p {
 .markdown-content p {
   margin-bottom: 12px;
   color: #374151;
+  font-size: 14px; /* 通常の文字（段落）のフォントサイズを調整可能 */
 }
 
 .markdown-content ul {

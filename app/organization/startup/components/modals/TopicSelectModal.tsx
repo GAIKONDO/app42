@@ -579,7 +579,6 @@ export default function TopicSelectModal({
                   >
                     <div 
                       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}
-                      onClick={(e) => e.stopPropagation()}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div

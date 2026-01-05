@@ -66,6 +66,7 @@ export default function EvaluationSection({
   setOriginalContent,
 }: EvaluationSectionProps) {
   const [viewMode, setViewMode] = React.useState<'text' | 'chart'>('chart');
+  const [isDetailTableExpanded, setIsDetailTableExpanded] = React.useState(false);
   const handleOpenAIModal = () => {
     setAIGenerationTarget('evaluation');
     setAIGenerationInput('');
@@ -117,9 +118,11 @@ export default function EvaluationSection({
           <label style={{ fontWeight: '600', color: '#374151' }}>
             評価
           </label>
-          <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace', backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px' }}>
-            ID: {evaluationTextareaId}
-          </span>
+          {isEditingEvaluation && (
+            <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace', backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px' }}>
+              ID: {evaluationTextareaId}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {/* 表示モード切り替え */}
@@ -334,7 +337,32 @@ export default function EvaluationSection({
                   }
                 }}
               />
-              <EvaluationDetailTable chartData={localEvaluationChart} />
+              {localEvaluationChart && (
+                <div style={{ marginTop: '24px' }}>
+                  <div 
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'space-between', 
+                      marginBottom: '12px',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setIsDetailTableExpanded(!isDetailTableExpanded)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '14px', transition: 'transform 0.2s', transform: isDetailTableExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                        ▶
+                      </span>
+                      <h4 style={{ fontSize: '16px', fontWeight: '600', color: '#374151', margin: 0 }}>
+                        評価詳細
+                      </h4>
+                    </div>
+                  </div>
+                  {isDetailTableExpanded && (
+                    <EvaluationDetailTable chartData={localEvaluationChart} />
+                  )}
+                </div>
+              )}
             </>
           )}
         </>

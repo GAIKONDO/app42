@@ -53,7 +53,7 @@ export default function DescriptionSection({
     setAIGenerationInput('');
     setSelectedTopicIdsForAI([]);
     setAiSummaryFormat('auto');
-    setAiSummaryLength(500);
+    setAiSummaryLength(1000);
     setAiCustomPrompt('');
     setIsAIGenerationModalOpen(true);
   };
@@ -78,9 +78,11 @@ export default function DescriptionSection({
           <label style={{ fontWeight: '600', color: '#374151' }}>
             説明
           </label>
-          <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace', backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px' }}>
-            ID: {descriptionTextareaId}
-          </span>
+          {isEditingDescription && (
+            <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace', backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px' }}>
+              ID: {descriptionTextareaId}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           {!isEditingDescription && (

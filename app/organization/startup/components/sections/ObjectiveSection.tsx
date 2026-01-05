@@ -76,11 +76,13 @@ export default function ObjectiveSection({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <label style={{ fontWeight: '600', color: '#374151' }}>
-            目標
+            注力アクション
           </label>
-          <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace', backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px' }}>
-            ID: {objectiveTextareaId}
-          </span>
+          {isEditingObjective && (
+            <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace', backgroundColor: '#F3F4F6', padding: '2px 8px', borderRadius: '4px' }}>
+              ID: {objectiveTextareaId}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           {!isEditingObjective && (
@@ -180,7 +182,7 @@ export default function ObjectiveSection({
           id={objectiveTextareaId}
           value={localObjective}
           onChange={(e) => setLocalObjective(e.target.value)}
-          placeholder="施策の目標を入力（マークダウン記法対応）"
+          placeholder="注力アクションを入力（マークダウン記法対応）"
           rows={8}
           style={{
             width: '100%',
@@ -218,7 +220,7 @@ export default function ObjectiveSection({
             </div>
           ) : (
             <p style={{ color: '#9CA3AF', fontStyle: 'italic', fontSize: '14px' }}>
-              目標が入力されていません。「編集」ボタンから追加してください。
+              注力アクションが入力されていません。「編集」ボタンから追加してください。
             </p>
           )}
         </div>

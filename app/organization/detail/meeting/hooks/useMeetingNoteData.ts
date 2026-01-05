@@ -34,18 +34,66 @@ export function useMeetingNoteData({
 
   // データ読み込み
   useEffect(() => {
+    // エラーハンドリングを追加して、クラッシュを防ぐ
+    let isMounted = true;
+    
     const loadData = async () => {
-      if (!organizationId || !meetingId) {
-        setError('組織IDまたは事業会社ID、または議事録IDが指定されていません');
-        setLoading(false);
-        return;
-      }
-
       try {
-        setLoading(true);
+        try {
+          console.log('[useMeetingNoteData] loadData開始:', { organizationId, meetingId });
+        
+        if (!organizationId || !meetingId) {
+          console.warn('[useMeetingNoteData] パラメータ不足:', { organizationId, meetingId });
+          if (isMounted) {
+            setError('組織IDまたは事業会社ID、または議事録IDが指定されていません');
+            // 10秒間読み込み状態を維持
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            if (isMounted) {
+              setLoading(false);
+            }
+          }
+          return;
+        }
+
+        if (isMounted) {
+          setLoading(true);
+        }
+        const loadStartTime = Date.now();
+        (window as any).__loadStartTime = loadStartTime; // グローバルに保存
+        console.log('[useMeetingNoteData] 議事録データ取得開始:', { meetingId });
         
         // 議事録データを取得
-        const noteData = await getMeetingNoteById(meetingId);
+        let noteData: MeetingNote | null = null;
+        try {
+          noteData = await getMeetingNoteById(meetingId);
+          console.log('[useMeetingNoteData] 議事録データ取得完了:', { hasData: !!noteData, noteId: noteData?.id });
+        } catch (getNoteError: any) {
+          console.error('[useMeetingNoteData] 議事録データ取得エラー:', getNoteError);
+          // getMeetingNoteByIdのエラーをキャッチ
+          const errorMessage = getNoteError?.message || String(getNoteError || '');
+          const errorString = String(getNoteError || '');
+          const isCSPError = getNoteError instanceof TypeError ||
+                            errorMessage.includes('Load failed') ||
+                            errorMessage.includes('TypeError: Load failed') ||
+                            errorMessage.includes('access control checks') ||
+                            errorMessage.includes('Failed to fetch') ||
+                            errorMessage.includes('CORS') ||
+                            errorString.includes('Load failed') ||
+                            errorString.includes('access control checks') ||
+                            errorString.includes('Failed to fetch') ||
+                            errorString.includes('CORS');
+          
+          if (isCSPError) {
+            console.warn('⚠️ [useMeetingNoteData] 議事録データ取得がCSPブロックされました');
+            setError('データの取得がブロックされました。ネットワーク接続を確認してください。');
+            setLoading(false);
+            return;
+          } else {
+            // その他のエラーは再スローして、外側のcatchで処理
+            throw getNoteError;
+          }
+        }
+        
         if (!noteData) {
           setError('議事録が見つかりませんでした');
           setLoading(false);
@@ -155,24 +203,40 @@ export function useMeetingNoteData({
           }
         
         // 組織データを取得（organizationIdが指定されている場合のみ）
+        // CSPブロックエラーが発生しても議事録データは表示できるように、エラーを無視
         let orgTree: OrgNodeData | null = null;
         if (organizationId) {
-          orgTree = await getOrgTreeFromDb();
-          if (orgTree) {
-            const findOrganization = (node: OrgNodeData): OrgNodeData | null => {
-              if (node.id === organizationId) {
-                return node;
-              }
-              if (node.children) {
-                for (const child of node.children) {
-                  const found = findOrganization(child);
-                  if (found) return found;
+          try {
+            orgTree = await getOrgTreeFromDb();
+            if (orgTree) {
+              const findOrganization = (node: OrgNodeData): OrgNodeData | null => {
+                if (node.id === organizationId) {
+                  return node;
                 }
-              }
-              return null;
-            };
-            const foundOrg = findOrganization(orgTree);
-            setOrgData(foundOrg);
+                if (node.children) {
+                  for (const child of node.children) {
+                    const found = findOrganization(child);
+                    if (found) return found;
+                  }
+                }
+                return null;
+              };
+              const foundOrg = findOrganization(orgTree);
+              setOrgData(foundOrg);
+            }
+          } catch (orgError: any) {
+            // 組織データ取得エラーは無視（議事録データは表示できるようにする）
+            const errorMessage = orgError?.message || String(orgError || '');
+            const isCSPError = errorMessage.includes('Load failed') || 
+                              errorMessage.includes('access control checks') ||
+                              errorMessage.includes('CORS') ||
+                              errorMessage.includes('TypeError');
+            if (isCSPError) {
+              console.warn('⚠️ [useMeetingNoteData] 組織データ取得がCSPブロックされました（無視します）');
+            } else {
+              console.warn('⚠️ [useMeetingNoteData] 組織データ取得エラー（無視します）:', orgError);
+            }
+            setOrgData(null);
           }
         } else {
           // 組織データを設定
@@ -192,8 +256,18 @@ export function useMeetingNoteData({
             } else {
               setAllOrganizations([]);
             }
-          } catch (treeError) {
-            console.warn('⚠️ [useMeetingNoteData] 全組織取得エラー（無視します）:', treeError);
+          } catch (treeError: any) {
+            // 全組織取得エラーも無視
+            const errorMessage = treeError?.message || String(treeError || '');
+            const isCSPError = errorMessage.includes('Load failed') || 
+                              errorMessage.includes('access control checks') ||
+                              errorMessage.includes('CORS') ||
+                              errorMessage.includes('TypeError');
+            if (isCSPError) {
+              console.warn('⚠️ [useMeetingNoteData] 全組織取得がCSPブロックされました（無視します）');
+            } else {
+              console.warn('⚠️ [useMeetingNoteData] 全組織取得エラー（無視します）:', treeError);
+            }
             setAllOrganizations([]);
           }
         }
@@ -201,13 +275,97 @@ export function useMeetingNoteData({
         setError(null);
       } catch (err: any) {
         console.error('データの読み込みエラー:', err);
-        setError(err.message || 'データの読み込みに失敗しました');
+        const errorMessage = err?.message || String(err || '');
+        const errorString = String(err || '');
+        const isCSPError = err instanceof TypeError ||
+                          errorMessage.includes('Load failed') ||
+                          errorMessage.includes('TypeError: Load failed') ||
+                          errorMessage.includes('access control checks') ||
+                          errorMessage.includes('Failed to fetch') ||
+                          errorMessage.includes('CORS') ||
+                          errorString.includes('Load failed') ||
+                          errorString.includes('access control checks') ||
+                          errorString.includes('Failed to fetch') ||
+                          errorString.includes('CORS');
+        
+        if (isCSPError) {
+          // CSPブロックエラーの場合は、より分かりやすいメッセージを表示
+          if (isMounted) {
+            setError('データの取得がブロックされました。ネットワーク接続を確認してください。');
+          }
+        } else {
+          if (isMounted) {
+            setError(err.message || 'データの読み込みに失敗しました');
+          }
+        }
       } finally {
+        // 読み込み開始から10秒経過するまで待機（setTimeoutで処理）
+        const loadStartTime = (window as any).__loadStartTime || Date.now();
+        const elapsed = Date.now() - loadStartTime;
+        const remainingTime = Math.max(0, 10000 - elapsed);
+        if (remainingTime > 0) {
+          console.log(`[useMeetingNoteData] 読み込み完了まで${remainingTime}ms待機します`);
+          // setTimeoutで処理（エラーハンドリングを追加）
+          try {
+            setTimeout(() => {
+              try {
+                if (isMounted) {
+                  setLoading(false);
+                }
+              } catch (setStateError: any) {
+                console.error('[useMeetingNoteData] setLoading(false)エラー:', setStateError);
+              }
+            }, remainingTime);
+          } catch (timeoutError: any) {
+            console.error('[useMeetingNoteData] setTimeoutエラー:', timeoutError);
+            // エラーが発生した場合は即座にsetLoading(false)を実行
+            if (isMounted) {
+              try {
+                setLoading(false);
+              } catch (setStateError: any) {
+                console.error('[useMeetingNoteData] setLoading(false)エラー（フォールバック）:', setStateError);
+              }
+            }
+          }
+        } else {
+          if (isMounted) {
+            try {
+              setLoading(false);
+            } catch (setStateError: any) {
+              console.error('[useMeetingNoteData] setLoading(false)エラー:', setStateError);
+            }
+          }
+        }
+      }
+    } catch (outerError: any) {
+      // 外側のエラーをキャッチ（loadData関数全体のエラー）
+      console.error('[useMeetingNoteData] loadData関数全体でエラー:', outerError);
+      if (isMounted) {
+        setError('データの読み込み中に予期しないエラーが発生しました。');
+        // 10秒間読み込み状態を維持
+        const loadStartTime = (window as any).__loadStartTime || Date.now();
+        const elapsed = Date.now() - loadStartTime;
+        const remainingTime = Math.max(0, 10000 - elapsed);
+        if (remainingTime > 0) {
+          await new Promise(resolve => setTimeout(resolve, remainingTime));
+        }
         setLoading(false);
       }
+    }
     };
 
-    loadData();
+    // loadDataを実行し、エラーをキャッチ
+    loadData().catch((error: any) => {
+      console.error('[useMeetingNoteData] loadData実行エラー:', error);
+      if (isMounted) {
+        setError('データの読み込み中に予期しないエラーが発生しました。');
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, [organizationId, meetingId, onSetActiveSection]);
 
   // タブが変更されたときに、該当タブのサマリIDをactiveSectionに設定

@@ -58,10 +58,7 @@ export default function EvaluationDetailTable({ chartData }: EvaluationDetailTab
     : 0;
 
   return (
-    <div style={{ marginTop: '24px' }}>
-      <h4 style={{ fontSize: '16px', fontWeight: '600', color: '#374151', marginBottom: '16px' }}>
-        評価詳細
-      </h4>
+    <div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ 
           width: '100%', 

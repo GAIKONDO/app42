@@ -74,7 +74,10 @@ export default function OrganizationEditModal({
         }
 
         // 既存メンバーを更新、新規メンバーを追加
-        for (const member of editingMembers) {
+        for (let i = 0; i < editingMembers.length; i++) {
+          const member = editingMembers[i];
+          const displayOrder = i; // 配列のインデックスをdisplayOrderとして使用
+          
           if (member.id) {
             // 既存メンバーの更新
             try {
@@ -95,7 +98,8 @@ export default function OrganizationEditModal({
                 location: member.location,
                 floorDoorNo: member.floorDoorNo,
                 previousName: member.previousName,
-              });
+                displayOrder: displayOrder,
+              } as any);
             } catch (error: any) {
               console.error('メンバー更新エラー:', error);
               // 更新エラーは続行
@@ -120,7 +124,8 @@ export default function OrganizationEditModal({
                 location: member.location,
                 floorDoorNo: member.floorDoorNo,
                 previousName: member.previousName,
-              });
+                displayOrder: displayOrder,
+              } as any);
             } catch (error: any) {
               console.error('メンバー追加エラー:', error);
               // 追加エラーは続行

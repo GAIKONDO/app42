@@ -11,11 +11,13 @@ import {
   getCategories, 
   getBizDevPhases,
   getStatuses,
+  getVcs,
   toggleStartupFavorite,
   type Startup, 
   type Category,
   type BizDevPhase,
   type Status,
+  type VC,
 } from '@/lib/orgApi';
 
 interface StartupLandscapeTabProps {
@@ -27,14 +29,17 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
   const [startups, setStartups] = useState<Startup[]>([]);
   const [bizDevPhases, setBizDevPhases] = useState<BizDevPhase[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
+  const [vcs, setVcs] = useState<VC[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<string>>(new Set());
   const [selectedBizDevPhaseIds, setSelectedBizDevPhaseIds] = useState<Set<string>>(new Set());
+  const [selectedVCIds, setSelectedVCIds] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'all' | 'parent-only'>('all');
   const [displayMode, setDisplayMode] = useState<'box' | 'landscape' | 'bizdev'>('bizdev');
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
   const [showBizDevPhaseFilter, setShowBizDevPhaseFilter] = useState(false);
+  const [showVCFilter, setShowVCFilter] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [searchInputFocused, setSearchInputFocused] = useState(false);
@@ -47,7 +52,7 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
         setLoading(true);
         setError(null);
 
-        const [categoriesData, startupsData, bizDevPhasesData, statusesData] = await Promise.all([
+        const [categoriesData, startupsData, bizDevPhasesData, statusesData, vcsData] = await Promise.all([
           getCategories().catch((err) => {
             console.warn('カテゴリーの取得に失敗しました:', err);
             return [];
@@ -64,12 +69,17 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
             console.warn('ステータスの取得に失敗しました:', err);
             return [];
           }),
+          getVcs().catch((err) => {
+            console.warn('VCの取得に失敗しました:', err);
+            return [];
+          }),
         ]);
 
         setCategories(categoriesData);
         setStartups(startupsData);
         setBizDevPhases(bizDevPhasesData);
         setStatuses(statusesData);
+        setVcs(vcsData);
       } catch (err: any) {
         console.error('データの読み込みに失敗しました:', err);
         setError(`データの読み込みに失敗しました: ${err?.message || err}`);
@@ -110,19 +120,20 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
       if (!target.closest('[data-filter-dropdown]')) {
         setShowCategoryFilter(false);
         setShowBizDevPhaseFilter(false);
+        setShowVCFilter(false);
       }
       if (!target.closest('[data-search-input]')) {
         setShowSearchSuggestions(false);
       }
     };
 
-    if (showCategoryFilter || showBizDevPhaseFilter || showSearchSuggestions) {
+    if (showCategoryFilter || showBizDevPhaseFilter || showVCFilter || showSearchSuggestions) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
       };
     }
-  }, [showCategoryFilter, showBizDevPhaseFilter, showSearchSuggestions]);
+  }, [showCategoryFilter, showBizDevPhaseFilter, showVCFilter, showSearchSuggestions]);
 
   // 親カテゴリーのみを取得
   const parentCategories = useMemo(() => {
@@ -193,13 +204,21 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
       );
     }
     
+    // 関連VCでフィルタリング（複数選択対応）
+    if (selectedVCIds.size > 0) {
+      filtered = filtered.filter(startup => 
+        startup.relatedVCS && 
+        startup.relatedVCS.some(vcId => selectedVCIds.has(vcId))
+      );
+    }
+    
     // お気に入りでフィルタリング
     if (favoriteFilter === 'favorite') {
       filtered = filtered.filter(startup => startup.isFavorite === true);
     }
     
     return filtered;
-  }, [startups, selectedCategoryIds, selectedBizDevPhaseIds, categories, searchQuery, favoriteFilter]);
+  }, [startups, selectedCategoryIds, selectedBizDevPhaseIds, selectedVCIds, categories, searchQuery, favoriteFilter]);
 
   // カテゴリー別にスタートアップをグループ化（フィルター適用済みのスタートアップを使用）
   const startupsByCategory = useMemo(() => {
@@ -500,7 +519,14 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
                 : 'すべてのカテゴリー'}
             </button>
             {showCategoryFilter && (
-              <div style={{
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                style={{
                 position: 'absolute',
                 top: '100%',
                 left: 0,
@@ -522,30 +548,75 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  gap: '8px',
                 }}>
                   <span style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A' }}>
                     カテゴリーを選択
                   </span>
-                  {selectedCategoryIds.size > 0 && (
+                  <div style={{ display: 'flex', gap: '4px' }}>
                     <button
                       onClick={(e) => {
+                        e.preventDefault();
                         e.stopPropagation();
-                        setSelectedCategoryIds(new Set());
+                        setSelectedCategoryIds(new Set(parentCategories.map(c => c.id)));
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                       }}
                       style={{
                         padding: '4px 8px',
-                        backgroundColor: '#F3F4F6',
-                        color: '#374151',
+                        backgroundColor: '#3B82F6',
+                        color: '#FFFFFF',
                         border: 'none',
                         borderRadius: '4px',
                         cursor: 'pointer',
                         fontSize: '11px',
                         fontWeight: '500',
+                        transition: 'background-color 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#2563EB';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#3B82F6';
                       }}
                     >
-                      クリア
+                      全て選択
                     </button>
-                  )}
+                    {selectedCategoryIds.size > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedCategoryIds(new Set());
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          backgroundColor: '#F3F4F6',
+                          color: '#374151',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          transition: 'background-color 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#E5E7EB';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#F3F4F6';
+                        }}
+                      >
+                        全てクリア
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {parentCategories.map(category => (
                   <label
@@ -669,7 +740,14 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
                 : 'すべてのBiz-Devフェーズ'}
             </button>
             {showBizDevPhaseFilter && (
-              <div style={{
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                style={{
                 position: 'absolute',
                 top: '100%',
                 left: 0,
@@ -691,30 +769,75 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  gap: '8px',
                 }}>
                   <span style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A' }}>
                     Biz-Devフェーズを選択
                   </span>
-                  {selectedBizDevPhaseIds.size > 0 && (
+                  <div style={{ display: 'flex', gap: '4px' }}>
                     <button
                       onClick={(e) => {
+                        e.preventDefault();
                         e.stopPropagation();
-                        setSelectedBizDevPhaseIds(new Set());
+                        setSelectedBizDevPhaseIds(new Set(bizDevPhases.map(p => p.id)));
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                       }}
                       style={{
                         padding: '4px 8px',
-                        backgroundColor: '#F3F4F6',
-                        color: '#374151',
+                        backgroundColor: '#3B82F6',
+                        color: '#FFFFFF',
                         border: 'none',
                         borderRadius: '4px',
                         cursor: 'pointer',
                         fontSize: '11px',
                         fontWeight: '500',
+                        transition: 'background-color 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#2563EB';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#3B82F6';
                       }}
                     >
-                      クリア
+                      全て選択
                     </button>
-                  )}
+                    {selectedBizDevPhaseIds.size > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedBizDevPhaseIds(new Set());
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          backgroundColor: '#F3F4F6',
+                          color: '#374151',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          transition: 'background-color 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#E5E7EB';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#F3F4F6';
+                        }}
+                      >
+                        全てクリア
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {bizDevPhases.map(phase => (
                   <label
@@ -789,6 +912,227 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
                           const newSet = new Set(selectedBizDevPhaseIds);
                           newSet.delete(phaseId);
                           setSelectedBizDevPhaseIds(newSet);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#1E40AF',
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: '14px',
+                          lineHeight: 1,
+                        }}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 関連VCフィルター */}
+          <div style={{ position: 'relative' }} data-filter-dropdown>
+            <label style={{ fontSize: '14px', color: '#374151', fontWeight: '500', marginRight: '8px' }}>
+              関連VC:
+            </label>
+            <button
+              onClick={() => setShowVCFilter(!showVCFilter)}
+              style={{
+                padding: '8px 36px 8px 12px',
+                border: '1.5px solid #E5E7EB',
+                borderRadius: '8px',
+                fontSize: '14px',
+                backgroundColor: '#FFFFFF',
+                color: selectedVCIds.size > 0 ? '#1F2937' : '#9CA3AF',
+                fontWeight: selectedVCIds.size > 0 ? '500' : '400',
+                cursor: 'pointer',
+                minWidth: '200px',
+                textAlign: 'left',
+                backgroundImage: `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236B7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 12px center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {selectedVCIds.size > 0 
+                ? `${selectedVCIds.size}件選択中`
+                : 'すべての関連VC'}
+            </button>
+            {showVCFilter && (
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                marginTop: '8px',
+                backgroundColor: '#FFFFFF',
+                border: '1.5px solid #E5E7EB',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                zIndex: 1000,
+                minWidth: '250px',
+                maxHeight: '300px',
+                overflowY: 'auto',
+                padding: '8px',
+              }}>
+                <div style={{
+                  padding: '8px 12px',
+                  borderBottom: '1px solid #E5E7EB',
+                  marginBottom: '8px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}>
+                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#1A1A1A' }}>
+                    関連VCを選択
+                  </span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedVCIds(new Set(vcs.map(v => v.id)));
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      style={{
+                        padding: '4px 8px',
+                        backgroundColor: '#3B82F6',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        transition: 'background-color 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#2563EB';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#3B82F6';
+                      }}
+                    >
+                      全て選択
+                    </button>
+                    {selectedVCIds.size > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedVCIds(new Set());
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          backgroundColor: '#F3F4F6',
+                          color: '#374151',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          transition: 'background-color 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#E5E7EB';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#F3F4F6';
+                        }}
+                      >
+                        全てクリア
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {vcs.map(vc => (
+                  <label
+                    key={vc.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      borderRadius: '6px',
+                      transition: 'background-color 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#F3F4F6';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedVCIds.has(vc.id)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedVCIds);
+                        if (e.target.checked) {
+                          newSet.add(vc.id);
+                        } else {
+                          newSet.delete(vc.id);
+                        }
+                        setSelectedVCIds(newSet);
+                      }}
+                      style={{
+                        marginRight: '8px',
+                        cursor: 'pointer',
+                      }}
+                    />
+                    <span style={{ fontSize: '14px', color: '#1A1A1A' }}>
+                      {vc.title}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {selectedVCIds.size > 0 && (
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px',
+                marginTop: '8px',
+              }}>
+                {Array.from(selectedVCIds).map(vcId => {
+                  const vc = vcs.find(v => v.id === vcId);
+                  if (!vc) return null;
+                  return (
+                    <span
+                      key={vcId}
+                      style={{
+                        padding: '4px 10px',
+                        backgroundColor: '#EFF6FF',
+                        color: '#1E40AF',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      {vc.title}
+                      <button
+                        onClick={() => {
+                          const newSet = new Set(selectedVCIds);
+                          newSet.delete(vcId);
+                          setSelectedVCIds(newSet);
                         }}
                         style={{
                           background: 'none',
@@ -1125,7 +1469,7 @@ export function StartupLandscapeTab({}: StartupLandscapeTabProps) {
             zIndex: 1,
             fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
           }}>
-            {selectedCategoryIds.size > 0 || selectedBizDevPhaseIds.size > 0 ? filteredStartups.length : startups.length}
+            {selectedCategoryIds.size > 0 || selectedBizDevPhaseIds.size > 0 || selectedVCIds.size > 0 ? filteredStartups.length : startups.length}
           </div>
           <div style={{
             fontSize: '13px',

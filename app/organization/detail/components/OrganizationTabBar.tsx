@@ -1,6 +1,6 @@
 'use client';
 
-export type OrganizationTab = 'introduction' | 'focusAreas' | 'startups' | 'focusInitiatives' | 'meetingNotes' | 'regulations' | 'graphviz';
+export type OrganizationTab = 'introduction' | 'focusAreas' | 'startups' | 'focusInitiatives' | 'meetingNotes' | 'regulations';
 
 interface OrganizationTabBarProps {
   activeTab: OrganizationTab;
@@ -9,7 +9,6 @@ interface OrganizationTabBarProps {
   meetingNotesCount?: number;
   regulationsCount?: number;
   startupsCount?: number;
-  graphvizCount?: number;
 }
 
 export function OrganizationTabBar({ 
@@ -18,8 +17,7 @@ export function OrganizationTabBar({
   focusInitiativesCount = 0,
   meetingNotesCount = 0,
   regulationsCount = 0,
-  startupsCount = 0,
-  graphvizCount = 0
+  startupsCount = 0
 }: OrganizationTabBarProps) {
   const tabs = [
     { id: 'introduction' as const, label: '組織紹介' },
@@ -30,8 +28,6 @@ export function OrganizationTabBar({
     { id: 'meetingNotes' as const, label: `議事録 (${meetingNotesCount})` },
     // 制度タブは非表示（機能オフ）
     // { id: 'regulations' as const, label: `制度 (${regulationsCount})` },
-    // Graphvizタブは非表示（機能オフ）
-    // { id: 'graphviz' as const, label: `Graphviz (${graphvizCount})` },
   ];
 
   return (

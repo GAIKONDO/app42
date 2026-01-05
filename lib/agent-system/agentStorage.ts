@@ -84,6 +84,12 @@ export async function loadAgent(agentId: string): Promise<Agent | null> {
  */
 export async function loadAllAgents(): Promise<Agent[]> {
   try {
+    // Tauriが利用可能かチェック
+    if (typeof window === 'undefined' || !('__TAURI__' in window)) {
+      // Tauriが利用できない場合は空配列を返す
+      return [];
+    }
+
     const agentsData: any[] = await invoke('get_all_agents_command');
     
     console.log(`[agentStorage] データベースから取得したAgent数: ${agentsData.length}件`);
@@ -119,7 +125,14 @@ export async function loadAllAgents(): Promise<Agent[]> {
     })));
     return agents;
   } catch (error: any) {
-    console.error('❌ [agentStorage] Agent定義の一括読み込みに失敗:', error);
+    // エラーメッセージを警告レベルに変更（Supabase使用時は正常な動作）
+    const errorMessage = error?.message || String(error);
+    if (errorMessage.includes('データベースが初期化されていません')) {
+      // データベース未初期化エラーは警告として扱う（Supabase使用時は正常）
+      console.warn('⚠️ [agentStorage] Agent定義の読み込みをスキップ（データベース未初期化）');
+    } else {
+      console.warn('⚠️ [agentStorage] Agent定義の一括読み込みに失敗:', errorMessage);
+    }
     return [];
   }
 }

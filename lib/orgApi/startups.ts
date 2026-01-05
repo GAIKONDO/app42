@@ -111,6 +111,7 @@ export async function getStartups(organizationId: string): Promise<Startup[]> {
               topicIds: parseJsonArray(data.topicIds),
               competitorComparison: data.competitorComparison ? (typeof data.competitorComparison === 'string' ? JSON.parse(data.competitorComparison) : data.competitorComparison) : undefined,
               deepSearch: data.deepSearch ? (typeof data.deepSearch === 'string' ? JSON.parse(data.deepSearch) : data.deepSearch) : undefined,
+              isFavorite: data.isFavorite === 1 || data.isFavorite === true,
               createdAt: createdAt,
               updatedAt: updatedAt,
             } as Startup;
@@ -339,6 +340,7 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
           relationDiagramId: data.relationDiagramId || null,
           causeEffectDiagramId: data.causeEffectDiagramId || null,
           themeId: data.themeId || null,
+          isFavorite: startup.isFavorite === true ? 1 : (startup.isFavorite === false ? 0 : (existingData?.isFavorite === 1 ? 1 : 0)),
           updatedAt: data.updatedAt,
           createdAt: data.createdAt,
         };
@@ -395,8 +397,8 @@ export async function saveStartup(startup: Partial<Startup>): Promise<string> {
         if (data.deepSearch) {
           supabaseData.deepSearch = JSON.stringify(data.deepSearch);
         }
-        if (data.assignee) {
-          supabaseData.assignee = data.assignee;
+        if (Array.isArray(data.assignee) && data.assignee.length > 0) {
+          supabaseData.assignee = JSON.stringify(data.assignee);
         }
         
         // organizationIdが存在するか確認（外部キー制約のため）
@@ -551,6 +553,7 @@ export async function getStartupById(startupId: string): Promise<Startup | null>
             boxUrl: data.boxUrl,
             competitorComparison: parseJsonObject(data.competitorComparison),
             deepSearch: parseJsonObject(data.deepSearch),
+            isFavorite: data.isFavorite === 1 || data.isFavorite === true,
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
           };
@@ -590,6 +593,67 @@ export async function deleteStartup(startupId: string): Promise<void> {
       startupId,
     });
     throw new Error(`スタートアップの削除に失敗しました: ${errorMessage || '不明なエラー'}`);
+  }
+}
+
+/**
+ * スタートアップのお気に入り状態を切り替え
+ */
+export async function toggleStartupFavorite(startupId: string): Promise<boolean> {
+  try {
+    console.log('⭐ [toggleStartupFavorite] 開始:', { startupId });
+    
+    // 既存のスタートアップデータを取得
+    const existingStartup = await getStartupById(startupId);
+    
+    if (!existingStartup) {
+      throw new Error(`スタートアップID "${startupId}" が見つかりません`);
+    }
+    
+    // お気に入り状態を反転
+    const newFavoriteStatus = !existingStartup.isFavorite;
+    
+    console.log('⭐ [toggleStartupFavorite] お気に入り状態を切り替え:', {
+      startupId,
+      currentStatus: existingStartup.isFavorite,
+      newStatus: newFavoriteStatus,
+    });
+    
+    // Supabase専用（環境変数チェック不要）
+    const { getDataSourceInstance } = await import('../dataSource');
+    const dataSource = getDataSourceInstance();
+    
+    // 既存データを取得して、isFavoriteだけを更新
+    const existingData = await dataSource.doc_get('startups', startupId);
+    
+    if (!existingData) {
+      throw new Error(`スタートアップID "${startupId}" のデータが見つかりません`);
+    }
+    
+    // 既存データをコピーして、isFavoriteだけを更新
+    const updateData = {
+      ...existingData,
+      isFavorite: newFavoriteStatus ? 1 : 0,
+      updatedAt: new Date().toISOString(),
+    };
+    
+    // Supabaseに保存
+    await dataSource.doc_set('startups', startupId, updateData);
+    
+    console.log('✅ [toggleStartupFavorite] お気に入り状態の切り替え成功:', {
+      startupId,
+      newStatus: newFavoriteStatus,
+    });
+    
+    return newFavoriteStatus;
+  } catch (error: any) {
+    const errorMessage = error?.message || String(error || '');
+    console.error('❌ [toggleStartupFavorite] お気に入り状態の切り替え失敗:', {
+      error,
+      errorMessage,
+      startupId,
+    });
+    throw new Error(`お気に入り状態の切り替えに失敗しました: ${errorMessage || '不明なエラー'}`);
   }
 }
 
@@ -725,6 +789,7 @@ export async function getAllStartups(): Promise<Startup[]> {
             }
             return undefined;
           })(),
+          isFavorite: data.isFavorite === 1 || data.isFavorite === true,
           createdAt: createdAt,
           updatedAt: updatedAt,
         } as Startup;

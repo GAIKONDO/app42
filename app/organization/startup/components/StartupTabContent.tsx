@@ -6,8 +6,6 @@ import DetailsTab from './tabs/DetailsTab';
 import DeepsearchTab from './tabs/DeepsearchTab';
 import CompetitorComparisonTab from './tabs/CompetitorComparisonTab';
 import PeriodsTab from './tabs/PeriodsTab';
-import RelationsTab from './tabs/RelationsTab';
-import MonetizationTab from './tabs/MonetizationTab';
 import RelationTab from './tabs/RelationTab';
 import type { StartupTab } from './StartupTabBar';
 import type { Startup, Category, VC, Department, Status, EngagementLevel, BizDevPhase } from '@/lib/orgApi';
@@ -26,6 +24,8 @@ interface StartupTabContentProps {
   setAssigneeSearchQuery: (query: string) => void;
   isAssigneeDropdownOpen: boolean;
   setIsAssigneeDropdownOpen: (open: boolean) => void;
+  isAssigneeSectionExpanded: boolean;
+  setIsAssigneeSectionExpanded: (expanded: boolean) => void;
   orgMembers: Array<{ id: string; name: string; position?: string }>;
   allOrgMembers: Array<{ id: string; name: string; position?: string; organizationId?: string }>;
   manualAssigneeInput: string;
@@ -110,23 +110,8 @@ interface StartupTabContentProps {
   setLocalMonetizationEndPeriod: (period: string) => void;
   localMonetizationRenewalNotRequired: boolean;
   setLocalMonetizationRenewalNotRequired: (value: boolean) => void;
-  // Relations Tab
-  localCauseEffectCode: string;
-  setLocalCauseEffectCode: (code: string) => void;
-  localMethodForDiagram: string[];
-  localMeansForDiagram: string[];
-  localObjectiveForDiagram: string;
-  isEditingCauseEffect: boolean;
-  setIsEditingCauseEffect: (editing: boolean) => void;
-  setIsUpdateModalOpen: (open: boolean) => void;
-  // Monetization Tab
-  setStartup: (startup: Startup) => void;
-  localMonetizationDiagram: string;
-  setLocalMonetizationDiagram: (diagram: string) => void;
-  isEditingMonetization: boolean;
-  setIsEditingMonetization: (editing: boolean) => void;
-  setIsMonetizationUpdateModalOpen: (open: boolean) => void;
   // Relation Tab
+  setStartup: (startup: Startup) => void;
   localRelationDiagram: string;
   setLocalRelationDiagram: (diagram: string) => void;
   isEditingRelation: boolean;
@@ -147,6 +132,8 @@ export default function StartupTabContent({
   setAssigneeSearchQuery,
   isAssigneeDropdownOpen,
   setIsAssigneeDropdownOpen,
+  isAssigneeSectionExpanded,
+  setIsAssigneeSectionExpanded,
   orgMembers,
   allOrgMembers,
   manualAssigneeInput,
@@ -229,20 +216,7 @@ export default function StartupTabContent({
   setLocalMonetizationEndPeriod,
   localMonetizationRenewalNotRequired,
   setLocalMonetizationRenewalNotRequired,
-  localCauseEffectCode,
-  setLocalCauseEffectCode,
-  localMethodForDiagram,
-  localMeansForDiagram,
-  localObjectiveForDiagram,
-  isEditingCauseEffect,
-  setIsEditingCauseEffect,
-  setIsUpdateModalOpen,
   setStartup,
-  localMonetizationDiagram,
-  setLocalMonetizationDiagram,
-  isEditingMonetization,
-  setIsEditingMonetization,
-  setIsMonetizationUpdateModalOpen,
   localRelationDiagram,
   setLocalRelationDiagram,
   isEditingRelation,
@@ -262,6 +236,8 @@ export default function StartupTabContent({
           setAssigneeSearchQuery={setAssigneeSearchQuery}
           isAssigneeDropdownOpen={isAssigneeDropdownOpen}
           setIsAssigneeDropdownOpen={setIsAssigneeDropdownOpen}
+          isAssigneeSectionExpanded={isAssigneeSectionExpanded}
+          setIsAssigneeSectionExpanded={setIsAssigneeSectionExpanded}
           orgMembers={orgMembers}
           allOrgMembers={allOrgMembers}
           manualAssigneeInput={manualAssigneeInput}
@@ -375,36 +351,6 @@ export default function StartupTabContent({
           setLocalMonetizationEndPeriod={setLocalMonetizationEndPeriod}
           localMonetizationRenewalNotRequired={localMonetizationRenewalNotRequired}
           setLocalMonetizationRenewalNotRequired={setLocalMonetizationRenewalNotRequired}
-        />
-      );
-      
-    case 'relations':
-      if (!startup) return null;
-      return (
-        <RelationsTab
-          startup={startup}
-          localCauseEffectCode={localCauseEffectCode}
-          setLocalCauseEffectCode={setLocalCauseEffectCode}
-          localMethod={localMethodForDiagram}
-          localMeans={localMeansForDiagram}
-          localObjective={localObjectiveForDiagram}
-          isEditingCauseEffect={isEditingCauseEffect}
-          setIsEditingCauseEffect={setIsEditingCauseEffect}
-          setIsUpdateModalOpen={setIsUpdateModalOpen}
-        />
-      );
-      
-    case 'monetization':
-      return (
-        <MonetizationTab
-          startup={startup}
-          setStartup={setStartup}
-          startupId={startupId}
-          localMonetizationDiagram={localMonetizationDiagram}
-          setLocalMonetizationDiagram={setLocalMonetizationDiagram}
-          isEditingMonetization={isEditingMonetization}
-          setIsEditingMonetization={setIsEditingMonetization}
-          setIsMonetizationUpdateModalOpen={setIsMonetizationUpdateModalOpen}
         />
       );
       

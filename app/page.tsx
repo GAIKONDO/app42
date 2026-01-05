@@ -10,6 +10,7 @@ import { DashboardTabBar } from './components/dashboard/TabBar';
 import { ThemeInitiativeAnalysisTab } from './components/dashboard/ThemeInitiativeAnalysisTab';
 import { PlaceholderTab } from './components/dashboard/PlaceholderTab';
 import { CategoryBizDevPhaseSnapshotTab } from './components/dashboard/CategoryBizDevPhaseSnapshotTab';
+import { StartupLandscapeTab } from './components/dashboard/StartupLandscapeTab';
 import { NDARenewalAlert } from './components/dashboard/NDARenewalAlert';
 
 // 表示モードの型定義（typeベースのフィルターに変更）
@@ -17,7 +18,7 @@ type DashboardViewMode = 'all' | 'organization' | 'company' | 'person';
 type DashboardTab = 'theme-analysis' | 'tab2' | 'tab3' | 'tab4';
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<DashboardTab>('tab2');
+  const [activeTab, setActiveTab] = useState<DashboardTab>('tab3');
   const [viewMode, setViewMode] = useState<DashboardViewMode>('all');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'organization' | 'company' | 'person'>('all');
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
@@ -187,7 +188,7 @@ export default function DashboardPage() {
         )}
 
         {activeTab === 'tab3' && (
-          <PlaceholderTab tabName="機能3" />
+          <StartupLandscapeTab />
         )}
 
         {activeTab === 'tab4' && (

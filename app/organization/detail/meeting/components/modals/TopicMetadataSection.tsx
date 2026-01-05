@@ -17,7 +17,7 @@ interface TopicMetadataSectionProps {
     keywords?: string[];
     summary?: string;
   } | null;
-  topicMetadataModelType: 'gpt' | 'local';
+  topicMetadataModelType: 'gpt' | 'local' | 'local-lfm';
   topicMetadataSelectedModel: string;
   topicMetadataMode: 'overwrite' | 'merge';
   topicMetadataLocalModels: Array<{ value: string; label: string }>;
@@ -33,7 +33,7 @@ interface TopicMetadataSectionProps {
     keywords?: string[];
     summary?: string;
   } | null) => void;
-  setTopicMetadataModelType: (value: 'gpt' | 'local') => void;
+  setTopicMetadataModelType: (value: 'gpt' | 'local' | 'local-lfm') => void;
   setTopicMetadataSelectedModel: (value: string) => void;
   setTopicMetadataMode: (value: 'overwrite' | 'merge') => void;
   setIsGeneratingMetadata: (value: boolean) => void;
@@ -115,7 +115,7 @@ export default function TopicMetadataSection({
               <select
                 value={topicMetadataModelType}
                 onChange={(e) => {
-                  const newType = e.target.value as 'gpt' | 'local';
+                  const newType = e.target.value as 'gpt' | 'local' | 'local-lfm';
                   setTopicMetadataModelType(newType);
                   if (typeof window !== 'undefined') {
                     localStorage.setItem('topicMetadataGenerationModelType', newType);
@@ -140,6 +140,7 @@ export default function TopicMetadataSection({
               >
                 <option value="gpt">GPT</option>
                 <option value="local">ローカル</option>
+                <option value="local-lfm">ローカル（LFM）</option>
               </select>
             </label>
             <label style={{ fontSize: '12px', color: '#6B7280', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -179,7 +180,7 @@ export default function TopicMetadataSection({
                     <option value="gpt-4o">gpt-4o</option>
                     <option value="gpt-4o-mini">gpt-4o-mini</option>
                   </>
-                ) : topicMetadataLocalModels.length === 0 ? (
+                ) : (topicMetadataModelType === 'local' || topicMetadataModelType === 'local-lfm') && topicMetadataLocalModels.length === 0 ? (
                   <option>モデルが見つかりません</option>
                 ) : (
                   topicMetadataLocalModels.map((model) => (

@@ -15,6 +15,8 @@ interface OverviewTabProps {
   setAssigneeSearchQuery: (query: string) => void;
   isAssigneeDropdownOpen: boolean;
   setIsAssigneeDropdownOpen: (open: boolean) => void;
+  isAssigneeSectionExpanded: boolean;
+  setIsAssigneeSectionExpanded: (expanded: boolean) => void;
   orgMembers: Array<{ id: string; name: string; position?: string }>;
   allOrgMembers: Array<{ id: string; name: string; position?: string; organizationId?: string }>;
   manualAssigneeInput: string;
@@ -66,6 +68,8 @@ export default function OverviewTab({
   setAssigneeSearchQuery,
   isAssigneeDropdownOpen,
   setIsAssigneeDropdownOpen,
+  isAssigneeSectionExpanded,
+  setIsAssigneeSectionExpanded,
   orgMembers,
   allOrgMembers,
   manualAssigneeInput,
@@ -123,6 +127,8 @@ export default function OverviewTab({
         setAssigneeSearchQuery={setAssigneeSearchQuery}
         isAssigneeDropdownOpen={isAssigneeDropdownOpen}
         setIsAssigneeDropdownOpen={setIsAssigneeDropdownOpen}
+        isAssigneeSectionExpanded={isAssigneeSectionExpanded}
+        setIsAssigneeSectionExpanded={setIsAssigneeSectionExpanded}
         orgMembers={orgMembers}
         allOrgMembers={allOrgMembers}
         manualAssigneeInput={manualAssigneeInput}

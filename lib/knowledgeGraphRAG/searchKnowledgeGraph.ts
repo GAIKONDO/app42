@@ -92,6 +92,8 @@ export async function searchKnowledgeGraph(
 
     // 各タイプごとの検索数を計算（limitを7等分：entities, relations, topics, startups, focusInitiatives, meetingNotes, regulations）
     const perTypeLimit = Math.max(1, Math.ceil(limit / 7));
+    // トピック検索の上限を60件に設定
+    const topicLimit = 60;
 
     // クエリルーターを使用する場合、クエリを分析して検索戦略を決定
     let entityHybridConfig: HybridSearchConfig | undefined;
@@ -135,6 +137,7 @@ export async function searchKnowledgeGraph(
     // 並列で各タイプを検索
     console.log('[searchKnowledgeGraph] 並列検索を開始:', { 
       perTypeLimit, 
+      topicLimit,
       filters, 
       useRouter: finalUseRouter,
       entityHybridConfig: finalEntityHybridConfig,
@@ -155,8 +158,8 @@ export async function searchKnowledgeGraph(
         return [] as KnowledgeGraphSearchResult[];
       }),
       
-      // トピック検索
-      searchTopics(normalizedQuery, perTypeLimit, filters, weights, finalTopicHybridConfig).catch(error => {
+      // トピック検索（上限60件）
+      searchTopics(normalizedQuery, topicLimit, filters, weights, finalTopicHybridConfig).catch(error => {
         console.error('[searchKnowledgeGraph] トピック検索エラー:', error);
         return [] as KnowledgeGraphSearchResult[];
       }),
@@ -221,9 +224,42 @@ export async function searchKnowledgeGraph(
     // スコアでソート
     allResults.sort((a, b) => b.score - a.score);
 
-    // 上位N件を返す
-    const finalResults = allResults.slice(0, limit);
-    console.log('[searchKnowledgeGraph] 最終結果数:', finalResults.length);
+    // トピックの重複排除（同じtopicIdは最高スコアのもののみ残す）
+    const seenTopicIds = new Set<string>();
+    const deduplicatedResults = allResults.filter(result => {
+      if (result.type === 'topic' && result.topicId) {
+        if (seenTopicIds.has(result.topicId)) {
+          // 既に同じtopicIdが存在する場合はスキップ（最高スコアのもののみ残す）
+          return false;
+        }
+        seenTopicIds.add(result.topicId);
+      }
+      return true;
+    });
+
+    console.log('[searchKnowledgeGraph] 重複排除:', {
+      before: allResults.length,
+      after: deduplicatedResults.length,
+      removed: allResults.length - deduplicatedResults.length,
+    });
+
+    // トピックを優先的に含める（最大40件）
+    const topicResultsInAll = deduplicatedResults.filter(r => r.type === 'topic');
+    const otherResults = deduplicatedResults.filter(r => r.type !== 'topic');
+    
+    // トピックを最初に含め、その後他のタイプの結果を追加
+    // トピックは最大40件、他のタイプは元のlimitを超えない範囲で追加
+    const displayedTopicCount = Math.min(40, topicResultsInAll.length);
+    const maxOtherResults = Math.max(0, limit - displayedTopicCount);
+    const finalResults = [
+      ...topicResultsInAll.slice(0, 40), // トピックは最大40件
+      ...otherResults.slice(0, maxOtherResults), // 他のタイプは残りの枠
+    ];
+    
+    console.log('[searchKnowledgeGraph] 最終結果数:', finalResults.length, {
+      topicCount: topicResultsInAll.slice(0, 40).length,
+      otherCount: otherResults.slice(0, maxOtherResults).length,
+    });
     return finalResults;
   } catch (error: any) {
     console.error('[searchKnowledgeGraph] 検索エラー:', error);

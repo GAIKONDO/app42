@@ -227,7 +227,7 @@ export function useStartupSave({
     const dataToSave = {
       ...startup,
       content: editingContent,
-      assignee: localAssignee.length > 0 ? localAssignee.join(', ') : undefined,
+      assignee: localAssignee.length > 0 ? localAssignee : undefined,
       description: localDescription,
       method: localMethod,
       methodOther: localMethodOther,
@@ -548,7 +548,7 @@ export function useStartupSave({
       const dataToDownload: Startup = {
         ...startup,
         content: editingContent,
-        assignee: localAssignee.length > 0 ? localAssignee.join(', ') : undefined,
+        assignee: localAssignee.length > 0 ? localAssignee : undefined,
         description: localDescription,
         method: localMethod,
         methodOther: localMethodOther,

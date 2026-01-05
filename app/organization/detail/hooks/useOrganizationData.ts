@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getOrgTreeFromDb, findOrganizationById, getOrgMembers, getFocusInitiatives, getMeetingNotes, getRegulations, getStartups, getOrganizationContent } from '@/lib/orgApi';
+import { getOrgTreeFromDb, findOrganizationById, getOrgMembers, getFocusInitiatives, getMeetingNotes, getStartups, getOrganizationContent } from '@/lib/orgApi';
 import type { OrgNodeData } from '@/components/OrgChart';
 import type { FocusInitiative, MeetingNote, Regulation, Startup, OrganizationContent } from '@/lib/orgApi';
 import { sortMembersByPosition } from '@/lib/memberSort';
@@ -486,70 +486,9 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               devWarn('データ取得に失敗しました:', dataError);
             }
             
-            // 制度を取得（並列化）
-            try {
-              const regulationsStartTime = performance.now();
-              const [currentRegulations, childRegulationsResults] = await Promise.all([
-                getRegulations(validOrganizationId).catch((regError: any) => {
-                  devWarn('現在の組織の制度取得に失敗しました:', regError);
-                  return [];
-                }),
-                Promise.all(
-                  childOrgIds.map(childOrgId =>
-                    getRegulations(childOrgId).catch((error) => {
-                      devWarn(`⚠️ [loadOrganizationData] 子組織 ${childOrgId} の制度取得に失敗:`, error);
-                      return [];
-                    })
-                  )
-                ),
-              ]);
-              
-              const regulationsLoadTime = performance.now() - regulationsStartTime;
-              devLog(`⏱️ [loadOrganizationData] 制度取得時間: ${regulationsLoadTime.toFixed(2)}ms`);
-              
-              const childRegulations = childRegulationsResults.flat();
-              
-              // すべての制度を設定
-              const allRegulations = [...currentRegulations, ...childRegulations];
-              setRegulations(allRegulations);
-              
-              // 組織ごとにグループ化
-              const regulationsByOrgMap = new Map<string, { orgName: string; regulations: Regulation[] }>();
-              
-              // 現在の組織の制度
-              if (currentRegulations.length > 0) {
-                const orgName = updatedOrg ? findOrgName(updatedOrg, validOrganizationId) : null;
-                regulationsByOrgMap.set(validOrganizationId, {
-                  orgName: orgName || validOrganizationId,
-                  regulations: currentRegulations,
-                });
-              }
-              
-              // 子組織の制度
-              for (const childOrgId of childOrgIds) {
-                const childRegulationsForOrg = childRegulations.filter(r => r.organizationId === childOrgId);
-                if (childRegulationsForOrg.length > 0) {
-                  const orgName = updatedOrg ? findOrgName(updatedOrg, childOrgId) : null;
-                  regulationsByOrgMap.set(childOrgId, {
-                    orgName: orgName || childOrgId,
-                    regulations: childRegulationsForOrg,
-                  });
-                }
-              }
-              
-              setRegulationsByOrg(regulationsByOrgMap);
-              
-              devLog('📋 [loadOrganizationData] 組織ごとの制度:', {
-                currentOrg: validOrganizationId,
-                currentCount: currentRegulations.length,
-                childOrgsCount: childOrgIds.length,
-                childCount: childRegulations.length,
-                totalCount: allRegulations.length,
-                byOrgCount: regulationsByOrgMap.size,
-              });
-            } catch (regulationError: any) {
-              devWarn('制度の取得に失敗しました:', regulationError);
-            }
+            // 制度を取得（制度タブは非表示のため、空配列を設定）
+            setRegulations([]);
+            setRegulationsByOrg(new Map());
             
             // スタートアップを取得（並列化）
             try {
@@ -580,6 +519,20 @@ export function useOrganizationData(organizationId: string | null): UseOrganizat
               
               // 組織ごとにグループ化
               const startupsByOrgMap = new Map<string, { orgName: string; startups: Startup[] }>();
+              
+              // 組織名を取得するヘルパー関数
+              const findOrgName = (org: OrgNodeData, targetId: string): string | null => {
+                if (org.id === targetId) {
+                  return org.name || org.title || targetId;
+                }
+                if (org.children) {
+                  for (const child of org.children) {
+                    const found = findOrgName(child, targetId);
+                    if (found) return found;
+                  }
+                }
+                return null;
+              };
               
               // 現在の組織のスタートアップ
               if (currentStartups.length > 0) {

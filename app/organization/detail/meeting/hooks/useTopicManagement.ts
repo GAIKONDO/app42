@@ -7,6 +7,7 @@ import { getRelationsByTopicId, deleteRelation } from '@/lib/relationApi';
 import { callTauriCommand } from '@/lib/localFirebase';
 // Supabaseに移行済みのため、ChromaDB削除は不要
 import { getAvailableOllamaModels } from '@/lib/pageGeneration';
+import { getAvailableLFM2Models } from '@/lib/localModel/getAvailableLFM2Models';
 import { devLog, devWarn } from '../utils';
 
 interface UseTopicManagementProps {
@@ -55,10 +56,10 @@ export function useTopicManagement({
   } | null>(null);
   
   // AI生成用のモデル選択とモード選択
-  const [topicMetadataModelType, setTopicMetadataModelType] = useState<'gpt' | 'local'>(() => {
+  const [topicMetadataModelType, setTopicMetadataModelType] = useState<'gpt' | 'local' | 'local-lfm'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('topicMetadataGenerationModelType');
-      return (saved as 'gpt' | 'local') || 'gpt';
+      return (saved as 'gpt' | 'local' | 'local-lfm') || 'gpt';
     }
     return 'gpt';
   });
@@ -224,7 +225,7 @@ export function useTopicManagement({
     setDeleteTargetTopicId(null);
   }, []);
 
-  // トピックメタデータ生成用のローカルモデル一覧を取得
+  // トピックメタデータ生成用のローカルモデル一覧を取得（Ollama）
   const loadTopicMetadataLocalModels = useCallback(async () => {
     setLoadingTopicMetadataLocalModels(true);
     try {
@@ -263,10 +264,38 @@ export function useTopicManagement({
     }
   }, [topicMetadataSelectedModel]);
 
-  // モデルタイプが変更されたら、ローカルモデルを取得
+  // トピックメタデータ生成用のLFM2モデル一覧を取得
+  const loadTopicMetadataLFM2Models = useCallback(async () => {
+    setLoadingTopicMetadataLocalModels(true);
+    try {
+      const models = await getAvailableLFM2Models();
+      if (models.length > 0) {
+        const formattedModels = models.map(model => ({
+          value: model.model,
+          label: model.name,
+        }));
+        setTopicMetadataLocalModels(formattedModels);
+        // 最初のモデルを選択
+        if (formattedModels.length > 0 && !topicMetadataSelectedModel.startsWith('gpt') && !topicMetadataSelectedModel.includes('lfm2')) {
+          setTopicMetadataSelectedModel(formattedModels[0].value);
+        }
+      } else {
+        setTopicMetadataLocalModels([]);
+      }
+    } catch (error) {
+      console.error('LFM2モデルの取得エラー:', error);
+      setTopicMetadataLocalModels([]);
+    } finally {
+      setLoadingTopicMetadataLocalModels(false);
+    }
+  }, [topicMetadataSelectedModel]);
+
+  // モデルタイプが変更されたら、適切なローカルモデルを取得
   useEffect(() => {
     if (topicMetadataModelType === 'local') {
       loadTopicMetadataLocalModels();
+    } else if (topicMetadataModelType === 'local-lfm') {
+      loadTopicMetadataLFM2Models();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicMetadataModelType]);
@@ -333,6 +362,7 @@ export function useTopicManagement({
     topicMetadataMode,
     setTopicMetadataMode,
     loadTopicMetadataLocalModels,
+    loadTopicMetadataLFM2Models,
     
     // 類似トピック検索関連
     showSimilarTopicsModal,

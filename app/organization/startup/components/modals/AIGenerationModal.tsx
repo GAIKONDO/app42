@@ -3,8 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getAvailableOllamaModels } from '@/lib/pageGeneration';
-import type { TopicInfo } from '@/lib/orgApi';
+import { getAvailableLocalModels } from '@/lib/localModel/getAvailableModels';
+import { getAvailableLFM2Models } from '@/lib/localModel/getAvailableLFM2Models';
+import { GPT_MODELS, GEMINI_MODELS, CLAUDE_MODELS } from '@/components/AIAssistantPanel/constants';
+import type { TopicInfo, Startup, Category, VC, Department, Status, EngagementLevel, BizDevPhase } from '@/lib/orgApi';
+import type { ModelInfo } from '@/components/AIAssistantPanel/types';
 
 interface AIGenerationModalProps {
   isOpen: boolean;
@@ -36,6 +39,13 @@ interface AIGenerationModalProps {
   setIsEditingDescription: (isEditing: boolean) => void;
   setIsEditingObjective: (isEditing: boolean) => void;
   setIsEditingEvaluation: (isEditing: boolean) => void;
+  startup: Startup | null;
+  categories: Category[];
+  vcs: VC[];
+  departments: Department[];
+  statuses: Status[];
+  engagementLevels: EngagementLevel[];
+  bizDevPhases: BizDevPhase[];
 }
 
 export default function AIGenerationModal({
@@ -68,12 +78,20 @@ export default function AIGenerationModal({
   setIsEditingDescription,
   setIsEditingObjective,
   setIsEditingEvaluation,
+  startup,
+  categories,
+  vcs,
+  departments,
+  statuses,
+  engagementLevels,
+  bizDevPhases,
 }: AIGenerationModalProps) {
   const [isAIGenerating, setIsAIGenerating] = useState(false);
-  const [aiModelType, setAiModelType] = useState<'gpt' | 'local'>(() => {
+  type ModelType = 'gpt' | 'gemini' | 'claude' | 'local' | 'local-lfm';
+  const [aiModelType, setAiModelType] = useState<ModelType>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('aiGenerationModelType');
-      return (saved as 'gpt' | 'local') || 'gpt';
+      return (saved as ModelType) || 'gpt';
     }
     return 'gpt';
   });
@@ -84,28 +102,39 @@ export default function AIGenerationModal({
     }
     return 'gpt-5-mini';
   });
-  const [aiLocalModels, setAiLocalModels] = useState<Array<{ value: string; label: string }>>([]);
+  const [aiLocalModels, setAiLocalModels] = useState<ModelInfo[]>([]);
+  const [aiLfm2Models, setAiLfm2Models] = useState<ModelInfo[]>([]);
   const [loadingAiLocalModels, setLoadingAiLocalModels] = useState(false);
 
-  const gptModels = [
-    { value: 'gpt-5.1', label: 'gpt-5.1' },
-    { value: 'gpt-5', label: 'gpt-5' },
-    { value: 'gpt-5-mini', label: 'gpt-5-mini' },
-    { value: 'gpt-5-nano', label: 'gpt-5-nano' },
-    { value: 'gpt-4.1', label: 'gpt-4.1' },
-    { value: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
-    { value: 'gpt-4.1-nano', label: 'gpt-4.1-nano' },
-    { value: 'gpt-4o', label: 'gpt-4o' },
-    { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-  ];
-
-  const availableAiModels = aiModelType === 'gpt' ? gptModels : aiLocalModels;
+  const availableAiModels: ModelInfo[] = 
+    aiModelType === 'gpt' ? GPT_MODELS :
+    aiModelType === 'gemini' ? GEMINI_MODELS :
+    aiModelType === 'claude' ? CLAUDE_MODELS :
+    aiModelType === 'local-lfm' ? aiLfm2Models :
+    aiLocalModels;
 
   useEffect(() => {
     if (aiModelType === 'local' && isOpen) {
       loadAiLocalModels();
+    } else if (aiModelType === 'local-lfm' && isOpen) {
+      loadAiLfm2Models();
     }
   }, [aiModelType, isOpen]);
+
+  // モデルタイプが変更されたら、デフォルトモデルを設定
+  useEffect(() => {
+    if (aiModelType === 'gpt' && GPT_MODELS.length > 0) {
+      setAiSelectedModel('gpt-5-mini');
+    } else if (aiModelType === 'gemini' && GEMINI_MODELS.length > 0) {
+      setAiSelectedModel(GEMINI_MODELS[0].value);
+    } else if (aiModelType === 'claude' && CLAUDE_MODELS.length > 0) {
+      setAiSelectedModel(CLAUDE_MODELS[0].value);
+    } else if (aiModelType === 'local' && aiLocalModels.length > 0) {
+      setAiSelectedModel(aiLocalModels[0].value);
+    } else if (aiModelType === 'local-lfm' && aiLfm2Models.length > 0) {
+      setAiSelectedModel(aiLfm2Models[0].value);
+    }
+  }, [aiModelType, aiLocalModels, aiLfm2Models]);
 
   useEffect(() => {
     if (aiModelType) {
@@ -122,9 +151,9 @@ export default function AIGenerationModal({
   const loadAiLocalModels = async () => {
     setLoadingAiLocalModels(true);
     try {
-      const models = await getAvailableOllamaModels();
+      const models = await getAvailableLocalModels();
       if (models.length > 0) {
-        const formattedModels = models.map(model => {
+        const formattedModels: ModelInfo[] = models.map(model => {
           let label = model.name;
           if (model.name.includes(':')) {
             const [name, tag] = model.name.split(':');
@@ -139,18 +168,43 @@ export default function AIGenerationModal({
           } else {
             label = model.name.charAt(0).toUpperCase() + model.name.slice(1);
           }
-          return { value: model.name, label };
+          return {
+            value: model.model,
+            label: label,
+            inputPrice: '無料',
+            outputPrice: '無料',
+          };
         });
         setAiLocalModels(formattedModels);
-        if (formattedModels.length > 0 && !aiSelectedModel.startsWith('gpt')) {
-          setAiSelectedModel(formattedModels[0].value);
-        }
       } else {
         setAiLocalModels([]);
       }
     } catch (error) {
       console.error('ローカルモデルの取得エラー:', error);
       setAiLocalModels([]);
+    } finally {
+      setLoadingAiLocalModels(false);
+    }
+  };
+
+  const loadAiLfm2Models = async () => {
+    setLoadingAiLocalModels(true);
+    try {
+      const models = await getAvailableLFM2Models();
+      if (models.length > 0) {
+        const formattedModels: ModelInfo[] = models.map(model => ({
+          value: model.model,
+          label: model.name,
+          inputPrice: '無料',
+          outputPrice: '無料',
+        }));
+        setAiLfm2Models(formattedModels);
+      } else {
+        setAiLfm2Models([]);
+      }
+    } catch (error) {
+      console.error('LFM2モデルの取得エラー:', error);
+      setAiLfm2Models([]);
     } finally {
       setLoadingAiLocalModels(false);
     }
@@ -192,6 +246,66 @@ export default function AIGenerationModal({
       // トピックの内容を結合
       const topicsContent = selectedTopics.map(topic => `【${topic.title}】\n${topic.content}`).join('\n\n');
       
+      // スタートアップの一般情報を取得
+      let startupInfo = '';
+      if (startup) {
+        const infoParts: string[] = [];
+        infoParts.push(`スタートアップ名: ${startup.title}`);
+        
+        if (startup.categoryIds && startup.categoryIds.length > 0) {
+          const categoryNames = startup.categoryIds
+            .map(id => categories.find(c => c.id === id)?.title)
+            .filter(Boolean)
+            .join('、');
+          if (categoryNames) {
+            infoParts.push(`カテゴリ: ${categoryNames}`);
+          }
+        }
+        
+        if (startup.status) {
+          const statusName = statuses.find(s => s.id === startup.status)?.title || startup.status;
+          infoParts.push(`ステータス: ${statusName}`);
+        }
+        
+        if (startup.engagementLevel) {
+          const engagementName = engagementLevels.find(e => e.id === startup.engagementLevel)?.title || startup.engagementLevel;
+          infoParts.push(`エンゲージメントレベル: ${engagementName}`);
+        }
+        
+        if (startup.bizDevPhase) {
+          const phaseName = bizDevPhases.find(p => p.id === startup.bizDevPhase)?.title || startup.bizDevPhase;
+          infoParts.push(`Biz-Devフェーズ: ${phaseName}`);
+        }
+        
+        if (startup.relatedVCS && startup.relatedVCS.length > 0) {
+          const vcNames = startup.relatedVCS
+            .map(id => vcs.find(v => v.id === id)?.title)
+            .filter(Boolean)
+            .join('、');
+          if (vcNames) {
+            infoParts.push(`関連VC: ${vcNames}`);
+          }
+        }
+        
+        if (startup.responsibleDepartments && startup.responsibleDepartments.length > 0) {
+          const deptNames = startup.responsibleDepartments
+            .map(id => departments.find(d => d.id === id)?.title)
+            .filter(Boolean)
+            .join('、');
+          if (deptNames) {
+            infoParts.push(`主管事業部署: ${deptNames}`);
+          }
+        }
+        
+        if (startup.hpUrl) {
+          infoParts.push(`HP URL: ${startup.hpUrl}`);
+        }
+        
+        if (infoParts.length > 0) {
+          startupInfo = `【スタートアップ基本情報】\n${infoParts.join('\n')}`;
+        }
+      }
+      
       // 要約形式に応じた指示を生成
       let formatInstruction = '';
       switch (aiSummaryFormat) {
@@ -221,50 +335,221 @@ ${formatInstruction}
 
 出力は必ずマークダウン形式で、プレーンテキストではなく、適切にフォーマットされたマークダウンとして出力してください。`;
       
-      const userPrompt = `以下の情報を基に、約${aiSummaryLength}文字で要約をマークダウン形式で作成してください。\n\n${inputText ? `【概要】\n${inputText}\n\n` : ''}${topicsContent ? `【関連トピック】\n${topicsContent}` : ''}`;
+      // プロンプトを構築（スタートアップ情報、概要、トピックの順）
+      const promptParts: string[] = [];
+      if (startupInfo) {
+        promptParts.push(startupInfo);
+      }
+      if (inputText) {
+        promptParts.push(`【概要】\n${inputText}`);
+      }
+      if (topicsContent) {
+        promptParts.push(`【関連トピック】\n${topicsContent}`);
+      }
+      
+      const userPrompt = `以下の情報を基に、約${aiSummaryLength}文字で要約をマークダウン形式で作成してください。\n\n${promptParts.join('\n\n')}`;
       
       // モデルタイプに応じてAPIを呼び出し
-      const isLocalModel = aiSelectedModel.startsWith('qwen') || 
-                           aiSelectedModel.startsWith('llama') || 
-                           aiSelectedModel.startsWith('mistral') ||
-                           aiSelectedModel.includes(':latest') ||
-                           aiSelectedModel.includes(':instruct');
-      
-      if (isLocalModel || aiModelType === 'local') {
-        // Ollama APIを呼び出し
-        const apiUrl = process.env.NEXT_PUBLIC_OLLAMA_API_URL || 'http://localhost:11434/api/chat';
-        const response = await fetch(apiUrl, {
+      if (aiModelType === 'gemini') {
+        // Gemini APIを呼び出し
+        let apiKey: string | undefined;
+        if (typeof window !== 'undefined') {
+          try {
+            const { getAPIKey } = await import('@/lib/security');
+            apiKey = getAPIKey('gemini') || undefined;
+          } catch (error) {
+            apiKey = localStorage.getItem('NEXT_PUBLIC_GEMINI_API_KEY') || undefined;
+          }
+        }
+        if (!apiKey) {
+          apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        }
+        
+        if (!apiKey) {
+          throw new Error('Gemini APIキーが設定されていません。設定ページ（/settings）でAPIキーを設定してください。');
+        }
+
+        // Gemini APIはsystemメッセージをサポートしていないため、最初のsystemメッセージをuserメッセージに変換
+        const geminiMessages = [
+          { role: 'user' as const, parts: [{ text: `[システム指示] ${systemPrompt}` }] },
+          { role: 'user' as const, parts: [{ text: userPrompt }] },
+        ];
+
+        const requestBody = {
+          contents: geminiMessages,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: aiSummaryLength + 200,
+          },
+        };
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${aiSelectedModel}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            model: aiSelectedModel,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            stream: false,
-            options: {
-              temperature: 0.7,
-              num_predict: 800,
-            },
-          }),
+          body: JSON.stringify(requestBody),
         });
-        
+
         if (!response.ok) {
-          const errorText = await response.text().catch(() => 'Unknown error');
-          throw new Error(`Ollama APIエラー: ${response.status} ${response.statusText}. ${errorText}`);
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Gemini APIエラー: ${response.status} ${JSON.stringify(errorData)}`);
         }
-        
+
         const data = await response.json();
-        const summary = data.message?.content?.trim() || '';
+        const summary = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
         
         if (!summary) {
-          throw new Error('AIからの応答が空でした');
+          console.error('Gemini API応答:', data);
+          throw new Error('AIからの応答が空でした。APIの応答を確認してください。');
         }
         
         return summary;
+      } else if (aiModelType === 'claude') {
+        // Claude APIを呼び出し
+        let apiKey: string | undefined;
+        if (typeof window !== 'undefined') {
+          try {
+            const { getAPIKey } = await import('@/lib/security');
+            apiKey = getAPIKey('claude') || undefined;
+          } catch (error) {
+            apiKey = localStorage.getItem('NEXT_PUBLIC_CLAUDE_API_KEY') || undefined;
+          }
+        }
+        if (!apiKey) {
+          apiKey = process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
+        }
+        
+        if (!apiKey) {
+          throw new Error('Claude APIキーが設定されていません。設定ページ（/settings）でAPIキーを設定してください。');
+        }
+
+        const requestBody: any = {
+          model: aiSelectedModel,
+          messages: [
+            { role: 'user', content: userPrompt }
+          ],
+          max_tokens: aiSummaryLength + 200,
+          temperature: 0.7,
+          system: systemPrompt,
+        };
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Claude APIエラー: ${response.status} ${JSON.stringify(errorData)}`);
+        }
+
+        const data = await response.json();
+        const summary = data.content?.[0]?.text?.trim() || '';
+        
+        if (!summary) {
+          console.error('Claude API応答:', data);
+          throw new Error('AIからの応答が空でした。APIの応答を確認してください。');
+        }
+        
+        return summary;
+      } else if (aiModelType === 'local' || aiModelType === 'local-lfm') {
+        // Ollama APIまたはLFM2 APIを呼び出し
+        if (aiModelType === 'local-lfm') {
+          // LFM2 API (LlamaCpp Server) を呼び出し
+          let baseUrl: string;
+          if (typeof window !== 'undefined') {
+            baseUrl = localStorage.getItem('NEXT_PUBLIC_LLAMA_CPP_API_URL') || process.env.NEXT_PUBLIC_LLAMA_CPP_API_URL || 'http://localhost:8080';
+          } else {
+            baseUrl = process.env.NEXT_PUBLIC_LLAMA_CPP_API_URL || 'http://localhost:8080';
+          }
+          
+          // ベースURLから/v1/chat/completionsを除く
+          const cleanBaseUrl = baseUrl.replace(/\/v1\/.*$/, '').replace(/\/$/, '');
+          const chatUrl = `${cleanBaseUrl}/v1/chat/completions`;
+          
+          // システムメッセージを最初のユーザーメッセージに統合（llama-serverの形式に合わせる）
+          const messages = [
+            { role: 'user', content: `${systemPrompt}\n\n${userPrompt}` }
+          ];
+          
+          const response = await fetch(chatUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: aiSelectedModel,
+              messages: messages,
+              temperature: 0.7,
+              max_tokens: aiSummaryLength + 200,
+              stream: false,
+            }),
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unknown error');
+            throw new Error(`LFM2 APIエラー: ${response.status} ${response.statusText}. ${errorText}`);
+          }
+          
+          const data = await response.json();
+          console.log('LFM2 API応答:', data);
+          
+          const summary = data.choices?.[0]?.message?.content?.trim() || '';
+          
+          if (!summary) {
+            console.error('LFM2 API応答（完全）:', JSON.stringify(data, null, 2));
+            throw new Error('AIからの応答が空でした。APIの応答を確認してください。応答構造: ' + JSON.stringify(Object.keys(data)));
+          }
+          
+          return summary;
+        } else {
+          // Ollama API
+          apiUrl = process.env.NEXT_PUBLIC_OLLAMA_API_URL || 'http://localhost:11434/api/chat';
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: aiSelectedModel,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+              ],
+              stream: false,
+              options: {
+                temperature: 0.7,
+                num_predict: aiSummaryLength + 200,
+              },
+            }),
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unknown error');
+            throw new Error(`Ollama APIエラー: ${response.status} ${response.statusText}. ${errorText}`);
+          }
+          
+          const data = await response.json();
+          console.log('Ollama API応答:', data);
+          
+          // 複数のパターンで応答を取得
+          const summary = data.message?.content?.trim() || 
+                         data.content?.trim() || 
+                         data.response?.trim() || '';
+          
+          if (!summary) {
+            console.error('Ollama API応答（完全）:', JSON.stringify(data, null, 2));
+            throw new Error('AIからの応答が空でした。APIの応答を確認してください。応答構造: ' + JSON.stringify(Object.keys(data)));
+          }
+          
+          return summary;
+        }
       } else {
         // OpenAI APIを呼び出し
         // APIキーを取得: 設定ページ > localStorage > 環境変数の順
@@ -295,9 +580,11 @@ ${formatInstruction}
         };
         
         if (aiSelectedModel.startsWith('gpt-5')) {
-          requestBody.max_completion_tokens = 800;
+          // GPT-5シリーズでは、推論トークンとコンテンツトークンの合計がmax_completion_tokens
+          // 推論に使われるトークンも考慮して、余裕を持たせる
+          requestBody.max_completion_tokens = Math.max(aiSummaryLength + 500, 1500);
         } else {
-          requestBody.max_tokens = 800;
+          requestBody.max_tokens = aiSummaryLength + 200;
           requestBody.temperature = 0.7;
         }
         
@@ -316,10 +603,50 @@ ${formatInstruction}
         }
         
         const data = await response.json();
-        const summary = data.choices?.[0]?.message?.content?.trim() || '';
+        console.log('OpenAI API応答:', data);
+        
+        // GPT-5シリーズの場合、レスポンス構造が異なる可能性があるため、複数のパターンを試す
+        let summary = '';
+        const choice = data.choices?.[0];
+        
+        if (choice?.message?.content) {
+          summary = choice.message.content.trim();
+        } else if (data.content) {
+          summary = typeof data.content === 'string' ? data.content.trim() : '';
+        } else if (data.message?.content) {
+          summary = data.message.content.trim();
+        }
+        
+        // GPT-5シリーズでcontentが空の場合、finish_reasonを確認
+        if (!summary && aiSelectedModel.startsWith('gpt-5')) {
+          const finishReason = choice?.finish_reason;
+          const usage = data.usage;
+          
+          if (finishReason === 'length') {
+            const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens || 0;
+            const totalTokens = usage?.completion_tokens || 0;
+            throw new Error(
+              `トークン制限に達しました。推論トークン: ${reasoningTokens}, 合計トークン: ${totalTokens}。` +
+              `max_completion_tokensを増やすか、プロンプトを短くしてください。`
+            );
+          }
+          
+          // reasoningフィールドがあるか確認
+          if (choice?.message?.reasoning) {
+            console.warn('GPT-5シリーズでreasoningフィールドが見つかりましたが、contentが空です。');
+          }
+          
+          console.error('OpenAI API応答（完全）:', JSON.stringify(data, null, 2));
+          throw new Error(
+            `AIからの応答が空でした。finish_reason: ${finishReason || '不明'}, ` +
+            `推論トークン: ${usage?.completion_tokens_details?.reasoning_tokens || 0}。` +
+            `APIの応答を確認してください。`
+          );
+        }
         
         if (!summary) {
-          throw new Error('AIからの応答が空でした');
+          console.error('OpenAI API応答（完全）:', JSON.stringify(data, null, 2));
+          throw new Error('AIからの応答が空でした。APIの応答を確認してください。応答構造: ' + JSON.stringify(Object.keys(data)));
         }
         
         return summary;
@@ -334,8 +661,13 @@ ${formatInstruction}
 
   const handleGenerate = async () => {
     try {
-      if (!aiGenerationInput.trim() && selectedTopicIdsForAI.length === 0) {
-        alert('概要または関連トピックを少なくとも1つ選択してください');
+      // スタートアップ情報、概要入力、またはトピックのいずれかがあれば生成可能
+      const hasStartupInfo = startup && startup.title;
+      const hasInput = aiGenerationInput.trim().length > 0;
+      const hasTopics = selectedTopicIdsForAI.length > 0;
+      
+      if (!hasStartupInfo && !hasInput && !hasTopics) {
+        alert('概要入力、関連トピックの選択、またはスタートアップ情報のいずれかが必要です');
         return;
       }
 
@@ -400,7 +732,7 @@ ${formatInstruction}
           }}
         >
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600', color: '#111827' }}>
-            AIで作文 - {target === 'description' ? '説明' : '目標'}
+            AIで作文 - {target === 'description' ? '説明' : '注力アクション'}
           </h2>
           <button
             onClick={handleClose}
@@ -432,8 +764,8 @@ ${formatInstruction}
 
             {/* モデルタイプ選択 */}
             <div style={{ marginBottom: '12px' }}>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                {(['gpt', 'local'] as const).map((type) => (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                {(['gpt', 'gemini', 'claude', 'local', 'local-lfm'] as const).map((type) => (
                   <label
                     key={type}
                     style={{
@@ -454,24 +786,30 @@ ${formatInstruction}
                       name="aiModelType"
                       value={type}
                       checked={aiModelType === type}
-                      onChange={(e) => setAiModelType(e.target.value as 'gpt' | 'local')}
+                      onChange={(e) => setAiModelType(e.target.value as ModelType)}
                       style={{ cursor: 'pointer' }}
                     />
-                    <span>{type === 'gpt' ? 'GPT' : 'ローカル'}</span>
+                    <span>
+                      {type === 'gpt' ? 'GPT' : 
+                       type === 'gemini' ? 'Gemini' : 
+                       type === 'claude' ? 'Claude' : 
+                       type === 'local-lfm' ? 'ローカル（LFM）' : 
+                       'ローカル'}
+                    </span>
                   </label>
                 ))}
               </div>
             </div>
 
             {/* モデル選択 */}
-            {aiModelType === 'local' && loadingAiLocalModels && (
+            {(aiModelType === 'local' || aiModelType === 'local-lfm') && loadingAiLocalModels && (
               <div style={{ padding: '8px', fontSize: '12px', color: '#6B7280' }}>
                 🔄 利用可能なモデルを取得中...
               </div>
             )}
-            {aiModelType === 'local' && !loadingAiLocalModels && availableAiModels.length === 0 && (
+            {(aiModelType === 'local' || aiModelType === 'local-lfm') && !loadingAiLocalModels && availableAiModels.length === 0 && (
               <div style={{ padding: '8px', fontSize: '12px', color: '#DC2626' }}>
-                ⚠️ 利用可能なローカルモデルが見つかりませんでした
+                ⚠️ 利用可能な{aiModelType === 'local-lfm' ? 'LFM2' : 'ローカル'}モデルが見つかりませんでした
               </div>
             )}
             {availableAiModels.length > 0 && (
@@ -492,7 +830,7 @@ ${formatInstruction}
               >
                 {availableAiModels.map((model) => (
                   <option key={model.value} value={model.value}>
-                    {model.label}
+                    {model.label} {model.inputPrice !== '無料' && `(${model.inputPrice}/${model.outputPrice})`}
                   </option>
                 ))}
               </select>

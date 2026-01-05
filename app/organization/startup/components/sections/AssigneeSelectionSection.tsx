@@ -12,6 +12,8 @@ interface AssigneeSelectionSectionProps {
   setAssigneeSearchQuery: (query: string) => void;
   isAssigneeDropdownOpen: boolean;
   setIsAssigneeDropdownOpen: (open: boolean) => void;
+  isAssigneeSectionExpanded: boolean;
+  setIsAssigneeSectionExpanded: (expanded: boolean) => void;
   orgMembers: Array<{ id: string; name: string; position?: string }>;
   allOrgMembers: Array<{ id: string; name: string; position?: string; organizationId?: string }>;
   manualAssigneeInput: string;
@@ -28,6 +30,8 @@ export default function AssigneeSelectionSection({
   setAssigneeSearchQuery,
   isAssigneeDropdownOpen,
   setIsAssigneeDropdownOpen,
+  isAssigneeSectionExpanded,
+  setIsAssigneeSectionExpanded,
   orgMembers,
   allOrgMembers,
   manualAssigneeInput,
@@ -36,11 +40,27 @@ export default function AssigneeSelectionSection({
 }: AssigneeSelectionSectionProps) {
   return (
     <div style={{ marginBottom: '24px' }}>
-      <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#374151' }}>
-        担当者 {localAssignee.length > 0 && `(${localAssignee.length}人)`}
-      </label>
+      <div 
+        style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: '12px',
+          cursor: 'pointer',
+        }}
+        onClick={() => setIsAssigneeSectionExpanded(!isAssigneeSectionExpanded)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '14px', transition: 'transform 0.2s', transform: isAssigneeSectionExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+            ▶
+          </span>
+          <label style={{ display: 'block', fontWeight: '600', color: '#374151', fontSize: '16px', cursor: 'pointer' }}>
+            担当者 {localAssignee.length > 0 && `(${localAssignee.length}人)`}
+          </label>
+        </div>
+      </div>
       
-      {/* 選択済みメンバーの表示 */}
+      {/* 選択済みメンバーの表示（開閉に関係なく表示） */}
       {localAssignee.length > 0 && (
         <div style={{ marginBottom: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
           {localAssignee.map((assignee, index) => (
@@ -59,7 +79,8 @@ export default function AssigneeSelectionSection({
             >
               <span style={{ color: '#1E40AF' }}>{assignee}</span>
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setLocalAssignee(localAssignee.filter((_, i) => i !== index));
                 }}
                 style={{
@@ -82,63 +103,66 @@ export default function AssigneeSelectionSection({
         </div>
       )}
       
-      {/* データベースから取得したメンバー選択フォームと自由入力フォームを横並び */}
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
-        {/* データベースから取得したメンバー選択フォーム */}
-        <div style={{ flex: 1 }}>
-          <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#6B7280' }}>
-            メンバーを選択（データベースから取得）
-          </label>
-          <div style={{ position: 'relative' }}>
-            <input
-              ref={assigneeInputRef}
-              type="text"
-              value={assigneeSearchQuery}
-              onChange={(e) => {
-                setAssigneeSearchQuery(e.target.value);
-                setIsAssigneeDropdownOpen(true);
-              }}
-              onKeyDown={(e) => {
-                // Escapeキーでドロップダウンを閉じる
-                if (e.key === 'Escape') {
-                  setIsAssigneeDropdownOpen(false);
-                  setAssigneeSearchQuery('');
-                }
-                // Enterキーは無効化（ドロップダウンから選択のみ）
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                }
-              }}
-              onFocus={() => setIsAssigneeDropdownOpen(true)}
-              placeholder="メンバーを検索して選択（ドロップダウンから選択のみ）"
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid #D1D5DB',
-                borderRadius: '6px',
-                fontSize: '14px',
-              }}
-            />
-            {isAssigneeDropdownOpen && (
-              <div
-                ref={assigneeDropdownRef}
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  marginTop: '4px',
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid #D1D5DB',
-                  borderRadius: '6px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                  zIndex: 1000,
-                  maxHeight: '200px',
-                  overflowY: 'auto',
-                }}
-              >
-                {/* 現在の組織のメンバー（検索クエリがない場合、または検索クエリがある場合は全組織メンバーも表示） */}
-                {(() => {
+      {/* 開閉式の入力フォーム */}
+      {isAssigneeSectionExpanded && (
+        <div>
+          {/* データベースから取得したメンバー選択フォームと自由入力フォームを横並び */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            {/* データベースから取得したメンバー選択フォーム */}
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#6B7280' }}>
+                メンバーを選択（データベースから取得）
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  ref={assigneeInputRef}
+                  type="text"
+                  value={assigneeSearchQuery}
+                  onChange={(e) => {
+                    setAssigneeSearchQuery(e.target.value);
+                    setIsAssigneeDropdownOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    // Escapeキーでドロップダウンを閉じる
+                    if (e.key === 'Escape') {
+                      setIsAssigneeDropdownOpen(false);
+                      setAssigneeSearchQuery('');
+                    }
+                    // Enterキーは無効化（ドロップダウンから選択のみ）
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                    }
+                  }}
+                  onFocus={() => setIsAssigneeDropdownOpen(true)}
+                  placeholder="メンバーを検索して選択（ドロップダウンから選択のみ）"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #D1D5DB',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                  }}
+                />
+                {isAssigneeDropdownOpen && (
+                  <div
+                    ref={assigneeDropdownRef}
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      marginTop: '4px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #D1D5DB',
+                      borderRadius: '6px',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                      zIndex: 1000,
+                      maxHeight: '200px',
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {/* 現在の組織のメンバー（検索クエリがない場合、または検索クエリがある場合は全組織メンバーも表示） */}
+                    {(() => {
                   const query = assigneeSearchQuery.toLowerCase();
                   const hasQuery = query.length > 0;
                   
@@ -330,84 +354,86 @@ export default function AssigneeSelectionSection({
                       </div>
                     </div>
                   ));
-                })()}
+                    })()}
+                  </div>
+                )}
+                {orgMembers.length > 0 && (
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#6B7280' }}>
+                    💡 ドロップダウンからメンバーをクリックして選択してください
+                  </div>
+                )}
               </div>
-            )}
-            {orgMembers.length > 0 && (
+            </div>
+            
+            {/* 自由入力フォーム */}
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#6B7280' }}>
+                担当者を直接入力
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={manualAssigneeInput}
+                  onChange={(e) => setManualAssigneeInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && manualAssigneeInput.trim()) {
+                      e.preventDefault();
+                      if (!localAssignee.includes(manualAssigneeInput.trim())) {
+                        setLocalAssignee([...localAssignee, manualAssigneeInput.trim()]);
+                      }
+                      setManualAssigneeInput('');
+                    }
+                  }}
+                  placeholder="担当者名を直接入力"
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    border: '1px solid #D1D5DB',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (manualAssigneeInput.trim() && !localAssignee.includes(manualAssigneeInput.trim())) {
+                      setLocalAssignee([...localAssignee, manualAssigneeInput.trim()]);
+                      setManualAssigneeInput('');
+                    }
+                  }}
+                  disabled={!manualAssigneeInput.trim()}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: manualAssigneeInput.trim() ? '#3B82F6' : '#9CA3AF',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    cursor: manualAssigneeInput.trim() ? 'pointer' : 'not-allowed',
+                    whiteSpace: 'nowrap',
+                    transition: 'background-color 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (manualAssigneeInput.trim()) {
+                      e.currentTarget.style.backgroundColor = '#2563EB';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (manualAssigneeInput.trim()) {
+                      e.currentTarget.style.backgroundColor = '#3B82F6';
+                    }
+                  }}
+                >
+                  追加
+                </button>
+              </div>
               <div style={{ marginTop: '6px', fontSize: '12px', color: '#6B7280' }}>
-                💡 ドロップダウンからメンバーをクリックして選択してください
+                💡 担当者名を入力して「追加」ボタンをクリック、またはEnterキーで追加
               </div>
-            )}
+            </div>
           </div>
         </div>
-        
-        {/* 自由入力フォーム */}
-        <div style={{ flex: 1 }}>
-          <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#6B7280' }}>
-            担当者を直接入力
-          </label>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type="text"
-              value={manualAssigneeInput}
-              onChange={(e) => setManualAssigneeInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && manualAssigneeInput.trim()) {
-                  e.preventDefault();
-                  if (!localAssignee.includes(manualAssigneeInput.trim())) {
-                    setLocalAssignee([...localAssignee, manualAssigneeInput.trim()]);
-                  }
-                  setManualAssigneeInput('');
-                }
-              }}
-              placeholder="担当者名を直接入力"
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                border: '1px solid #D1D5DB',
-                borderRadius: '6px',
-                fontSize: '14px',
-              }}
-            />
-            <button
-              onClick={() => {
-                if (manualAssigneeInput.trim() && !localAssignee.includes(manualAssigneeInput.trim())) {
-                  setLocalAssignee([...localAssignee, manualAssigneeInput.trim()]);
-                  setManualAssigneeInput('');
-                }
-              }}
-              disabled={!manualAssigneeInput.trim()}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: manualAssigneeInput.trim() ? '#3B82F6' : '#9CA3AF',
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontWeight: 500,
-                cursor: manualAssigneeInput.trim() ? 'pointer' : 'not-allowed',
-                whiteSpace: 'nowrap',
-                transition: 'background-color 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                if (manualAssigneeInput.trim()) {
-                  e.currentTarget.style.backgroundColor = '#2563EB';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (manualAssigneeInput.trim()) {
-                  e.currentTarget.style.backgroundColor = '#3B82F6';
-                }
-              }}
-            >
-              追加
-            </button>
-          </div>
-          <div style={{ marginTop: '6px', fontSize: '12px', color: '#6B7280' }}>
-            💡 担当者名を入力して「追加」ボタンをクリック、またはEnterキーで追加
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

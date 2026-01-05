@@ -25,8 +25,12 @@ export function useOrganizationManagement(
         // メンバー情報をMemberInfo形式に変換（ID付き）
         const memberInfos = mapMembersToMemberInfo(members);
         
-        // 役職順にソート（情報・通信部門の場合は部門長を最上位にする）
-        const sortedMembers = sortMembersByPosition(memberInfos, node.name);
+        // displayOrderでソートされている場合はその順序を保持
+        // displayOrderが設定されていないメンバーがある場合のみ、役職順にソート
+        const hasDisplayOrder = memberInfos.some((m: any) => m.displayOrder !== null && m.displayOrder !== undefined);
+        const sortedMembers = hasDisplayOrder 
+          ? memberInfos // displayOrderで既にソートされているのでそのまま使用
+          : sortMembersByPosition(memberInfos, node.name); // displayOrderがない場合のみ役職順にソート
         
         // ID付きメンバー情報を保存（編集モーダル用）
         setSelectedNodeMembers(sortedMembers);
@@ -79,7 +83,7 @@ export function useOrganizationManagement(
       hasId: !!selectedNode.id
     });
     
-    router.push(`/organization/detail?id=${selectedNode.id}`);
+    router.push(`/organization/detail?id=${selectedNode.id}&tab=startups`);
   }, [router]);
 
   const handleAddOrg = useCallback(async () => {
@@ -154,7 +158,11 @@ export function useOrganizationManagement(
         try {
           const members = await getOrgMembers(tree.id);
           const memberInfos = mapMembersToMemberInfo(members);
-          const sortedMembers = sortMembersByPosition(memberInfos, tree.name);
+          // displayOrderでソートされている場合はその順序を保持
+          const hasDisplayOrder = memberInfos.some((m: any) => m.displayOrder !== null && m.displayOrder !== undefined);
+          const sortedMembers = hasDisplayOrder 
+            ? memberInfos // displayOrderで既にソートされているのでそのまま使用
+            : sortMembersByPosition(memberInfos, tree.name); // displayOrderがない場合のみ役職順にソート
           setSelectedNodeMembers(sortedMembers);
           setSelectedNode({
             ...tree,

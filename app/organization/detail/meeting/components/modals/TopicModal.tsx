@@ -36,7 +36,7 @@ interface TopicModalProps {
     keywords?: string[];
     summary?: string;
   } | null;
-  topicMetadataModelType: 'gpt' | 'local';
+  topicMetadataModelType: 'gpt' | 'local' | 'local-lfm';
   topicMetadataSelectedModel: string;
   topicMetadataMode: 'overwrite' | 'merge';
   topicMetadataLocalModels: Array<{ value: string; label: string }>;
@@ -69,7 +69,7 @@ interface TopicModalProps {
     keywords?: string[];
     summary?: string;
   } | null) => void;
-  setTopicMetadataModelType: (value: 'gpt' | 'local') => void;
+  setTopicMetadataModelType: (value: 'gpt' | 'local' | 'local-lfm') => void;
   setTopicMetadataSelectedModel: (value: string) => void;
   setTopicMetadataMode: (value: 'overwrite' | 'merge') => void;
   setIsGeneratingMetadata: (value: boolean) => void;

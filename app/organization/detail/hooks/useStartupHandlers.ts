@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { saveStartup, deleteStartup, generateUniqueStartupId, getStartups, tauriAlert } from '@/lib/orgApi';
+import { saveStartup, deleteStartup, generateUniqueStartupId, getStartups, tauriAlert, toggleStartupFavorite } from '@/lib/orgApi';
 import type { OrgNodeData } from '@/components/OrgChart';
 import type { Startup } from '@/lib/orgApi';
 
@@ -227,6 +227,21 @@ export function useStartupHandlers({
     setDeleteTargetStartupId(null);
   };
 
+  // スタートアップのお気に入りを切り替え
+  const handleToggleFavorite = async (startupId: string) => {
+    try {
+      const newFavoriteState = await toggleStartupFavorite(startupId);
+      
+      // ローカル状態を更新
+      setStartups(prev => prev.map(s => 
+        s.id === startupId ? { ...s, isFavorite: newFavoriteState } : s
+      ));
+    } catch (error: any) {
+      console.error('❌ お気に入りの切り替えに失敗しました:', error);
+      await tauriAlert(`お気に入りの切り替えに失敗しました: ${error?.message || '不明なエラー'}`);
+    }
+  };
+
   return {
     // 状態
     showAddStartupModal,
@@ -253,6 +268,7 @@ export function useStartupHandlers({
     handleDeleteStartup,
     confirmDeleteStartup,
     cancelDeleteStartup,
+    handleToggleFavorite,
   };
 }
 

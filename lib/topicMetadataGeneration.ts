@@ -15,13 +15,69 @@ async function callGPTAPI(
   model: string = 'gpt-4o-mini'
 ): Promise<string> {
   // モデルタイプを判定
-  const isLocalModel = !model.startsWith('gpt-') && 
-                       !model.startsWith('gemini') && 
-                       !model.startsWith('claude');
   const isGeminiModel = model.startsWith('gemini');
   const isClaudeModel = model.startsWith('claude');
+  const isGPTModel = model.startsWith('gpt-');
+  
+  // LFM2モデル（LlamaCpp）の判定
+  const isLFM2Model = model === 'lfm2-8b-a1b-q4-k-m' || 
+                       model.includes('LFM2') || 
+                       model.includes('lfm2') ||
+                       model.endsWith('.gguf');
+  
+  // その他のローカルモデル（Ollama）の判定
+  const isOllamaModel = !isGPTModel && 
+                        !isGeminiModel && 
+                        !isClaudeModel && 
+                        !isLFM2Model;
 
-  if (isLocalModel) {
+  // LFM2モデル（LlamaCpp Server）の場合
+  if (isLFM2Model) {
+    try {
+      // LlamaCppServerProviderを使用
+      const { getModelConfig, getProviderForModel } = await import('./localModel/router');
+      const modelConfig = getModelConfig(model);
+      const provider = getProviderForModel(modelConfig);
+      
+      // エンティティ・リレーション抽出の場合はより長いレスポンスが必要
+      const isJsonExtraction = messages.some(msg => 
+        msg.content.includes('JSON形式') || 
+        msg.content.includes('JSON形式で返してください') ||
+        msg.content.includes('結果はJSON形式')
+      );
+      
+      console.log(`🔄 LlamaCpp Server API呼び出し開始: モデル: ${model}`);
+      
+      const chatMessages = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+      
+      const result = await provider.chat(chatMessages, {
+        model: modelConfig.id,
+        temperature: 0.7,
+        maxTokens: isJsonExtraction ? 4000 : 2000,
+      });
+      
+      const content = result.text?.trim() || '';
+      
+      if (!content) {
+        throw new Error('LlamaCpp Server APIの応答が空でした');
+      }
+      
+      console.log(`✅ LlamaCpp Server API呼び出し完了: ${content.length}文字`);
+      return content;
+    } catch (error: any) {
+      console.error('LlamaCpp Server API呼び出しエラー:', error);
+      
+      // エラーメッセージを改善
+      if (error.message?.includes('fetch') || error.message?.includes('接続')) {
+        throw new Error(`LlamaCpp Serverに接続できませんでした。\n\n【確認事項】\n1. llama-serverが起動しているか確認:\n   cd /Users/gaikondo/Desktop/test-app/app50_LFM2\n   ./ai/bin/run_lfm2_server.sh ./ai/models/LFM2-8B-A1B-Q4_K_M.gguf\n\n2. サーバーが http://localhost:8080 で起動しているか確認\n3. 環境変数 NEXT_PUBLIC_LLAMA_CPP_API_URL が正しく設定されているか確認\n\n【現在の設定】\n- 使用モデル: ${model}`);
+      }
+      
+      throw new Error(`LlamaCpp Server API呼び出しエラー: ${error.message || String(error)}`);
+    }
+  } else if (isOllamaModel) {
     // Ollama API呼び出し
     // API URLを取得: localStorage > 環境変数 > デフォルト
     let apiUrl: string = 'http://localhost:11434/api/chat';

@@ -178,7 +178,7 @@ export default function RelationsTab({
   },
   "method": ["手法1", "手法2"],
   "means": ["手段1", "手段2"],
-  "objective": "目標の説明",
+  "objective": "注力アクションの説明",
   "title": "タイトル",
   "description": "説明"
 }`}
@@ -195,7 +195,7 @@ export default function RelationsTab({
               }}
             />
             <div style={{ marginTop: '8px', fontSize: '12px', color: '#6B7280' }}>
-              💡 特性要因図のJSONコードを編集してください。手法（method）、手段（means）、目標（objective）を変更できます。
+              💡 特性要因図のJSONコードを編集してください。手法（method）、手段（means）、注力アクション（objective）を変更できます。
             </div>
           </div>
         ) : (
@@ -216,7 +216,7 @@ export default function RelationsTab({
               />
             </div>
             <div style={{ marginTop: '8px', fontSize: '12px', color: '#6B7280' }}>
-              💡 特性要因図は、このスタートアップの手法・手段・目標を可視化しています。
+              💡 特性要因図は、このスタートアップの手法・手段・注力アクションを可視化しています。
               {!startup.causeEffectDiagramId && (
                 <span style={{ marginLeft: '8px', color: '#F59E0B' }}>
                   （保存すると特性要因図IDが自動生成されます）

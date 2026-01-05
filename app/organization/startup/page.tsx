@@ -105,7 +105,18 @@ function StartupDetailPageContent() {
   const [localHpUrl, setLocalHpUrl] = useState<string>(initialLocalState.hpUrl || '');
   const [localAsanaUrl, setLocalAsanaUrl] = useState<string>(initialLocalState.asanaUrl || '');
   const [localBoxUrl, setLocalBoxUrl] = useState<string>(initialLocalState.boxUrl || '');
+  const [isThemesExpanded, setIsThemesExpanded] = useState(false);
   const [isTopicsExpanded, setIsTopicsExpanded] = useState(false);
+  const [isAssigneeSectionExpanded, setIsAssigneeSectionExpanded] = useState(() => {
+    // 1人でも設定されていたら閉じる、誰も登録されていない場合は開く
+    return initialLocalState.assignee.length === 0;
+  });
+
+  // localAssigneeが変更された時に、開閉状態を更新
+  useEffect(() => {
+    // 1人でも設定されていたら閉じる、誰も登録されていない場合は開く
+    setIsAssigneeSectionExpanded(localAssignee.length === 0);
+  }, [localAssignee]);
   const [isTopicSelectModalOpen, setIsTopicSelectModalOpen] = useState(false);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isMonetizationUpdateModalOpen, setIsMonetizationUpdateModalOpen] = useState(false);
@@ -438,6 +449,8 @@ function StartupDetailPageContent() {
             themes={themes}
             localThemeIds={localThemeIds}
             setLocalThemeIds={setLocalThemeIds}
+            isThemesExpanded={isThemesExpanded}
+            setIsThemesExpanded={setIsThemesExpanded}
           />
           
           {/* 個別トピックセクション */}
@@ -477,6 +490,8 @@ function StartupDetailPageContent() {
           setAssigneeSearchQuery={setAssigneeSearchQuery}
           isAssigneeDropdownOpen={isAssigneeDropdownOpen}
           setIsAssigneeDropdownOpen={setIsAssigneeDropdownOpen}
+          isAssigneeSectionExpanded={isAssigneeSectionExpanded}
+          setIsAssigneeSectionExpanded={setIsAssigneeSectionExpanded}
           orgMembers={orgMembers}
           allOrgMembers={allOrgMembers}
           manualAssigneeInput={manualAssigneeInput}
@@ -559,20 +574,7 @@ function StartupDetailPageContent() {
           setLocalMonetizationEndPeriod={setLocalMonetizationEndPeriod}
           localMonetizationRenewalNotRequired={localMonetizationRenewalNotRequired}
           setLocalMonetizationRenewalNotRequired={setLocalMonetizationRenewalNotRequired}
-          localCauseEffectCode={localCauseEffectCode}
-          setLocalCauseEffectCode={setLocalCauseEffectCode}
-          localMethodForDiagram={localMethod}
-          localMeansForDiagram={localMeans}
-          localObjectiveForDiagram={localObjective}
-          isEditingCauseEffect={isEditingCauseEffect}
-          setIsEditingCauseEffect={setIsEditingCauseEffect}
-          setIsUpdateModalOpen={setIsUpdateModalOpen}
           setStartup={setStartup}
-          localMonetizationDiagram={localMonetizationDiagram}
-          setLocalMonetizationDiagram={setLocalMonetizationDiagram}
-          isEditingMonetization={isEditingMonetization}
-          setIsEditingMonetization={setIsEditingMonetization}
-          setIsMonetizationUpdateModalOpen={setIsMonetizationUpdateModalOpen}
           localRelationDiagram={localRelationDiagram}
           setLocalRelationDiagram={setLocalRelationDiagram}
           isEditingRelation={isEditingRelation}
@@ -647,6 +649,13 @@ function StartupDetailPageContent() {
         setIsEditingDescription={setIsEditingDescription}
         setIsEditingObjective={setIsEditingObjective}
         setIsEditingEvaluation={setIsEditingEvaluation}
+        startup={startup}
+        categories={categories}
+        vcs={vcs}
+        departments={departments}
+        statuses={statuses}
+        engagementLevels={engagementLevels}
+        bizDevPhases={bizDevPhases}
       />
     </Layout>
   );

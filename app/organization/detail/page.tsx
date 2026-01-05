@@ -12,7 +12,6 @@ import FocusInitiativesTab from './components/tabs/FocusInitiativesTab';
 import MeetingNotesTab from './components/tabs/MeetingNotesTab';
 import RegulationsTab from './components/tabs/RegulationsTab';
 import StartupsTab from './components/tabs/StartupsTab';
-import GraphvizTab from './components/tabs/GraphvizTab';
 import AddInitiativeModal from './components/modals/AddInitiativeModal';
 import DeleteInitiativeModal from './components/modals/DeleteInitiativeModal';
 import AddMeetingNoteModal from './components/modals/AddMeetingNoteModal';
@@ -27,7 +26,6 @@ import { useInitiativeHandlers } from './hooks/useInitiativeHandlers';
 import { useMeetingNoteHandlers } from './hooks/useMeetingNoteHandlers';
 import { useRegulationHandlers } from './hooks/useRegulationHandlers';
 import { useStartupHandlers } from './hooks/useStartupHandlers';
-import { getAllGraphvizYamlFiles } from '@/lib/graphvizApi';
 
 // 開発環境でのみログを有効化するヘルパー関数（パフォーマンス最適化）
 const isDev = process.env.NODE_ENV === 'development';
@@ -72,7 +70,6 @@ function OrganizationDetailPageContent() {
   
   const [expandedOrgIds, setExpandedOrgIds] = useState<Set<string>>(new Set()); // 開いている子組織のID
   const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'introduction');
-  const [graphvizCount, setGraphvizCount] = useState<number>(0);
 
   // 各タブのコンテンツ用のref
   const introductionTabRef = useRef<HTMLDivElement>(null);
@@ -81,7 +78,6 @@ function OrganizationDetailPageContent() {
   const focusInitiativesTabRef = useRef<HTMLDivElement>(null);
   const meetingNotesTabRef = useRef<HTMLDivElement>(null);
   const regulationsTabRef = useRef<HTMLDivElement>(null);
-  const graphvizTabRef = useRef<HTMLDivElement>(null);
   
   // 注力施策関連のハンドラー
   const initiativeHandlers = useInitiativeHandlers({
@@ -119,7 +115,7 @@ function OrganizationDetailPageContent() {
   // タブパラメータが変更されたときにactiveTabを更新
   useEffect(() => {
     // 非表示タブが指定された場合はintroductionにリダイレクト
-    if (tabParam === 'focusInitiatives' || tabParam === 'regulations' || tabParam === 'graphviz') {
+    if (tabParam === 'focusInitiatives' || tabParam === 'regulations') {
       setActiveTab('introduction');
     } else if (tabParam && ['introduction', 'focusAreas', 'startups', 'meetingNotes'].includes(tabParam)) {
       setActiveTab(tabParam);
@@ -127,23 +123,6 @@ function OrganizationDetailPageContent() {
       setActiveTab('introduction');
     }
   }, [tabParam]);
-
-  // Graphvizファイルの件数を取得
-  useEffect(() => {
-    if (!organizationId) return;
-    
-    const loadGraphvizCount = async () => {
-      try {
-        const allFiles = await getAllGraphvizYamlFiles();
-        const filteredFiles = allFiles.filter(file => file.organizationId === organizationId);
-        setGraphvizCount(filteredFiles.length);
-      } catch (error) {
-        console.error('Graphvizファイルの件数取得に失敗:', error);
-      }
-    };
-    
-    loadGraphvizCount();
-  }, [organizationId, activeTab]); // activeTabが変更されたときも再取得（追加・削除後に更新されるように）
 
   // 各タブのコンテンツを画像としてダウンロード（早期リターンの前に定義）
   const handleDownloadTabImage = useCallback(async (tab: TabType) => {
@@ -181,11 +160,6 @@ function OrganizationDetailPageContent() {
         tabRef = startupsTabRef;
         tabName = 'スタートアップ';
         break;
-      // Graphvizタブは非表示（機能オフ）
-      // case 'graphviz':
-      //   tabRef = graphvizTabRef;
-      //   tabName = 'Graphviz';
-      //   break;
     }
 
     if (!tabRef || !tabRef.current) {
@@ -315,7 +289,6 @@ function OrganizationDetailPageContent() {
           meetingNotesCount={meetingNotes.length}
           regulationsCount={0} // 制度タブは非表示のため0を渡す
           startupsCount={startups.length}
-          graphvizCount={0} // Graphvizタブは非表示のため0を渡す
         />
 
         {/* タブコンテンツ */}
@@ -353,6 +326,7 @@ function OrganizationDetailPageContent() {
             onCancelEdit={startupHandlers.handleCancelEditStartup}
             onSaveEdit={startupHandlers.handleSaveEditStartup}
             onDelete={startupHandlers.handleDeleteStartup}
+            onToggleFavorite={startupHandlers.handleToggleFavorite}
           />
         )}
 
@@ -445,16 +419,6 @@ function OrganizationDetailPageContent() {
             onCancelEdit={regulationHandlers.handleCancelEditRegulation}
             onSaveEdit={regulationHandlers.handleSaveEditRegulation}
             onDelete={regulationHandlers.handleDeleteRegulation}
-          />
-        )} */}
-
-        {/* Graphvizタブは非表示（機能オフ） */}
-        {/* {activeTab === 'graphviz' && (
-          <GraphvizTab
-            organizationId={organizationId}
-            tabRef={graphvizTabRef}
-            onDownloadImage={handleDownloadTabImage}
-            onFilesChange={setGraphvizCount}
           />
         )} */}
 

@@ -18,7 +18,7 @@ export interface ModelInfo {
   outputPrice: string;
 }
 
-export type ModelType = 'gpt' | 'local' | 'gemini' | 'claude';
+export type ModelType = 'gpt' | 'local' | 'local-lfm' | 'gemini' | 'claude';
 
 export interface RAGSource {
   type: 'entity' | 'relation' | 'topic';

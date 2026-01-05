@@ -56,28 +56,28 @@ export default function TopicSelectionSection({
             onOpenModal();
           }}
           style={{
-            padding: '8px 16px',
-            backgroundColor: '#3B82F6',
-            color: '#FFFFFF',
-            border: 'none',
+            padding: '6px 12px',
+            backgroundColor: 'transparent',
+            color: '#6B7280',
+            border: '1px solid #D1D5DB',
             borderRadius: '6px',
-            fontSize: '14px',
-            fontWeight: '500',
+            fontSize: '13px',
+            fontWeight: '400',
             cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            transition: 'background-color 0.2s',
+            transition: 'all 0.2s',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#2563EB';
+            e.currentTarget.style.backgroundColor = '#F9FAFB';
+            e.currentTarget.style.borderColor = '#9CA3AF';
+            e.currentTarget.style.color = '#374151';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = '#3B82F6';
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.currentTarget.style.borderColor = '#D1D5DB';
+            e.currentTarget.style.color = '#6B7280';
           }}
         >
-          <span>📝</span>
-          <span>個別トピックを選択</span>
+          個別トピックを選択
         </button>
       </div>
       

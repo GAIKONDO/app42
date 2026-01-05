@@ -137,70 +137,7 @@ export async function saveCategoryBizDevPhaseSnapshot(
  */
 export async function getAllCategoryBizDevPhaseSnapshots(): Promise<CategoryBizDevPhaseSnapshot[]> {
   try {
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
-      const { callTauriCommand } = await import('../localFirebase');
-
-      try {
-        const result = await callTauriCommand('collection_get', {
-          collectionName: 'categoryBizDevPhaseSnapshots',
-        });
-
-        const resultArray: any[] = Array.isArray(result) ? result : [];
-        
-        const snapshots: CategoryBizDevPhaseSnapshot[] = resultArray.map((item: any) => {
-          const data = item.data || item;
-          
-          // JSON文字列をパース
-          let categoryCounts: Record<string, number> = {};
-          let bizDevPhaseCounts: Record<string, number> = {};
-          
-          if (data.categoryCounts) {
-            if (typeof data.categoryCounts === 'string') {
-              try {
-                categoryCounts = JSON.parse(data.categoryCounts);
-              } catch (e) {
-                console.warn('⚠️ [getAllCategoryBizDevPhaseSnapshots] categoryCounts JSONパースエラー:', e);
-              }
-            } else if (typeof data.categoryCounts === 'object') {
-              categoryCounts = data.categoryCounts;
-            }
-          }
-          
-          if (data.bizDevPhaseCounts) {
-            if (typeof data.bizDevPhaseCounts === 'string') {
-              try {
-                bizDevPhaseCounts = JSON.parse(data.bizDevPhaseCounts);
-              } catch (e) {
-                console.warn('⚠️ [getAllCategoryBizDevPhaseSnapshots] bizDevPhaseCounts JSONパースエラー:', e);
-              }
-            } else if (typeof data.bizDevPhaseCounts === 'object') {
-              bizDevPhaseCounts = data.bizDevPhaseCounts;
-            }
-          }
-
-          return {
-            id: data.id || item.id,
-            snapshotDate: data.snapshotDate || '',
-            categoryCounts,
-            bizDevPhaseCounts,
-            createdAt: data.createdAt || '',
-            updatedAt: data.updatedAt || '',
-          } as CategoryBizDevPhaseSnapshot;
-        });
-
-        // 日付順にソート（新しい順）
-        snapshots.sort((a, b) => {
-          return b.snapshotDate.localeCompare(a.snapshotDate);
-        });
-
-        console.log('✅ [getAllCategoryBizDevPhaseSnapshots] 取得成功:', snapshots.length, '件');
-        return snapshots;
-      } catch (error: any) {
-        console.error('❌ [getAllCategoryBizDevPhaseSnapshots] Tauriコマンドエラー:', error);
-        return [];
-      }
-    }
-
+    // Supabaseに切り替えているため、直接API版を使用
     const { apiGet } = await import('../apiClient');
     const result = await apiGet<CategoryBizDevPhaseSnapshot[]>('/api/categoryBizDevPhaseSnapshots');
     
@@ -215,7 +152,14 @@ export async function getAllCategoryBizDevPhaseSnapshots(): Promise<CategoryBizD
         : snapshot.bizDevPhaseCounts,
     }));
   } catch (error: any) {
-    console.error('❌ [getAllCategoryBizDevPhaseSnapshots] エラー:', error);
+    // タイムアウトエラーやAPIエンドポイント未実装の場合は警告レベルで処理
+    const errorMessage = error?.message || String(error);
+    if (errorMessage.includes('timeout') || errorMessage.includes('API request timeout')) {
+      // APIエンドポイントが未実装の場合は正常な動作として扱う
+      console.warn('⚠️ [getAllCategoryBizDevPhaseSnapshots] APIエンドポイントが未実装またはタイムアウト（スナップショット機能は使用できません）');
+    } else {
+      console.warn('⚠️ [getAllCategoryBizDevPhaseSnapshots] エラー:', errorMessage);
+    }
     return [];
   }
 }

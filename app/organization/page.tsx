@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Layout from '@/components/Layout';
 import type { OrgNodeData, MemberInfo } from '@/components/OrgChart';
 import { getOrgTreeFromDb, getOrgMembers, deleteOrg, tauriAlert } from '@/lib/orgApi';
@@ -16,7 +16,7 @@ import FilterPanel from './components/FilterPanel';
 import SearchBar from './components/SearchBar';
 import SearchCandidates from './components/SearchCandidates';
 import FilterResults from './components/FilterResults';
-import { mapMembersToMemberInfo, findOrgInTree } from './utils/organizationUtils';
+import { mapMembersToMemberInfo, findOrgInTree, findParentOrg } from './utils/organizationUtils';
 import { useOrganizationDataWithRealtime } from './hooks/useOrganizationDataWithRealtime';
 import { useOrganizationFilters } from './hooks/useOrganizationFilters';
 import { useOrganizationManagement } from './hooks/useOrganizationManagement';
@@ -98,6 +98,53 @@ export default function OrganizationPage() {
     orgData
   );
 
+  // selectedRootOrgIdが変更されたときにフィルターした組織を選択状態にする
+  // orgDataが変更されたときは実行しない（ノードクリック時の選択を上書きしないため）
+  useEffect(() => {
+    if (selectedRootOrgId && orgData) {
+      // フィルターした組織自体を取得
+      const selectedOrg = findOrgInTree(orgData, selectedRootOrgId);
+      
+      if (selectedOrg && selectedOrg.id) {
+        // 組織のメンバー情報を取得して選択状態にする
+        getOrgMembers(selectedOrg.id)
+          .then((members) => {
+            const memberInfos = mapMembersToMemberInfo(members);
+            const hasDisplayOrder = memberInfos.some((m: any) => m.displayOrder !== null && m.displayOrder !== undefined);
+            const sortedMembers = hasDisplayOrder 
+              ? memberInfos
+              : sortMembersByPosition(memberInfos, selectedOrg.name);
+            
+            setSelectedNodeMembers(sortedMembers);
+            setSelectedNode({
+              ...selectedOrg,
+              members: sortedMembers.map(m => {
+                if ('id' in m) {
+                  const { id, ...memberWithoutId } = m as any;
+                  return memberWithoutId;
+                }
+                return m;
+              }),
+            });
+          })
+          .catch((error) => {
+            console.error('組織のメンバー取得に失敗しました:', error);
+            setSelectedNode(selectedOrg);
+            setSelectedNodeMembers([]);
+          });
+      } else if (selectedOrg) {
+        // 組織が見つかったがIDがない場合
+        setSelectedNode(selectedOrg);
+        setSelectedNodeMembers([]);
+      }
+    } else if (!selectedRootOrgId) {
+      // フィルターがクリアされた場合は選択をクリアしない（ノードクリック時の選択を維持するため）
+      // setSelectedNode(null);
+      // setSelectedNodeMembers([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRootOrgId]); // orgDataを依存配列から削除して、selectedRootOrgIdが変更されたときのみ実行
+
 
   if (loading) {
     return (
@@ -116,50 +163,6 @@ export default function OrganizationPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <h2 style={{ marginBottom: 0 }}>組織</h2>
-              <button
-                onClick={() => setShowCompanyDisplay(!showCompanyDisplay)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid #BAE6FD',
-                  backgroundColor: showCompanyDisplay ? '#E0F2FE' : '#fff',
-                  color: '#0369A1',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  whiteSpace: 'nowrap',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#E0F2FE';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = showCompanyDisplay ? '#E0F2FE' : '#fff';
-                }}
-              >
-                事業会社表示
-              </button>
-              <button
-                onClick={() => setShowPersonDisplay(!showPersonDisplay)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid #BAE6FD',
-                  backgroundColor: showPersonDisplay ? '#E0F2FE' : '#fff',
-                  color: '#0369A1',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  whiteSpace: 'nowrap',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#E0F2FE';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = showPersonDisplay ? '#E0F2FE' : '#fff';
-                }}
-              >
-                個人表示
-              </button>
             </div>
             <ViewModeSelector viewMode={viewMode} onViewModeChange={setViewMode} />
           </div>
@@ -256,7 +259,6 @@ export default function OrganizationPage() {
               setExpandedMembers={setExpandedMembers}
               onEditClick={() => setShowEditModal(true)}
               onNavigateToDetail={() => handleNavigateToDetail(selectedNode)}
-              showCompanyDisplay={showCompanyDisplay}
             />
           </>
         ) : viewMode === 'bubble' ? (
@@ -279,7 +281,6 @@ export default function OrganizationPage() {
               setExpandedMembers={setExpandedMembers}
               onEditClick={() => setShowEditModal(true)}
               onNavigateToDetail={() => handleNavigateToDetail(selectedNode)}
-              showCompanyDisplay={showCompanyDisplay}
             />
           </>
         ) : (
@@ -522,7 +523,11 @@ export default function OrganizationPage() {
                   // メンバーを再取得
                   const membersData = await getOrgMembers(selectedNode.id);
                   const memberInfos = mapMembersToMemberInfo(membersData);
-                  const sortedMembers = sortMembersByPosition(memberInfos, foundOrg.name);
+                  // displayOrderでソートされている場合はその順序を保持
+                  const hasDisplayOrder = memberInfos.some((m: any) => m.displayOrder !== null && m.displayOrder !== undefined);
+                  const sortedMembers = hasDisplayOrder 
+                    ? memberInfos // displayOrderで既にソートされているのでそのまま使用
+                    : sortMembersByPosition(memberInfos, foundOrg.name); // displayOrderがない場合のみ役職順にソート
                   
                   // ID付きメンバー情報を保存（編集モーダル用）
                   setSelectedNodeMembers(sortedMembers);

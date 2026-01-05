@@ -41,6 +41,7 @@ export function CategoryBizDevPhaseSnapshotTab({}: CategoryBizDevPhaseSnapshotTa
   const [error, setError] = useState<string | null>(null);
   const [selectedView, setSelectedView] = useState<'comparison' | 'timeline'>('timeline');
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [favoriteFilter, setFavoriteFilter] = useState<'all' | 'favorite'>('all');
 
   // データ読み込み
   useEffect(() => {
@@ -71,10 +72,18 @@ export function CategoryBizDevPhaseSnapshotTab({}: CategoryBizDevPhaseSnapshotTa
     loadData();
   }, []);
 
+  // お気に入りフィルターを適用したスタートアップ
+  const filteredStartupsForCounts = useMemo(() => {
+    if (favoriteFilter === 'favorite') {
+      return startups.filter(s => s.isFavorite === true);
+    }
+    return startups;
+  }, [startups, favoriteFilter]);
+
   // 現在の数値を計算
   const currentCounts = useMemo(() => {
-    return calculateCurrentCounts(startups, categories, bizDevPhases);
-  }, [startups, categories, bizDevPhases]);
+    return calculateCurrentCounts(filteredStartupsForCounts, categories, bizDevPhases);
+  }, [filteredStartupsForCounts, categories, bizDevPhases]);
 
   // スナップショットを保存
   const handleSaveSnapshot = useCallback(async () => {
@@ -224,6 +233,7 @@ export function CategoryBizDevPhaseSnapshotTab({}: CategoryBizDevPhaseSnapshotTa
           categories={categories}
           bizDevPhases={bizDevPhases}
           snapshots={snapshots}
+          startups={filteredStartupsForCounts}
           onSnapshotChange={async () => {
             // スナップショットリストを再読み込み
             const updatedSnapshots = await getAllCategoryBizDevPhaseSnapshots();
@@ -232,6 +242,55 @@ export function CategoryBizDevPhaseSnapshotTab({}: CategoryBizDevPhaseSnapshotTa
         />
       )}
 
+      {/* お気に入りフィルター */}
+      <div style={{
+        marginBottom: '24px',
+        display: 'flex',
+        gap: '12px',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}>
+        <button
+          onClick={() => setFavoriteFilter('all')}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: favoriteFilter === 'all' ? '#3B82F6' : '#E5E7EB',
+            color: favoriteFilter === 'all' ? 'white' : '#374151',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '13px',
+            fontWeight: '500',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          すべて
+        </button>
+        <button
+          onClick={() => setFavoriteFilter('favorite')}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: favoriteFilter === 'favorite' ? '#F59E0B' : '#E5E7EB',
+            color: favoriteFilter === 'favorite' ? 'white' : '#374151',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '13px',
+            fontWeight: '500',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill={favoriteFilter === 'favorite' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+          お気に入りのみ
+        </button>
+      </div>
+
       {/* 年間推移ビュー */}
       {selectedView === 'timeline' && (
         <TimelineView
@@ -239,7 +298,7 @@ export function CategoryBizDevPhaseSnapshotTab({}: CategoryBizDevPhaseSnapshotTa
           currentCounts={currentCounts}
           categories={categories}
           bizDevPhases={bizDevPhases}
-          startups={startups}
+          startups={filteredStartupsForCounts}
         />
       )}
     </div>
@@ -253,10 +312,11 @@ interface ComparisonViewProps {
   categories: Category[];
   bizDevPhases: BizDevPhase[];
   snapshots: CategoryBizDevPhaseSnapshot[];
+  startups: Startup[];
   onSnapshotChange: () => Promise<void>;
 }
 
-function ComparisonView({ currentCounts, lastMonthSnapshot, categories, bizDevPhases, snapshots, onSnapshotChange }: ComparisonViewProps) {
+function ComparisonView({ currentCounts, lastMonthSnapshot, categories, bizDevPhases, snapshots, startups, onSnapshotChange }: ComparisonViewProps) {
   const [categoryMode, setCategoryMode] = useState<'all' | 'parent' | 'sub'>('parent');
   const [selectedSnapshot, setSelectedSnapshot] = useState<CategoryBizDevPhaseSnapshot | null>(lastMonthSnapshot);
   const [showSnapshotManagement, setShowSnapshotManagement] = useState(false);
@@ -659,6 +719,7 @@ interface TimelineViewProps {
 }
 
 function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhases, startups }: TimelineViewProps) {
+  // お気に入りフィルターは親コンポーネントで適用済み
   const router = useRouter();
   const [displayMode, setDisplayMode] = useState<'table' | 'chart'>('table');
   const [categoryMode, setCategoryMode] = useState<'all' | 'parent' | 'sub'>('parent');
@@ -1243,7 +1304,7 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
         display: 'grid',
         gridTemplateColumns: typeof window !== 'undefined' && window.innerWidth < 768 
           ? '1fr' 
-          : 'repeat(3, 1fr)',
+          : 'repeat(4, 1fr)',
         gap: typeof window !== 'undefined' && window.innerWidth < 768 ? '16px' : '20px',
         marginBottom: '32px',
       }}>
@@ -1377,7 +1438,7 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
           </div>
         </div>
 
-        {/* スタートアップ件数 */}
+        {/* 全企業数 */}
         <div style={{
           padding: '24px',
           backgroundColor: '#FFFFFF',
@@ -1417,7 +1478,7 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
             position: 'relative',
             zIndex: 1,
           }}>
-            スタートアップ件数
+            全企業数
           </div>
           <div style={{
             fontSize: '40px',
@@ -1438,7 +1499,72 @@ function TimelineView({ monthlySnapshots, currentCounts, categories, bizDevPhase
             position: 'relative',
             zIndex: 1,
           }}>
-            件のスタートアップ
+            件の企業
+          </div>
+        </div>
+
+        {/* お気に入り企業数 */}
+        <div style={{
+          padding: '24px',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+          transition: 'all 0.2s ease',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.08)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.04)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+        >
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '60px',
+            height: '60px',
+            background: 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
+            borderRadius: '0 12px 0 60px',
+            opacity: 0.5,
+          }} />
+          <div style={{
+            fontSize: '13px',
+            color: '#6B7280',
+            marginBottom: '12px',
+            fontWeight: '500',
+            letterSpacing: '0.02em',
+            textTransform: 'uppercase',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            お気に入り企業数
+          </div>
+          <div style={{
+            fontSize: '40px',
+            fontWeight: '700',
+            color: '#1A1A1A',
+            lineHeight: '1',
+            marginBottom: '4px',
+            position: 'relative',
+            zIndex: 1,
+            fontFamily: 'var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif',
+          }}>
+            {startups.filter(s => s.isFavorite === true).length}
+          </div>
+          <div style={{
+            fontSize: '13px',
+            color: '#9CA3AF',
+            fontWeight: '400',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            件の企業
           </div>
         </div>
       </div>

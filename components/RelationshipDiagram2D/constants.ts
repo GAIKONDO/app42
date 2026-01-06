@@ -37,6 +37,12 @@ export const DESIGN = {
       text: '#FFFFFF',
       hover: '#F472B6',
     },
+    bizdevphase: {
+      fill: '#06B6D4',
+      stroke: '#0891B2',
+      text: '#FFFFFF',
+      hover: '#22D3EE',
+    },
     connection: {
       main: '#666666',      // より濃いグレー（#C4C4C4 → #666666）
       branch: '#888888',    // より濃いグレー（#E0E0E0 → #888888）
@@ -71,6 +77,10 @@ export const DESIGN = {
       fontSize: '14px',
       fontWeight: '500',
     },
+    bizdevphase: {
+      fontSize: '14px',
+      fontWeight: '600',
+    },
   },
   spacing: {
     nodePadding: {
@@ -80,6 +90,7 @@ export const DESIGN = {
       topic: { x: 12, y: 6 },
       category: { x: 16, y: 8 },
       startup: { x: 16, y: 8 },
+      bizdevphase: { x: 16, y: 8 },
     },
     radius: {
       theme: 6,
@@ -88,6 +99,7 @@ export const DESIGN = {
       topic: 4,
       category: 6,
       startup: 6,
+      bizdevphase: 6,
     },
   },
   stroke: {

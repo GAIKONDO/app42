@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { RelationshipNode, RelationshipLink } from '@/components/RelationshipDiagram2D';
-import type { Theme, FocusInitiative, TopicInfo, Startup } from '@/lib/orgApi';
+import type { Theme, FocusInitiative, TopicInfo, Startup, BizDevPhase } from '@/lib/orgApi';
 import type { OrgNodeData } from '@/lib/orgApi';
 import { devLog, devWarn } from '../utils/devLog';
 
@@ -13,7 +13,7 @@ export function useRelationshipDiagramData({
   startups,
   orgData,
   topics,
-  selectedTypeFilter,
+  bizDevPhases,
 }: {
   selectedThemeId: string | null;
   themes: Theme[];
@@ -21,12 +21,11 @@ export function useRelationshipDiagramData({
   startups: Startup[];
   orgData: OrgNodeData | null;
   topics: TopicInfo[];
-  selectedTypeFilter: 'all' | 'organization' | 'company' | 'person';
+  bizDevPhases: BizDevPhase[];
 }) {
   const { nodes, links } = useMemo(() => {
     devLog('🔍 [2D関係性図] useMemo実行:', {
       selectedThemeId,
-      selectedTypeFilter,
       hasOrgData: !!orgData,
       themesCount: themes.length,
       initiativesCount: initiatives.length,
@@ -52,26 +51,6 @@ export function useRelationshipDiagramData({
       devLog('🔍 [2D関係性図] 表示するテーマがありません');
       return { nodes: [], links: [] };
     }
-
-    const getOrgName = (orgId: string, orgTree: OrgNodeData | null): string => {
-      if (!orgTree) return orgId;
-      
-      const findOrg = (node: OrgNodeData): OrgNodeData | null => {
-        if (node.id === orgId) return node;
-        if (node.children) {
-          for (const child of node.children) {
-            const found = findOrg(child);
-            if (found) return found;
-          }
-        }
-        return null;
-      };
-
-      const found = findOrg(orgTree);
-      const orgName = found ? (found.name || found.title || orgId) : orgId;
-      
-      return orgName;
-    };
 
     themesToShow.forEach((theme) => {
       diagramNodes.push({
@@ -110,71 +89,7 @@ export function useRelationshipDiagramData({
         return false;
       });
 
-      const organizationIds = new Set<string>();
-      relatedInitiatives.forEach((init) => {
-        if (init.organizationId) {
-          organizationIds.add(init.organizationId);
-        }
-        if (Array.isArray((init as any).relatedOrganizations)) {
-          (init as any).relatedOrganizations.forEach((orgId: string) => {
-            if (orgId) {
-              organizationIds.add(orgId);
-            }
-          });
-        }
-      });
-      
-      // スタートアップの組織IDも追加
-      relatedStartups.forEach((startup) => {
-        if (startup.organizationId) {
-          organizationIds.add(startup.organizationId);
-        }
-        if (startup.companyId) {
-          organizationIds.add(startup.companyId);
-        }
-        if (Array.isArray(startup.relatedOrganizations)) {
-          startup.relatedOrganizations.forEach((orgId: string) => {
-            if (orgId) {
-              organizationIds.add(orgId);
-            }
-          });
-        }
-      });
-
-      organizationIds.forEach((orgId) => {
-        const findOrg = (node: OrgNodeData, targetId: string): OrgNodeData | null => {
-          if (node.id === targetId) return node;
-          if (node.children) {
-            for (const child of node.children) {
-              const found = findOrg(child, targetId);
-              if (found) return found;
-            }
-          }
-          return null;
-        };
-        const actualOrg = orgData ? findOrg(orgData, orgId) : null;
-        const orgType = actualOrg ? ((actualOrg as any).type || 'organization') : 'organization';
-        
-        if (selectedTypeFilter !== 'all' && orgType !== selectedTypeFilter) {
-          return;
-        }
-        
-        const orgNodeId = `${theme.id}_${orgId}`;
-        const orgName = getOrgName(orgId, orgData);
-        
-        diagramNodes.push({
-          id: orgNodeId,
-          label: orgName,
-          type: orgType === 'company' ? 'company' : 'organization',
-          data: { id: orgId, name: orgName, originalId: orgId, themeId: theme.id, type: orgType },
-        });
-
-        diagramLinks.push({
-          source: theme.id,
-          target: orgNodeId,
-          type: 'main',
-        });
-      });
+      // 組織ノードは作成しない（テーマから直接スタートアップへ接続）
 
       relatedInitiatives.forEach((initiative) => {
         const initiativeNodeId = `${theme.id}_${initiative.id}`;
@@ -186,17 +101,7 @@ export function useRelationshipDiagramData({
           data: { ...initiative, originalId: initiative.id, themeId: theme.id },
         });
 
-        if (initiative.organizationId) {
-          const orgNodeId = `${theme.id}_${initiative.organizationId}`;
-          const orgNodeExists = diagramNodes.find(n => n.id === orgNodeId);
-          if (orgNodeExists) {
-            diagramLinks.push({
-              source: orgNodeId,
-              target: initiativeNodeId,
-              type: 'branch',
-            });
-          }
-        }
+        // 組織ノードは表示しないため、注力施策から組織へのリンクも作成しない
         
         let parsedTopicIds: string[] = [];
         if (initiative.topicIds) {
@@ -277,47 +182,70 @@ export function useRelationshipDiagramData({
         }
       });
 
-      // スタートアップノードを追加
+      // スタートアップをBiz-Devフェーズでグループ化
+      const startupsByBizDevPhase = new Map<string, Startup[]>();
       relatedStartups.forEach((startup) => {
-        const startupNodeId = `${theme.id}_${startup.id}`;
+        const phaseId = startup.bizDevPhase || 'no-phase';
+        if (!startupsByBizDevPhase.has(phaseId)) {
+          startupsByBizDevPhase.set(phaseId, []);
+        }
+        startupsByBizDevPhase.get(phaseId)!.push(startup);
+      });
+
+      // Biz-Devフェーズノードを作成し、テーマからBiz-Devフェーズへのリンクを作成
+      startupsByBizDevPhase.forEach((phaseStartups, phaseId) => {
+        // Biz-Devフェーズ情報を取得
+        const bizDevPhase = phaseId !== 'no-phase' 
+          ? bizDevPhases.find(p => p.id === phaseId)
+          : null;
         
-        diagramNodes.push({
-          id: startupNodeId,
-          label: startup.title,
-          type: 'startup',
-          data: { ...startup, originalId: startup.id, themeId: theme.id },
-        });
+        const phaseNodeId = `${theme.id}_bizdev_${phaseId}`;
+        const phaseLabel = bizDevPhase ? bizDevPhase.title : 'Biz-Devフェーズ未設定';
+        
+        // Biz-Devフェーズノードを追加（重複チェック）
+        if (!diagramNodes.find(n => n.id === phaseNodeId)) {
+          diagramNodes.push({
+            id: phaseNodeId,
+            label: phaseLabel,
+            type: 'bizdevphase',
+            data: { 
+              id: phaseId, 
+              title: phaseLabel, 
+              originalId: phaseId, 
+              themeId: theme.id,
+              bizDevPhase: bizDevPhase || null,
+            },
+          });
 
-        // テーマからスタートアップへのリンク
-        diagramLinks.push({
-          source: theme.id,
-          target: startupNodeId,
-          type: 'startup',
-        });
+          // テーマからBiz-Devフェーズへのリンク
+          diagramLinks.push({
+            source: theme.id,
+            target: phaseNodeId,
+            type: 'bizdevphase',
+          });
+        }
 
-        // スタートアップから組織へのリンク
-        if (startup.organizationId) {
-          const orgNodeId = `${theme.id}_${startup.organizationId}`;
-          const orgNodeExists = diagramNodes.find(n => n.id === orgNodeId);
-          if (orgNodeExists) {
-            diagramLinks.push({
-              source: orgNodeId,
-              target: startupNodeId,
-              type: 'branch',
+        // スタートアップノードを追加し、Biz-Devフェーズからスタートアップへのリンクを作成
+        phaseStartups.forEach((startup) => {
+          const startupNodeId = `${theme.id}_${startup.id}`;
+          
+          // スタートアップノードを追加（重複チェック）
+          if (!diagramNodes.find(n => n.id === startupNodeId)) {
+            diagramNodes.push({
+              id: startupNodeId,
+              label: startup.title,
+              type: 'startup',
+              data: { ...startup, originalId: startup.id, themeId: theme.id },
             });
           }
-        }
-        if (startup.companyId) {
-          const companyNodeId = `${theme.id}_${startup.companyId}`;
-          const companyNodeExists = diagramNodes.find(n => n.id === companyNodeId);
-          if (companyNodeExists) {
-            diagramLinks.push({
-              source: companyNodeId,
-              target: startupNodeId,
-              type: 'branch',
-            });
-          }
-        }
+
+          // Biz-Devフェーズからスタートアップへのリンク
+          diagramLinks.push({
+            source: phaseNodeId,
+            target: startupNodeId,
+            type: 'startup',
+          });
+        });
       });
     });
 
@@ -361,7 +289,7 @@ export function useRelationshipDiagramData({
     });
 
     return { nodes: diagramNodes, links: validLinks };
-  }, [selectedThemeId, themes, initiatives, startups, orgData, topics, selectedTypeFilter]);
+  }, [selectedThemeId, themes, initiatives, startups, orgData, topics, bizDevPhases]);
 
   return { nodes, links };
 }

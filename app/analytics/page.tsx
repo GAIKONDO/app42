@@ -14,7 +14,6 @@ export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('category-management');
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'diagram' | 'bubble' | 'bar'>('diagram');
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'organization' | 'company' | 'person'>('all');
 
   const {
     themes,
@@ -102,7 +101,6 @@ export default function AnalyticsPage() {
           <RelationshipDiagramTab
             selectedThemeId={selectedThemeId}
             viewMode={viewMode}
-            selectedTypeFilter={selectedTypeFilter}
             themes={themes}
             setThemes={setThemes}
             initiatives={initiatives}
@@ -110,11 +108,11 @@ export default function AnalyticsPage() {
             orgData={orgData}
             topics={topics}
             setTopics={setTopics}
+            bizDevPhases={bizDevPhases}
             refreshThemes={refreshThemes}
             refreshTopics={refreshTopics}
             onSelectedThemeIdChange={setSelectedThemeId}
             onViewModeChange={setViewMode}
-            onTypeFilterChange={setSelectedTypeFilter}
           />
         )}
 

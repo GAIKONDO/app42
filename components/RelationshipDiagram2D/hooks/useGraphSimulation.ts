@@ -234,7 +234,9 @@ export function useGraphSimulation({
           // リンクタイプ別の距離設定（ノードサイズに応じて調整）
           let baseDistance = 150;
           if (link.type === 'main') baseDistance = 200; // テーマ-組織間（大-中）
+          else if (link.type === 'bizdevphase') baseDistance = 180; // テーマ-Biz-Devフェーズ間（大-中）
           else if (link.type === 'branch') baseDistance = 120; // 組織-注力施策間（中-小）
+          else if (link.type === 'startup') baseDistance = 100; // Biz-Devフェーズ-スタートアップ間（中-小）
           else if (link.type === 'topic') baseDistance = 80; // 注力施策-個別トピック間（小-最小）
           return baseDistance * linkDistanceMultiplier;
         })
@@ -246,6 +248,7 @@ export function useGraphSimulation({
         if (d.data?.isParent) baseStrength = -1000; // 親：非常に強い反発力
         else if (d.type === 'theme') baseStrength = -600; // 大：強い反発力
         else if (d.type === 'organization') baseStrength = -400; // 中：中程度の反発力
+        else if (d.type === 'bizdevphase') baseStrength = -300; // Biz-Devフェーズ：中程度の反発力
         else if (d.type === 'initiative') baseStrength = -250; // 小：弱い反発力
         else if (d.type === 'topic') baseStrength = -150; // 最小：弱い反発力
         return baseStrength * chargeStrengthMultiplier;
@@ -277,24 +280,31 @@ export function useGraphSimulation({
       .enter()
       .append('line')
       .attr('stroke', (d) => {
-        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
-        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
-        const isHovered = hoveredNodeId !== null && (
-          sourceId === hoveredNodeId || targetId === hoveredNodeId
-        );
-        return isHovered ? DESIGN.colors.connection.hover : (d.type === 'main' ? DESIGN.colors.connection.main : DESIGN.colors.connection.branch);
+        return d.type === 'main' ? DESIGN.colors.connection.main : DESIGN.colors.connection.branch;
       })
       .attr('stroke-width', (d) => d.type === 'main' ? DESIGN.stroke.main : DESIGN.stroke.branch)
       .attr('opacity', (d) => {
-        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
-        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
-        const isHovered = hoveredNodeId !== null && (
-          sourceId === hoveredNodeId || targetId === hoveredNodeId
-        );
-        return isHovered ? 1.0 : (d.type === 'main' ? 0.7 : 0.6); // 不透明度を上げて見やすく（0.5→0.7, 0.4→0.6）
+        return d.type === 'main' ? 0.7 : 0.6; // 不透明度を上げて見やすく（0.5→0.7, 0.4→0.6）
       })
       .attr('stroke-dasharray', (d) => d.type === 'branch' ? '3,3' : 'none')
+      .attr('data-source-id', (d) => typeof d.source === 'object' ? d.source.id : d.source)
+      .attr('data-target-id', (d) => typeof d.target === 'object' ? d.target.id : d.target)
       .lower();
+    
+    // リンクのホバー状態を更新する関数
+    const updateLinkHoverState = (nodeId: string | null) => {
+      linkElements.each(function(d: any) {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const isHovered = nodeId !== null && (
+          sourceId === nodeId || targetId === nodeId
+        );
+        const linkElement = select(this);
+        linkElement
+          .attr('stroke', isHovered ? DESIGN.colors.connection.hover : (d.type === 'main' ? DESIGN.colors.connection.main : DESIGN.colors.connection.branch))
+          .attr('opacity', isHovered ? 1.0 : (d.type === 'main' ? 0.7 : 0.6));
+      });
+    };
 
     // ノードグループを作成
     const nodeGroups = g
@@ -331,6 +341,7 @@ export function useGraphSimulation({
         if (d.type === 'category') return DESIGN.colors.category.fill;
         if (d.type === 'startup') return DESIGN.colors.startup.fill;
         if (d.type === 'initiative') return DESIGN.colors.initiative.fill;
+        if (d.type === 'bizdevphase') return DESIGN.colors.bizdevphase.fill;
         if (d.type === 'topic') return DESIGN.colors.topic.fill;
         return '#CCCCCC';
       })
@@ -342,6 +353,7 @@ export function useGraphSimulation({
         if (d.type === 'category') return DESIGN.colors.category.stroke;
         if (d.type === 'startup') return DESIGN.colors.startup.stroke;
         if (d.type === 'initiative') return DESIGN.colors.initiative.stroke;
+        if (d.type === 'bizdevphase') return DESIGN.colors.bizdevphase.stroke;
         if (d.type === 'topic') return DESIGN.colors.topic.stroke;
         return '#999999';
       })
@@ -362,6 +374,7 @@ export function useGraphSimulation({
         if (d.type === 'category') return DESIGN.colors.category.text;
         if (d.type === 'startup') return DESIGN.colors.startup.text;
         if (d.type === 'initiative') return DESIGN.colors.initiative.text;
+        if (d.type === 'bizdevphase') return DESIGN.colors.bizdevphase.text;
         if (d.type === 'topic') return DESIGN.colors.topic.text;
         return '#000000';
       })
@@ -371,6 +384,7 @@ export function useGraphSimulation({
         if (d.type === 'category') return DESIGN.typography.category.fontSize;
         if (d.type === 'startup') return DESIGN.typography.startup.fontSize;
         if (d.type === 'initiative') return DESIGN.typography.initiative.fontSize;
+        if (d.type === 'bizdevphase') return DESIGN.typography.bizdevphase.fontSize;
         if (d.type === 'topic') return DESIGN.typography.topic.fontSize;
         return '14px';
       })
@@ -380,6 +394,7 @@ export function useGraphSimulation({
         if (d.type === 'category') return DESIGN.typography.category.fontWeight;
         if (d.type === 'startup') return DESIGN.typography.startup.fontWeight;
         if (d.type === 'initiative') return DESIGN.typography.initiative.fontWeight;
+        if (d.type === 'bizdevphase') return DESIGN.typography.bizdevphase.fontWeight;
         if (d.type === 'topic') return DESIGN.typography.topic.fontWeight;
         return '500';
       })
@@ -394,6 +409,8 @@ export function useGraphSimulation({
           ? parseFloat(DESIGN.typography.organization.fontSize)
           : d.type === 'initiative'
           ? parseFloat(DESIGN.typography.initiative.fontSize)
+          : d.type === 'bizdevphase'
+          ? parseFloat(DESIGN.typography.bizdevphase.fontSize)
           : d.type === 'topic'
           ? parseFloat(DESIGN.typography.topic.fontSize)
           : 14;
@@ -531,9 +548,12 @@ export function useGraphSimulation({
     // ホバーイベント
     nodeGroups
       .on('mouseenter', (event, d) => {
-        // ホバー状態を更新（シミュレーションの再計算を防ぐため、refも更新）
+        // ホバー状態を更新（refのみ更新してシミュレーションの再計算を防ぐ）
         hoveredNodeIdRef.current = d.id;
+        // 状態も更新（他のコンポーネントで使用される可能性があるため）
         setHoveredNodeId(d.id);
+        // リンクのホバー状態を更新
+        updateLinkHoverState(d.id);
         // ホバー時に視覚的なスケールと色を変更（シミュレーションには影響しない）
         const nodeGroup = select(event.currentTarget);
         const circle = nodeGroup.select('circle:not(.shadow-layer)');
@@ -546,6 +566,7 @@ export function useGraphSimulation({
         else if (d.type === 'category') circle.attr('fill', DESIGN.colors.category.hover);
         else if (d.type === 'startup') circle.attr('fill', DESIGN.colors.startup.hover);
         else if (d.type === 'initiative') circle.attr('fill', DESIGN.colors.initiative.hover);
+        else if (d.type === 'bizdevphase') circle.attr('fill', DESIGN.colors.bizdevphase.hover);
         else if (d.type === 'topic') circle.attr('fill', DESIGN.colors.topic.hover);
         nodeGroup
           .select('.shadow-layer')
@@ -555,6 +576,8 @@ export function useGraphSimulation({
         // ホバー状態をクリア
         hoveredNodeIdRef.current = null;
         setHoveredNodeId(null);
+        // リンクのホバー状態をクリア
+        updateLinkHoverState(null);
         // ホバー解除時にスケールと色を戻す
         const nodeGroup = select(event.currentTarget);
         const circle = nodeGroup.select('circle:not(.shadow-layer)');
@@ -567,6 +590,7 @@ export function useGraphSimulation({
         else if (d.type === 'category') circle.attr('fill', DESIGN.colors.category.fill);
         else if (d.type === 'startup') circle.attr('fill', DESIGN.colors.startup.fill);
         else if (d.type === 'initiative') circle.attr('fill', DESIGN.colors.initiative.fill);
+        else if (d.type === 'bizdevphase') circle.attr('fill', DESIGN.colors.bizdevphase.fill);
         else if (d.type === 'topic') circle.attr('fill', DESIGN.colors.topic.fill);
         nodeGroup
           .select('.shadow-layer')
@@ -643,7 +667,7 @@ export function useGraphSimulation({
         clickTimerRef.current = null;
       }
     };
-  }, [filteredNodes, filteredLinks, width, height, onNodeClick, selectedThemeId, maxNodes, hoveredNodeId, setHoveredNodeId, setSelectedTopic, router]);
+  }, [filteredNodes, filteredLinks, width, height, onNodeClick, selectedThemeId, maxNodes, setHoveredNodeId, setSelectedTopic, router]);
 
   return {
     simulationRef,

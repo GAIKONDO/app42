@@ -74,47 +74,23 @@ export function useHierarchyData(
       };
     };
 
-    // テーマ階層を構築（既存のロジック）
+    // テーマ階層を構築（テーマ→Biz-Devフェーズ→スタートアップ）
     const buildThemeHierarchy = (node: RelationshipNode, depth: number): any => {
       const children = childrenMap.get(node.id) || [];
       
       // 子ノードをタイプごとに分類
-      const orgChildren = children.filter(n => n.type === 'organization' || n.type === 'company');
+      const bizDevPhaseChildren = children.filter(n => n.type === 'bizdevphase');
+      const startupChildren = children.filter(n => n.type === 'startup'); // テーマから直接リンクされているスタートアップ（フォールバック用）
       const initiativeChildren = children.filter(n => n.type === 'initiative');
-      const startupChildren = children.filter(n => n.type === 'startup'); // テーマから直接リンクされているスタートアップ
       const topicChildren = children.filter(n => n.type === 'topic');
       
-      // 組織/事業会社ノードの子として注力施策とスタートアップを配置
-      const orgNodesWithInitiatives = orgChildren.map(orgNode => {
-        const orgChildren = childrenMap.get(orgNode.id) || [];
-        const initiativeChildren = orgChildren.filter(n => n.type === 'initiative');
-        const startupChildren = orgChildren.filter(n => n.type === 'startup'); // 組織の子としてリンクされているスタートアップ
-        
-        // 各注力施策の子としてトピックを配置
-        const initiativesWithTopics = initiativeChildren.map(initNode => {
-          const initChildren = childrenMap.get(initNode.id) || [];
-          const topicChildren = showTopics ? initChildren.filter(n => n.type === 'topic') : [];
-          
-          return {
-            name: initNode.label,
-            id: initNode.id,
-            value: 1, // 注力施策の基本値
-            depth: depth + 2,
-            nodeType: initNode.type,
-            originalData: initNode,
-            children: topicChildren.length > 0 ? topicChildren.map(topicNode => ({
-              name: topicNode.label,
-              id: topicNode.id,
-              value: 1, // トピックの基本値
-              depth: depth + 3,
-              nodeType: topicNode.type,
-              originalData: topicNode,
-            })) : undefined,
-          };
-        });
+      // Biz-Devフェーズノードの子としてスタートアップを配置
+      const bizDevPhaseNodesWithStartups = bizDevPhaseChildren.map(bizDevPhaseNode => {
+        const phaseChildren = childrenMap.get(bizDevPhaseNode.id) || [];
+        const phaseStartupChildren = phaseChildren.filter(n => n.type === 'startup');
         
         // スタートアップノードを構築
-        const startups = startupChildren.map(startupNode => ({
+        const startups = phaseStartupChildren.map(startupNode => ({
           name: startupNode.label,
           id: startupNode.id,
           value: 1,
@@ -123,21 +99,18 @@ export function useHierarchyData(
           originalData: startupNode,
         }));
         
-        // 注力施策とスタートアップを結合
-        const allChildren = [...initiativesWithTopics, ...startups];
-        
         return {
-          name: orgNode.label,
-          id: orgNode.id,
-          value: 1, // 組織の基本値
+          name: bizDevPhaseNode.label,
+          id: bizDevPhaseNode.id,
+          value: 1, // Biz-Devフェーズの基本値
           depth: depth + 1,
-          nodeType: orgNode.type,
-          originalData: orgNode,
-          children: allChildren.length > 0 ? allChildren : undefined,
+          nodeType: bizDevPhaseNode.type,
+          originalData: bizDevPhaseNode,
+          children: startups.length > 0 ? startups : undefined,
         };
       });
       
-      // テーマから直接リンクされているスタートアップノードを構築
+      // テーマから直接リンクされているスタートアップノードを構築（フォールバック用、通常はBiz-Devフェーズ経由）
       const directStartups = startupChildren.map(startupNode => ({
         name: startupNode.label,
         id: startupNode.id,
@@ -147,8 +120,31 @@ export function useHierarchyData(
         originalData: startupNode,
       }));
       
-      // 組織ノードと直接リンクされているスタートアップノードを結合
-      const allThemeChildren = [...orgNodesWithInitiatives, ...directStartups];
+      // 注力施策とトピックも含める（既存の機能を維持）
+      const initiativesWithTopics = initiativeChildren.map(initNode => {
+        const initChildren = childrenMap.get(initNode.id) || [];
+        const topicChildren = showTopics ? initChildren.filter(n => n.type === 'topic') : [];
+        
+        return {
+          name: initNode.label,
+          id: initNode.id,
+          value: 1,
+          depth: depth + 1,
+          nodeType: initNode.type,
+          originalData: initNode,
+          children: topicChildren.length > 0 ? topicChildren.map(topicNode => ({
+            name: topicNode.label,
+            id: topicNode.id,
+            value: 1,
+            depth: depth + 2,
+            nodeType: topicNode.type,
+            originalData: topicNode,
+          })) : undefined,
+        };
+      });
+      
+      // Biz-Devフェーズ、直接スタートアップ、注力施策を結合
+      const allThemeChildren = [...bizDevPhaseNodesWithStartups, ...directStartups, ...initiativesWithTopics];
       
       return {
         name: node.label,

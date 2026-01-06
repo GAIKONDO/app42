@@ -12,7 +12,7 @@ interface AnalyticsTabBarProps {
 export function AnalyticsTabBar({ activeTab, onTabChange }: AnalyticsTabBarProps) {
   const tabs = [
     { id: 'category-management' as const, label: 'カテゴリー管理' },
-    { id: 'relationship-diagram' as const, label: '関係性図' },
+    { id: 'relationship-diagram' as const, label: 'テーマ管理' },
     { id: 'tab4' as const, label: '機能4（準備中）' },
   ];
 

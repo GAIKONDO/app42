@@ -1,7 +1,7 @@
 export interface RelationshipNode {
   id: string;
   label: string;
-  type: 'theme' | 'organization' | 'initiative' | 'topic' | 'company' | 'category' | 'startup';
+  type: 'theme' | 'organization' | 'initiative' | 'topic' | 'company' | 'category' | 'startup' | 'bizdevphase';
   data?: any;
   x?: number;
   y?: number;
@@ -12,7 +12,7 @@ export interface RelationshipNode {
 export interface RelationshipLink {
   source: string | RelationshipNode;
   target: string | RelationshipNode;
-  type?: 'main' | 'branch' | 'topic';
+  type?: 'main' | 'branch' | 'topic' | 'bizdevphase' | 'startup';
 }
 
 export interface RelationshipDiagram2DProps {

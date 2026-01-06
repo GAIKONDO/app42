@@ -16,11 +16,12 @@ interface ComparisonAxis {
   id: string;
   label: string;
   isEditing?: boolean;
+  options?: string[]; // ターゲット層セクションの場合、バッジの選択肢
 }
 
 interface ComparisonMatrix {
   [startupId: string]: {
-    [axisId: string]: number; // 0-5の点数
+    [axisId: string]: number; // 0-5の点数（一般・機能セクション用）
   };
 }
 
@@ -28,7 +29,11 @@ type ComparisonSectionType = 'general' | 'function' | 'target';
 
 interface ComparisonSection {
   axes: ComparisonAxis[];
-  matrix: ComparisonMatrix;
+  matrix: {
+    [startupId: string]: {
+      [axisId: string]: number | string[]; // 点数（0-5）またはバッジの配列
+    };
+  };
 }
 
 interface ComparisonSections {
@@ -64,6 +69,9 @@ export default function CompetitorComparisonTab({
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [deleteAllSection, setDeleteAllSection] = useState<ComparisonSectionType | null>(null);
   const [scoreSelectCell, setScoreSelectCell] = useState<{ section: ComparisonSectionType; startupId: string; axisId: string } | null>(null);
+  const [badgeSelectCell, setBadgeSelectCell] = useState<{ section: ComparisonSectionType; startupId: string; axisId: string } | null>(null);
+  const [editingAxisOptions, setEditingAxisOptions] = useState<{ section: ComparisonSectionType; axisId: string } | null>(null);
+  const [newOptionInput, setNewOptionInput] = useState<string>('');
 
   // マトリクスのbooleanを数値に変換（後方互換性）
   const convertMatrixToScores = (matrix: any): ComparisonMatrix => {
@@ -88,8 +96,8 @@ export default function CompetitorComparisonTab({
     if (prevStartupIdRef.current !== startup.id) {
       prevStartupIdRef.current = startup.id;
       
-      if (startup.competitorComparison) {
-        const saved = startup.competitorComparison;
+      if ((startup as any).competitorComparison) {
+        const saved = (startup as any).competitorComparison;
         console.log('📖 [CompetitorComparisonTab] 保存されたデータを読み込み:', {
           id: saved.id,
           axesCount: saved.axes?.length || 0,
@@ -103,6 +111,7 @@ export default function CompetitorComparisonTab({
         if ((saved as any).sections) {
           const sections = (saved as any).sections;
           // マトリクスのbooleanを数値に変換（後方互換性）
+          // ターゲット層セクションはバッジ（配列）なので変換しない
           const convertedSections: ComparisonSections = {
             general: {
               axes: sections.general?.axes || [],
@@ -114,9 +123,19 @@ export default function CompetitorComparisonTab({
             },
             target: {
               axes: sections.target?.axes || [],
-              matrix: convertMatrixToScores(sections.target?.matrix || {}),
+              // ターゲット層セクションのマトリクスはそのまま使用（バッジの配列）
+              matrix: sections.target?.matrix || {},
             },
           };
+          
+          // デバッグ: ターゲット層セクションのマトリクスを確認
+          console.log('📖 [CompetitorComparisonTab] ターゲット層セクションのマトリクス:', {
+            targetMatrix: convertedSections.target.matrix,
+            sampleCell: Object.keys(convertedSections.target.matrix).length > 0 
+              ? convertedSections.target.matrix[Object.keys(convertedSections.target.matrix)[0]]
+              : null,
+          });
+          
           setComparisonSections(convertedSections);
         } else {
           // 従来の構造をセクション構造に変換（一般セクションに配置）
@@ -129,9 +148,9 @@ export default function CompetitorComparisonTab({
             function: { axes: [], matrix: {} },
             target: { axes: [], matrix: {} },
           });
-          // 後方互換性のため従来の構造も保持
-          setComparisonAxes(saved.axes || []);
-          setComparisonMatrix(convertedMatrix);
+      // 後方互換性のため従来の構造も保持
+      setComparisonAxes(saved.axes || []);
+      setComparisonMatrix(convertedMatrix as any);
         }
       } else {
         // データがない場合は初期化
@@ -255,10 +274,10 @@ export default function CompetitorComparisonTab({
   // フィルタリングされたスタートアップから初期選択を設定
   useEffect(() => {
     // 保存されたデータがない場合のみ初期選択
-    if (!startup?.competitorComparison && filteredStartups.length > 0 && selectedStartups.length === 0) {
+    if (!(startup as any)?.competitorComparison && filteredStartups.length > 0 && selectedStartups.length === 0) {
       setSelectedStartups(filteredStartups.slice(0, Math.min(5, filteredStartups.length)).map(s => s.id));
     }
-  }, [filteredStartups, startup?.competitorComparison]);
+  }, [filteredStartups, (startup as any)?.competitorComparison]);
 
   // サブカテゴリーごとに専門的な比較軸をAI生成
   const generateFunctionAxesForSubCategory = async (subCategory: Category, startupInfo?: { title: string; description?: string }): Promise<ComparisonAxis[]> => {
@@ -380,18 +399,27 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
         }
       }
 
-      // 一般セクション：AIで生成
+      // 一般セクション：AIで生成（スタートアップ情報を活用）
       const generalSystemPrompt = `あなたはスタートアップの競合比較分析の専門家です。
-一般的な比較軸を考えてください。`;
+一般的な比較軸を考えてください。各比較軸は、スタートアップを比較する際に実際に使える、具体的で明確な名称にしてください。`;
 
-      const generalUserPrompt = `スタートアップの競合比較において、一般的に重要な比較軸を6個考えてください。
-以下のような観点を含めてください：
-- 技術優位性
-- 市場規模
-- 資金調達状況
-- 主要機能
-- 機能の独自性
-- 機能の完成度
+      const generalUserPrompt = `以下のスタートアップ情報を参考に、一般的に重要な比較軸を6個考えてください。
+
+${startup ? `【対象スタートアップ】
+${startup.title}
+${startup.description ? `説明: ${startup.description}` : ''}
+${startup.categoryIds && startup.categoryIds.length > 0 ? `\nカテゴリー: ${startup.categoryIds.map(id => {
+  const cat = categories.find(c => c.id === id);
+  return cat ? cat.title : '';
+}).filter(Boolean).join(', ')}` : ''}` : '【スタートアップ情報】\n（情報なし）'}
+
+一般的な比較軸として、以下のような観点を含めて考えてください：
+- 技術優位性（技術的な強みや独自性）
+- 市場規模（市場の大きさや成長性）
+- 資金調達状況（調達額、調達ラウンド、投資家など）
+- 主要機能（製品・サービスの主要な機能）
+- 機能の独自性（他社との差別化要因）
+- 機能の完成度（製品・サービスの完成度や品質）
 
 各比較軸は1行で、簡潔で明確な名称を付けてください。
 出力は以下の形式で、各行が1つの比較軸名になります:
@@ -400,37 +428,68 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
 比較軸3
 ...`;
 
-      const generalResponse = await callGPTAPI([
-        { role: 'system', content: generalSystemPrompt },
-        { role: 'user', content: generalUserPrompt }
-      ], model);
+      let generalAxes: ComparisonAxis[] = [];
+      let generalResponse = '';
+      
+      try {
+        generalResponse = await callGPTAPI([
+          { role: 'system', content: generalSystemPrompt },
+          { role: 'user', content: generalUserPrompt }
+        ], model);
 
-      const generalAxes: ComparisonAxis[] = [];
-      const generalLines = generalResponse.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      generalLines.forEach((line, index) => {
-        const cleanLabel = line
-          .replace(/^[0-9]+[\.\)、]\s*/, '')
-          .replace(/^[-•・]\s*/, '')
-          .replace(/^比較軸[0-9]+[:：]\s*/, '')
-          .trim();
-        if (cleanLabel.length > 0 && cleanLabel.length < 50) {
-          generalAxes.push({
-            id: `general_axis_${Date.now()}_${index}`,
-            label: cleanLabel,
+        const generalLines = generalResponse.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        generalLines.forEach((line, index) => {
+          const cleanLabel = line
+            .replace(/^[0-9]+[\.\)、]\s*/, '')
+            .replace(/^[-•・]\s*/, '')
+            .replace(/^比較軸[0-9]+[:：]\s*/, '')
+            .trim();
+          if (cleanLabel.length > 0 && cleanLabel.length < 50) {
+            generalAxes.push({
+              id: `general_axis_${Date.now()}_${index}`,
+              label: cleanLabel,
+            });
+          }
+        });
+      } catch (error) {
+        console.error('一般セクションのAI生成エラー:', error);
+      }
+
+      // パースに失敗した場合や軸が少ない場合は、再度AI APIを呼び出す
+      if (generalAxes.length < 3) {
+        try {
+          const retryPrompt = `前回の応答が適切に解析できませんでした。以下の形式で、スタートアップの一般的な比較軸を6個、1行に1つずつ出力してください：
+技術優位性
+市場規模
+資金調達状況
+主要機能
+機能の独自性
+機能の完成度
+
+${generalResponse ? `前回の応答: ${generalResponse.substring(0, 200)}` : ''}`;
+
+          const retryResponse = await callGPTAPI([
+            { role: 'system', content: generalSystemPrompt },
+            { role: 'user', content: retryPrompt }
+          ], model);
+
+          const retryLines = retryResponse.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+          retryLines.forEach((line, index) => {
+            const cleanLabel = line
+              .replace(/^[0-9]+[\.\)、]\s*/, '')
+              .replace(/^[-•・]\s*/, '')
+              .replace(/^比較軸[0-9]+[:：]\s*/, '')
+              .trim();
+            if (cleanLabel.length > 0 && cleanLabel.length < 50 && generalAxes.length < 6) {
+              generalAxes.push({
+                id: `general_axis_${Date.now()}_retry_${index}`,
+                label: cleanLabel,
+              });
+            }
           });
+        } catch (retryError) {
+          console.error('一般セクションの再試行エラー:', retryError);
         }
-      });
-
-      // パースに失敗した場合はデフォルト値を使用
-      if (generalAxes.length === 0) {
-        generalAxes.push(
-          { id: `general_axis_${Date.now()}_1`, label: '技術優位性' },
-          { id: `general_axis_${Date.now()}_2`, label: '市場規模' },
-          { id: `general_axis_${Date.now()}_3`, label: '資金調達状況' },
-          { id: `general_axis_${Date.now()}_4`, label: '主要機能' },
-          { id: `general_axis_${Date.now()}_5`, label: '機能の独自性' },
-          { id: `general_axis_${Date.now()}_6`, label: '機能の完成度' }
-        );
       }
 
       // 機能セクション：各サブカテゴリーごとにAIで専門的な比較軸を生成
@@ -456,26 +515,96 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
         });
       }
       
-      // サブカテゴリーがない場合はデフォルトの専門的な比較軸
+      // サブカテゴリーがない場合は、AIで一般的な機能比較軸を生成
       if (functionAxes.length === 0) {
-        functionAxes.push(
-          { id: `function_axis_${Date.now()}_1`, label: '技術的優位性' },
-          { id: `function_axis_${Date.now()}_2`, label: '差別化要因' },
-          { id: `function_axis_${Date.now()}_3`, label: '実用性・完成度' },
-          { id: `function_axis_${Date.now()}_4`, label: '拡張性・将来性' }
-        );
-      }
-      
-      // ターゲット層セクション：AIで生成
-      const targetSystemPrompt = `あなたはスタートアップの競合比較分析の専門家です。
-ターゲット層に関する比較軸を考えてください。`;
+        try {
+          const functionSystemPrompt = `あなたはスタートアップの競合比較分析の専門家です。
+機能に関する専門的な比較軸を考えてください。`;
 
-      const targetUserPrompt = `スタートアップの競合比較において、ターゲット層に関する重要な比較軸を3個考えてください。
+          const functionUserPrompt = `以下のスタートアップ情報を参考に、機能に関する専門的な比較軸を4-5個考えてください。
+
+${startup ? `【対象スタートアップ】
+${startup.title}
+${startup.description ? `説明: ${startup.description}` : ''}` : '【スタートアップ情報】\n（情報なし）'}
+
+機能に関する専門的な比較軸として、以下のような観点を含めて考えてください：
+- 技術的優位性
+- 差別化要因
+- 実用性・完成度
+- 拡張性・将来性
+- 統合性・連携機能
+
 各比較軸は1行で、簡潔で明確な名称を付けてください。
 出力は以下の形式で、各行が1つの比較軸名になります:
 比較軸1
 比較軸2
-比較軸3`;
+比較軸3
+...`;
+
+          const functionResponse = await callGPTAPI([
+            { role: 'system', content: functionSystemPrompt },
+            { role: 'user', content: functionUserPrompt }
+          ], model);
+
+          const functionLines = functionResponse.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+          functionLines.forEach((line, index) => {
+            const cleanLabel = line
+              .replace(/^[0-9]+[\.\)、]\s*/, '')
+              .replace(/^[-•・]\s*/, '')
+              .replace(/^比較軸[0-9]+[:：]\s*/, '')
+              .trim();
+            if (cleanLabel.length > 0 && cleanLabel.length < 50) {
+              functionAxes.push({
+                id: `function_axis_${Date.now()}_${index}`,
+                label: cleanLabel,
+              });
+            }
+          });
+        } catch (error) {
+          console.error('機能セクションのAI生成エラー:', error);
+        }
+      }
+      
+      // ターゲット層セクション：AIで生成（職種、業務内容、産業、企業規模などの観点を含む）
+      const targetSystemPrompt = `あなたはスタートアップの競合比較分析の専門家です。
+ターゲット層に関する比較軸と、その選択肢（バッジ）を考えてください。
+ターゲット層の比較軸には、以下のような観点を含めてください：
+- 職種（エンジニア、営業、マーケター、経営者など）
+- 業務内容（開発、営業、マーケティング、経営企画など）
+- 産業・業界（製造業、IT、金融、小売など）
+- 企業規模（大企業、中堅企業、中小企業、スタートアップなど）
+- 部署・部門（開発部門、営業部門、経営層など）
+- 地域（国内、海外、特定地域など）
+
+各比較軸に対して、選択肢（バッジ）を3-6個考えてください。
+出力形式:
+比較軸名: 選択肢1, 選択肢2, 選択肢3, ...
+
+例:
+職種: ITエンジニア, セキュリティ担当者, 営業担当者, 経営者
+産業・業界: 製造業, IT・ソフトウェア, 金融, 小売, 医療`;
+
+      const targetUserPrompt = `以下のスタートアップ情報を参考に、ターゲット層に関する重要な比較軸を4-6個、各比較軸の選択肢も含めて考えてください。
+
+${startup ? `【対象スタートアップ】
+${startup.title}
+${startup.description ? `説明: ${startup.description}` : ''}
+${startup.categoryIds && startup.categoryIds.length > 0 ? `\nカテゴリー: ${startup.categoryIds.map(id => {
+  const cat = categories.find(c => c.id === id);
+  return cat ? cat.title : '';
+}).filter(Boolean).join(', ')}` : ''}` : '【スタートアップ情報】\n（情報なし）'}
+
+ターゲット層の比較軸として、以下のような観点を含めて考えてください：
+- 職種（例: ITエンジニア、セキュリティ担当者、営業担当者、マーケター、経営者、経理担当者など）
+- 業務内容（例: ソフトウェア開発、営業活動、マーケティング、経営企画、財務管理など）
+- 産業・業界（例: 製造業、IT・ソフトウェア、金融、小売、医療、教育など）
+- 企業規模（例: 大企業、中堅企業、中小企業、スタートアップ、個人事業主など）
+- 部署・部門（例: 開発部門、営業部門、マーケティング部門、経営層、経理部門など）
+- 地域（例: 国内、海外、特定地域など）
+
+各比較軸に対して、選択肢（バッジ）を3-6個考えてください。
+出力形式:
+比較軸名: 選択肢1, 選択肢2, 選択肢3, ...`;
 
       const targetResponse = await callGPTAPI([
         { role: 'system', content: targetSystemPrompt },
@@ -485,32 +614,103 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
       const targetAxes: ComparisonAxis[] = [];
       const targetLines = targetResponse.split('\n').map(line => line.trim()).filter(line => line.length > 0);
       targetLines.forEach((line, index) => {
-        const cleanLabel = line
-          .replace(/^[0-9]+[\.\)、]\s*/, '')
-          .replace(/^[-•・]\s*/, '')
-          .replace(/^比較軸[0-9]+[:：]\s*/, '')
-          .trim();
-        if (cleanLabel.length > 0 && cleanLabel.length < 50) {
-          targetAxes.push({
-            id: `target_axis_${Date.now()}_${index}`,
-            label: cleanLabel,
-          });
+        // "比較軸名: 選択肢1, 選択肢2, ..." の形式をパース
+        const colonIndex = line.indexOf(':');
+        if (colonIndex > 0) {
+          const label = line.substring(0, colonIndex)
+            .replace(/^[0-9]+[\.\)、]\s*/, '')
+            .replace(/^[-•・]\s*/, '')
+            .replace(/^比較軸[0-9]+[:：]\s*/, '')
+            .trim();
+          
+          const optionsStr = line.substring(colonIndex + 1).trim();
+          const options = optionsStr.split(',').map(opt => opt.trim()).filter(opt => opt.length > 0);
+          
+          if (label.length > 0 && label.length < 50 && options.length > 0) {
+            targetAxes.push({
+              id: `target_axis_${Date.now()}_${index}`,
+              label: label,
+              options: options,
+            });
+          }
+        } else {
+          // コロンがない場合は従来の形式として処理
+          const cleanLabel = line
+            .replace(/^[0-9]+[\.\)、]\s*/, '')
+            .replace(/^[-•・]\s*/, '')
+            .replace(/^比較軸[0-9]+[:：]\s*/, '')
+            .trim();
+          if (cleanLabel.length > 0 && cleanLabel.length < 50) {
+            targetAxes.push({
+              id: `target_axis_${Date.now()}_${index}`,
+              label: cleanLabel,
+              options: [], // デフォルトの選択肢なし
+            });
+          }
         }
       });
 
-      // パースに失敗した場合はデフォルト値を使用
-      if (targetAxes.length === 0) {
-        targetAxes.push(
-          { id: `target_axis_${Date.now()}_1`, label: 'ターゲット層の明確性' },
-          { id: `target_axis_${Date.now()}_2`, label: 'ターゲット層の規模' },
-          { id: `target_axis_${Date.now()}_3`, label: 'ターゲット層へのリーチ' }
-        );
+      // パースに失敗した場合や軸が少ない場合は、再度AI APIを呼び出す
+      if (targetAxes.length < 3) {
+        try {
+          const retryPrompt = `前回の応答が適切に解析できませんでした。以下の形式で、ターゲット層に関する比較軸を4-6個、各比較軸の選択肢も含めて出力してください：
+職種: ITエンジニア, セキュリティ担当者, 営業担当者, 経営者
+産業・業界: 製造業, IT・ソフトウェア, 金融, 小売
+企業規模: 大企業, 中堅企業, 中小企業, スタートアップ
+業務内容: ソフトウェア開発, 営業活動, マーケティング, 経営企画
+
+${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`;
+
+          const retryResponse = await callGPTAPI([
+            { role: 'system', content: targetSystemPrompt },
+            { role: 'user', content: retryPrompt }
+          ], model);
+
+          const retryLines = retryResponse.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+          retryLines.forEach((line, index) => {
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > 0) {
+              const label = line.substring(0, colonIndex).trim();
+              const optionsStr = line.substring(colonIndex + 1).trim();
+              const options = optionsStr.split(',').map(opt => opt.trim()).filter(opt => opt.length > 0);
+              
+              if (label.length > 0 && label.length < 50 && options.length > 0 && targetAxes.length < 6) {
+                targetAxes.push({
+                  id: `target_axis_${Date.now()}_retry_${index}`,
+                  label: label,
+                  options: options,
+                });
+              }
+            }
+          });
+        } catch (retryError) {
+          console.error('ターゲット層セクションの再試行エラー:', retryError);
+        }
       }
+      
+      // 選択肢がない比較軸にはデフォルトの選択肢を追加
+      targetAxes.forEach(axis => {
+        if (!axis.options || axis.options.length === 0) {
+          // 比較軸名に基づいてデフォルトの選択肢を生成
+          const labelLower = axis.label.toLowerCase();
+          if (labelLower.includes('職種')) {
+            axis.options = ['ITエンジニア', 'セキュリティ担当者', '営業担当者', '経営者'];
+          } else if (labelLower.includes('産業') || labelLower.includes('業界')) {
+            axis.options = ['製造業', 'IT・ソフトウェア', '金融', '小売', '医療'];
+          } else if (labelLower.includes('企業規模') || labelLower.includes('規模')) {
+            axis.options = ['大企業', '中堅企業', '中小企業', 'スタートアップ'];
+          } else if (labelLower.includes('業務') || labelLower.includes('内容')) {
+            axis.options = ['ソフトウェア開発', '営業活動', 'マーケティング', '経営企画'];
+          } else {
+            axis.options = ['選択肢1', '選択肢2', '選択肢3'];
+          }
+        }
+      });
       
       const newSections: ComparisonSections = {
         general: { axes: generalAxes.slice(0, 6), matrix: {} },
         function: { axes: functionAxes, matrix: {} },
-        target: { axes: targetAxes.slice(0, 3), matrix: {} },
+        target: { axes: targetAxes.slice(0, 6), matrix: {} }, // 最大6個まで
       };
       
       setComparisonSections(newSections);
@@ -642,6 +842,59 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
     await autoSaveComparisonDataWithSections(updatedSections);
   };
 
+  // ターゲット層セクションのマトリクスのセルにバッジを設定
+  const setMatrixCellBadges = async (section: ComparisonSectionType, startupId: string, axisId: string, badges: string[]) => {
+    const updatedSections = { ...comparisonSections };
+    const updatedMatrix = {
+      ...updatedSections[section].matrix,
+      [startupId]: {
+        ...updatedSections[section].matrix[startupId],
+        [axisId]: badges,
+      },
+    };
+    updatedSections[section].matrix = updatedMatrix;
+    setComparisonSections(updatedSections);
+    // マトリクス変更後に自動保存
+    await autoSaveComparisonDataWithSections(updatedSections);
+  };
+
+  // 比較軸の選択肢を追加
+  const addAxisOption = async (section: ComparisonSectionType, axisId: string, option: string) => {
+    if (!option.trim()) return;
+    const updatedSections = { ...comparisonSections };
+    const axis = updatedSections[section].axes.find(a => a.id === axisId);
+    if (axis) {
+      if (!axis.options) {
+        axis.options = [];
+      }
+      if (!axis.options.includes(option.trim())) {
+        axis.options.push(option.trim());
+        setComparisonSections(updatedSections);
+        await autoSaveComparisonDataWithSections(updatedSections);
+      }
+    }
+  };
+
+  // 比較軸の選択肢を削除
+  const removeAxisOption = async (section: ComparisonSectionType, axisId: string, option: string) => {
+    const updatedSections = { ...comparisonSections };
+    const axis = updatedSections[section].axes.find(a => a.id === axisId);
+    if (axis && axis.options) {
+      axis.options = axis.options.filter(opt => opt !== option);
+      setComparisonSections(updatedSections);
+      
+      // マトリクスからも削除された選択肢を削除
+      Object.keys(updatedSections[section].matrix).forEach(startupId => {
+        const cellValue = updatedSections[section].matrix[startupId]?.[axisId];
+        if (Array.isArray(cellValue)) {
+          updatedSections[section].matrix[startupId][axisId] = cellValue.filter(badge => badge !== option);
+        }
+      });
+      
+      await autoSaveComparisonDataWithSections(updatedSections);
+    }
+  };
+
   // セクション構造での自動保存用の関数
   const autoSaveComparisonDataWithSections = async (sectionsOverride?: ComparisonSections) => {
     if (!startup) return;
@@ -658,8 +911,8 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
         // 後方互換性のため、一般セクションのデータも従来の形式で保存
         axes: sectionsToSave.general.axes,
         matrix: sectionsToSave.general.matrix,
-        createdAt: comparisonId && startup.competitorComparison?.createdAt 
-          ? startup.competitorComparison.createdAt 
+        createdAt: comparisonId && (startup as any).competitorComparison?.createdAt 
+          ? (startup as any).competitorComparison.createdAt 
           : now,
         updatedAt: now,
       };
@@ -690,13 +943,13 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
 
     try {
       const now = new Date().toISOString();
-      const comparisonData: CompetitorComparisonData = {
+      const comparisonData: any = {
         id: comparisonId || `comp_${generateUniqueId()}`,
         axes: axesOverride ?? comparisonAxes,
         selectedStartupIds: selectedStartupsOverride ?? selectedStartups,
         matrix: matrixOverride ?? comparisonMatrix,
-        createdAt: comparisonId && startup.competitorComparison?.createdAt 
-          ? startup.competitorComparison.createdAt 
+        createdAt: comparisonId && (startup as any).competitorComparison?.createdAt 
+          ? (startup as any).competitorComparison.createdAt 
           : now,
         updatedAt: now,
       };
@@ -732,8 +985,8 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
         // 後方互換性のため、一般セクションのデータも従来の形式で保存
         axes: comparisonSections.general.axes,
         matrix: comparisonSections.general.matrix,
-        createdAt: comparisonId && startup.competitorComparison?.createdAt 
-          ? startup.competitorComparison.createdAt 
+        createdAt: comparisonId && (startup as any).competitorComparison?.createdAt 
+          ? (startup as any).competitorComparison.createdAt 
           : now,
         updatedAt: now,
       };
@@ -1266,29 +1519,633 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
                     padding: '8px',
                     textAlign: 'center',
                     borderBottom: '1px solid #E5E7EB',
-                    backgroundColor: '#EFF6FF'
+                    position: 'relative',
                   }}>
-                    <div
-                      style={{
-                        width: '40px',
-                        height: '40px',
-                        margin: '0 auto',
-                        backgroundColor: '#4262FF',
-                        border: '2px solid #2563EB',
-                        borderRadius: '8px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#FFFFFF',
-                        fontSize: '16px',
-                        fontWeight: '700',
-                      }}
-                    >
-                      5
-                    </div>
+                    {(() => {
+                      // ターゲット層セクションの場合はバッジ形式、それ以外は点数形式
+                      if (type === 'target') {
+                        const cellValue = section.matrix[startup.id]?.[axis.id];
+                        const selectedBadges = Array.isArray(cellValue) 
+                          ? (cellValue as string[])
+                          : [];
+                        const isSelected = badgeSelectCell?.section === type && 
+                                          badgeSelectCell?.startupId === startup.id && 
+                                          badgeSelectCell?.axisId === axis.id;
+                        
+                        return (
+                          <>
+                            <div
+                              onClick={() => {
+                                setBadgeSelectCell({ section: type, startupId: startup.id, axisId: axis.id });
+                              }}
+                              style={{
+                                minHeight: '40px',
+                                padding: '8px',
+                                margin: '0 auto',
+                                border: `2px solid ${isSelected ? '#4262FF' : '#E5E7EB'}`,
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '4px',
+                                justifyContent: selectedBadges.length === 0 ? 'center' : 'flex-start',
+                                alignItems: 'center',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.borderColor = '#4262FF';
+                                e.currentTarget.style.backgroundColor = '#F9FAFB';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) {
+                                  e.currentTarget.style.borderColor = '#E5E7EB';
+                                  e.currentTarget.style.backgroundColor = 'transparent';
+                                }
+                              }}
+                            >
+                              {selectedBadges.length > 0 ? (
+                                selectedBadges.map((badge, idx) => (
+                                  <span
+                                    key={idx}
+                                    style={{
+                                      padding: '4px 8px',
+                                      backgroundColor: '#4262FF',
+                                      color: '#FFFFFF',
+                                      borderRadius: '12px',
+                                      fontSize: '12px',
+                                      fontWeight: '500',
+                                      display: 'inline-block',
+                                    }}
+                                  >
+                                    {badge}
+                                  </span>
+                                ))
+                              ) : (
+                                <span style={{ color: '#9CA3AF', fontSize: '12px' }}>バッジを選択</span>
+                              )}
+                            </div>
+                            
+                            {/* バッジ選択モーダル */}
+                            {isSelected && axis.options && axis.options.length > 0 && (
+                              <div
+                                style={{
+                                  position: 'fixed',
+                                  top: '50%',
+                                  left: '50%',
+                                  transform: 'translate(-50%, -50%)',
+                                  backgroundColor: '#FFFFFF',
+                                  border: '1px solid #E5E7EB',
+                                  borderRadius: '16px',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                                  zIndex: 10001,
+                                  padding: '24px',
+                                  minWidth: '500px',
+                                  maxWidth: '600px',
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div style={{ marginBottom: '16px' }}>
+                                  <h4 style={{
+                                    margin: 0,
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    color: '#374151',
+                                    marginBottom: '4px',
+                                  }}>
+                                    バッジを選択
+                                  </h4>
+                                  <p style={{
+                                    margin: 0,
+                                    fontSize: '12px',
+                                    color: '#6B7280',
+                                  }}>
+                                    {axis.label} - {startup.title}
+                                  </p>
+                                </div>
+                                
+                                <div style={{
+                                  display: 'flex',
+                                  flexWrap: 'wrap',
+                                  gap: '8px',
+                                  marginBottom: '16px',
+                                  maxHeight: '300px',
+                                  overflowY: 'auto',
+                                }}>
+                                  {axis.options.map((option) => {
+                                    const isSelected = selectedBadges.includes(option);
+                                    return (
+                                      <button
+                                        key={option}
+                                        onClick={() => {
+                                          const newBadges = isSelected
+                                            ? selectedBadges.filter(b => b !== option)
+                                            : [...selectedBadges, option];
+                                          setMatrixCellBadges(type, startup.id, axis.id, newBadges);
+                                        }}
+                                        style={{
+                                          padding: '8px 16px',
+                                          border: `2px solid ${isSelected ? '#4262FF' : '#E5E7EB'}`,
+                                          borderRadius: '12px',
+                                          backgroundColor: isSelected ? '#EFF6FF' : '#FFFFFF',
+                                          color: isSelected ? '#4262FF' : '#374151',
+                                          fontSize: '14px',
+                                          fontWeight: isSelected ? '600' : '500',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.2s ease',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          if (!isSelected) {
+                                            e.currentTarget.style.borderColor = '#4262FF';
+                                            e.currentTarget.style.backgroundColor = '#F9FAFB';
+                                          }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          if (!isSelected) {
+                                            e.currentTarget.style.borderColor = '#E5E7EB';
+                                            e.currentTarget.style.backgroundColor = '#FFFFFF';
+                                          }
+                                        }}
+                                      >
+                                        {option}
+                                        {isSelected && ' ✓'}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                
+                                <div style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  paddingTop: '16px',
+                                  borderTop: '1px solid #E5E7EB',
+                                }}>
+                                  <button
+                                    onClick={() => {
+                                      setEditingAxisOptions({ section: type, axisId: axis.id });
+                                      setBadgeSelectCell(null);
+                                    }}
+                                    style={{
+                                      padding: '8px 16px',
+                                      backgroundColor: '#F3F4F6',
+                                      color: '#374151',
+                                      border: 'none',
+                                      borderRadius: '8px',
+                                      fontSize: '14px',
+                                      fontWeight: '500',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    選択肢を編集
+                                  </button>
+                                  <button
+                                    onClick={() => setBadgeSelectCell(null)}
+                                    style={{
+                                      padding: '8px 16px',
+                                      backgroundColor: '#F3F4F6',
+                                      color: '#374151',
+                                      border: 'none',
+                                      borderRadius: '8px',
+                                      fontSize: '14px',
+                                      fontWeight: '500',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    閉じる
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+                      
+                      // 一般・機能セクションは点数形式
+                      const currentStartupScore = section.matrix[startup.id]?.[axis.id];
+                      const score = typeof currentStartupScore === 'number' && currentStartupScore !== undefined 
+                        ? currentStartupScore 
+                        : 5; // デフォルトは5点
+                      const colors = getScoreColor(score);
+                      const isSelected = scoreSelectCell?.section === type && 
+                                        scoreSelectCell?.startupId === startup.id && 
+                                        scoreSelectCell?.axisId === axis.id;
+                      
+                      return (
+                        <>
+                          <div
+                            onClick={() => {
+                              setScoreSelectCell({ section: type, startupId: startup.id, axisId: axis.id });
+                            }}
+                            style={{
+                              width: '40px',
+                              height: '40px',
+                              margin: '0 auto',
+                              backgroundColor: colors.bg,
+                              border: `2px solid ${isSelected ? '#4262FF' : colors.border}`,
+                              borderRadius: '8px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: colors.text,
+                              fontSize: '16px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              opacity: score === 0 ? 0.5 : 1,
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'scale(1.1)';
+                              e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'scale(1)';
+                              e.currentTarget.style.boxShadow = 'none';
+                            }}
+                          >
+                            {score !== undefined && score !== null ? score : '-'}
+                          </div>
+                          
+                          {/* 点数選択モーダル */}
+                          {isSelected && (
+                            <div
+                              style={{
+                                position: 'fixed',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                backgroundColor: '#FFFFFF',
+                                border: '1px solid #E5E7EB',
+                                borderRadius: '16px',
+                                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                                zIndex: 10001,
+                                padding: '24px',
+                                minWidth: '400px',
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => {
+                                const key = e.key;
+                                if (key >= '0' && key <= '5') {
+                                  const point = parseInt(key);
+                                  setMatrixCellScore(type, startup.id, axis.id, point);
+                                  setScoreSelectCell(null);
+                                } else if (key === 'Escape') {
+                                  setScoreSelectCell(null);
+                                }
+                              }}
+                              tabIndex={0}
+                            >
+                              <div style={{ marginBottom: '16px' }}>
+                                <h4 style={{
+                                  margin: 0,
+                                  fontSize: '16px',
+                                  fontWeight: '600',
+                                  color: '#374151',
+                                  marginBottom: '4px',
+                                }}>
+                                  点数を選択
+                                </h4>
+                                <p style={{
+                                  margin: 0,
+                                  fontSize: '12px',
+                                  color: '#6B7280',
+                                }}>
+                                  {axis.label} - {startup.title}
+                                </p>
+                              </div>
+                              
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(3, 1fr)',
+                                gap: '12px',
+                                marginBottom: '16px',
+                              }}>
+                                {[0, 1, 2, 3, 4, 5].map((point) => {
+                                  const pointColors = getScoreColor(point);
+                                  const isCurrentScore = score === point;
+                                  return (
+                                    <button
+                                      key={point}
+                                      onClick={() => {
+                                        setMatrixCellScore(type, startup.id, axis.id, point);
+                                        setScoreSelectCell(null);
+                                      }}
+                                      style={{
+                                        padding: '16px',
+                                        border: `2px solid ${isCurrentScore ? '#4262FF' : pointColors.border}`,
+                                        borderRadius: '12px',
+                                        backgroundColor: isCurrentScore ? '#EFF6FF' : pointColors.bg,
+                                        color: pointColors.text,
+                                        fontSize: '18px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        opacity: point === 0 ? 0.6 : 1,
+                                        position: 'relative',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.05)';
+                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.boxShadow = 'none';
+                                      }}
+                                    >
+                                      <div style={{
+                                        fontSize: '32px',
+                                        fontWeight: '700',
+                                        lineHeight: 1,
+                                      }}>
+                                        {point}
+                                      </div>
+                                      <div style={{
+                                        fontSize: '11px',
+                                        fontWeight: '500',
+                                        opacity: 0.8,
+                                      }}>
+                                        点
+                                      </div>
+                                      {isCurrentScore && (
+                                        <div style={{
+                                          position: 'absolute',
+                                          top: '4px',
+                                          right: '4px',
+                                          width: '20px',
+                                          height: '20px',
+                                          backgroundColor: '#4262FF',
+                                          borderRadius: '50%',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          color: '#FFFFFF',
+                                          fontSize: '12px',
+                                        }}>
+                                          ✓
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingTop: '16px',
+                                borderTop: '1px solid #E5E7EB',
+                              }}>
+                                <p style={{
+                                  margin: 0,
+                                  fontSize: '11px',
+                                  color: '#9CA3AF',
+                                }}>
+                                  キーボードの0-5キーでも選択できます
+                                </p>
+                                <button
+                                  onClick={() => setScoreSelectCell(null)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    backgroundColor: '#F3F4F6',
+                                    color: '#374151',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '500',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.2s ease',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#E5E7EB';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#F3F4F6';
+                                  }}
+                                >
+                                  キャンセル
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
                   {selectedStartupList.map(s => {
-                    const score = section.matrix[s.id]?.[axis.id];
+                    // ターゲット層セクションの場合はバッジ形式、それ以外は点数形式
+                    if (type === 'target') {
+                      const cellValue = section.matrix[s.id]?.[axis.id];
+                      const selectedBadges = Array.isArray(cellValue) 
+                        ? (cellValue as string[])
+                        : [];
+                      const isSelected = badgeSelectCell?.section === type && 
+                                        badgeSelectCell?.startupId === s.id && 
+                                        badgeSelectCell?.axisId === axis.id;
+                      
+                      return (
+                        <td 
+                          key={s.id}
+                          style={{ 
+                            padding: '8px',
+                            textAlign: 'center',
+                            borderBottom: '1px solid #E5E7EB',
+                            position: 'relative',
+                          }}
+                        >
+                          <div
+                            onClick={() => {
+                              setBadgeSelectCell({ section: type, startupId: s.id, axisId: axis.id });
+                            }}
+                            style={{
+                              minHeight: '40px',
+                              padding: '8px',
+                              margin: '0 auto',
+                              border: `2px solid ${isSelected ? '#4262FF' : '#E5E7EB'}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '4px',
+                              justifyContent: selectedBadges.length === 0 ? 'center' : 'flex-start',
+                              alignItems: 'center',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = '#4262FF';
+                              e.currentTarget.style.backgroundColor = '#F9FAFB';
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.borderColor = '#E5E7EB';
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                              }
+                            }}
+                          >
+                            {selectedBadges.length > 0 ? (
+                              selectedBadges.map((badge, idx) => (
+                                <span
+                                  key={idx}
+                                  style={{
+                                    padding: '4px 8px',
+                                    backgroundColor: '#4262FF',
+                                    color: '#FFFFFF',
+                                    borderRadius: '12px',
+                                    fontSize: '12px',
+                                    fontWeight: '500',
+                                    display: 'inline-block',
+                                  }}
+                                >
+                                  {badge}
+                                </span>
+                              ))
+                            ) : (
+                              <span style={{ color: '#9CA3AF', fontSize: '12px' }}>バッジを選択</span>
+                            )}
+                          </div>
+                          
+                          {/* バッジ選択モーダル */}
+                          {isSelected && axis.options && axis.options.length > 0 && (
+                            <div
+                              style={{
+                                position: 'fixed',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                backgroundColor: '#FFFFFF',
+                                border: '1px solid #E5E7EB',
+                                borderRadius: '16px',
+                                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                                zIndex: 10001,
+                                padding: '24px',
+                                minWidth: '500px',
+                                maxWidth: '600px',
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div style={{ marginBottom: '16px' }}>
+                                <h4 style={{
+                                  margin: 0,
+                                  fontSize: '16px',
+                                  fontWeight: '600',
+                                  color: '#374151',
+                                  marginBottom: '4px',
+                                }}>
+                                  バッジを選択
+                                </h4>
+                                <p style={{
+                                  margin: 0,
+                                  fontSize: '12px',
+                                  color: '#6B7280',
+                                }}>
+                                  {axis.label} - {s.title}
+                                </p>
+                              </div>
+                              
+                              <div style={{
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '8px',
+                                marginBottom: '16px',
+                                maxHeight: '300px',
+                                overflowY: 'auto',
+                              }}>
+                                {axis.options.map((option) => {
+                                  const isSelectedBadge = selectedBadges.includes(option);
+                                  return (
+                                    <button
+                                      key={option}
+                                      onClick={() => {
+                                        const newBadges = isSelectedBadge
+                                          ? selectedBadges.filter(b => b !== option)
+                                          : [...selectedBadges, option];
+                                        setMatrixCellBadges(type, s.id, axis.id, newBadges);
+                                      }}
+                                      style={{
+                                        padding: '8px 16px',
+                                        border: `2px solid ${isSelectedBadge ? '#4262FF' : '#E5E7EB'}`,
+                                        borderRadius: '12px',
+                                        backgroundColor: isSelectedBadge ? '#EFF6FF' : '#FFFFFF',
+                                        color: isSelectedBadge ? '#4262FF' : '#374151',
+                                        fontSize: '14px',
+                                        fontWeight: isSelectedBadge ? '600' : '500',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        if (!isSelectedBadge) {
+                                          e.currentTarget.style.borderColor = '#4262FF';
+                                          e.currentTarget.style.backgroundColor = '#F9FAFB';
+                                        }
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        if (!isSelectedBadge) {
+                                          e.currentTarget.style.borderColor = '#E5E7EB';
+                                          e.currentTarget.style.backgroundColor = '#FFFFFF';
+                                        }
+                                      }}
+                                    >
+                                      {option}
+                                      {isSelectedBadge && ' ✓'}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingTop: '16px',
+                                borderTop: '1px solid #E5E7EB',
+                              }}>
+                                <button
+                                  onClick={() => {
+                                    setEditingAxisOptions({ section: type, axisId: axis.id });
+                                    setBadgeSelectCell(null);
+                                  }}
+                                  style={{
+                                    padding: '8px 16px',
+                                    backgroundColor: '#F3F4F6',
+                                    color: '#374151',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '500',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  選択肢を編集
+                                </button>
+                                <button
+                                  onClick={() => setBadgeSelectCell(null)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    backgroundColor: '#F3F4F6',
+                                    color: '#374151',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '500',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  閉じる
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      );
+                    }
+                    
+                    // 一般・機能セクションは点数形式
+                    const cellValue = section.matrix[s.id]?.[axis.id];
+                    const score = typeof cellValue === 'number' && cellValue !== undefined ? cellValue : undefined;
                     const colors = getScoreColor(score);
                     const isSelected = scoreSelectCell?.section === type && 
                                       scoreSelectCell?.startupId === s.id && 
@@ -1555,6 +2412,186 @@ ${startupInfo.description ? `説明: ${startupInfo.description}` : ''}` : ''}
           onClick={() => setScoreSelectCell(null)}
         />
       )}
+
+      {/* バッジ選択モーダルを閉じるためのオーバーレイ */}
+      {badgeSelectCell && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 10000,
+          }}
+          onClick={() => setBadgeSelectCell(null)}
+        />
+      )}
+
+      {/* 選択肢編集モーダル */}
+      {editingAxisOptions && (() => {
+        const axis = comparisonSections[editingAxisOptions.section].axes.find(a => a.id === editingAxisOptions.axisId);
+        if (!axis) return null;
+        const options = axis.options || [];
+        
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 10000,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onClick={() => {
+              setEditingAxisOptions(null);
+              setNewOptionInput('');
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E5E7EB',
+                borderRadius: '16px',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                padding: '24px',
+                minWidth: '500px',
+                maxWidth: '600px',
+                maxHeight: '80vh',
+                overflowY: 'auto',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={{
+                margin: 0,
+                marginBottom: '16px',
+                fontSize: '18px',
+                fontWeight: '600',
+                color: '#374151',
+              }}>
+                選択肢を編集: {axis.label}
+              </h3>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    value={newOptionInput}
+                    onChange={(e) => setNewOptionInput(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && newOptionInput.trim()) {
+                        addAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, newOptionInput.trim());
+                        setNewOptionInput('');
+                      }
+                    }}
+                    placeholder="新しい選択肢を入力"
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      border: '1px solid #E5E7EB',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (newOptionInput.trim()) {
+                        addAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, newOptionInput.trim());
+                        setNewOptionInput('');
+                      }
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#4262FF',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    追加
+                  </button>
+                </div>
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                marginBottom: '16px',
+              }}>
+                {options.map((option, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px',
+                      backgroundColor: '#F9FAFB',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <span style={{ fontSize: '14px', color: '#374151' }}>{option}</span>
+                    <button
+                      onClick={() => removeAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, option)}
+                      style={{
+                        padding: '4px 8px',
+                        backgroundColor: '#FEF2F2',
+                        color: '#EF4444',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      削除
+                    </button>
+                  </div>
+                ))}
+                {options.length === 0 && (
+                  <p style={{ color: '#9CA3AF', fontSize: '14px', textAlign: 'center', margin: '16px 0' }}>
+                    選択肢がありません。上記の入力欄から追加してください。
+                  </p>
+                )}
+              </div>
+              
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '8px',
+              }}>
+                <button
+                  onClick={() => {
+                    setEditingAxisOptions(null);
+                    setNewOptionInput('');
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#F3F4F6',
+                    color: '#374151',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                  }}
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 一括削除確認モーダル */}
       {showDeleteAllModal && (

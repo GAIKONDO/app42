@@ -10,7 +10,7 @@ import type { Relation, RelationType } from '@/types/relation';
 /**
  * LLM APIを呼び出してテキストを生成（GPT、Gemini、Claude、またはローカルモデル）
  */
-async function callGPTAPI(
+export async function callGPTAPI(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   model: string = 'gpt-4o-mini'
 ): Promise<string> {

@@ -46,6 +46,9 @@ interface AIGenerationModalProps {
   statuses: Status[];
   engagementLevels: EngagementLevel[];
   bizDevPhases: BizDevPhase[];
+  // 競合比較セクションの解説用の追加プロパティ
+  comparisonSectionType?: 'general' | 'function' | 'target' | null;
+  comparisonSectionLabel?: string;
 }
 
 export default function AIGenerationModal({
@@ -85,6 +88,8 @@ export default function AIGenerationModal({
   statuses,
   engagementLevels,
   bizDevPhases,
+  comparisonSectionType,
+  comparisonSectionLabel,
 }: AIGenerationModalProps) {
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   type ModelType = 'gpt' | 'gemini' | 'claude' | 'local' | 'local-lfm';
@@ -329,11 +334,29 @@ export default function AIGenerationModal({
       }
       
       // プロンプトを作成（マークダウン形式で出力するように指示）
-      const systemPrompt = `あなたはビジネス文書の要約を専門とするアシスタントです。提供された情報を基に、約${aiSummaryLength}文字で簡潔かつ明確な要約をマークダウン記法で作成してください。
+      // 競合比較セクションの解説の場合は、専用のシステムプロンプトを使用
+      let systemPrompt: string;
+      if (comparisonSectionType && comparisonSectionLabel) {
+        // 競合比較セクションの解説用のシステムプロンプト
+        systemPrompt = `あなたはスタートアップの競合比較分析の専門家です。競合比較マトリクスのセクション解説を作成する専門家として、提供された情報を基に、約${aiSummaryLength}文字で簡潔かつ明確な解説文をマークダウン記法で作成してください。
+
+【重要な指示】
+- この解説は「${comparisonSectionLabel}」セクションの解説文です
+- スタートアップの基本情報や概要を要約するのではなく、このセクションの比較軸とマトリクスの内容を分析し、そのセクションの特徴や洞察を説明する解説文を作成してください
+- 比較軸の意味や、マトリクスに記録された評価やバッジの内容を踏まえて、このセクションで比較されている観点の重要性や、各スタートアップの特徴を説明してください
+- セクションの比較結果から読み取れる洞察や、このセクションで明らかになった差別化要因などを含めてください
 
 ${formatInstruction}
 
 出力は必ずマークダウン形式で、プレーンテキストではなく、適切にフォーマットされたマークダウンとして出力してください。`;
+      } else {
+        // 通常の要約用のシステムプロンプト（スタートアップの概要説明など）
+        systemPrompt = `あなたはビジネス文書の要約を専門とするアシスタントです。提供された情報を基に、約${aiSummaryLength}文字で簡潔かつ明確な要約をマークダウン記法で作成してください。
+
+${formatInstruction}
+
+出力は必ずマークダウン形式で、プレーンテキストではなく、適切にフォーマットされたマークダウンとして出力してください。`;
+      }
       
       // プロンプトを構築（スタートアップ情報、概要、トピックの順）
       const promptParts: string[] = [];
@@ -732,7 +755,7 @@ ${formatInstruction}
           }}
         >
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600', color: '#111827' }}>
-            AIで作文 - {target === 'description' ? '説明' : '注力アクション'}
+            AIで作文 - {comparisonSectionType && comparisonSectionLabel ? `${comparisonSectionLabel}セクションの解説` : target === 'description' ? '説明' : '注力アクション'}
           </h2>
           <button
             onClick={handleClose}

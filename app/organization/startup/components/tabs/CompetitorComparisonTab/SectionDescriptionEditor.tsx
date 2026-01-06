@@ -184,7 +184,7 @@ export default function SectionDescriptionEditor({
             placeholder="解説文をマークダウン形式で入力してください..."
             style={{
               width: '100%',
-              minHeight: '200px',
+              minHeight: '400px',
               padding: '12px',
               border: '1px solid #D1D5DB',
               borderRadius: '6px',

@@ -17,6 +17,7 @@ import SplitViewLayout from './SplitViewLayout';
 import SplitViewConditionalTabBar from './SplitViewConditionalTabBar';
 import SplitViewConditionalUrlBar from './SplitViewConditionalUrlBar';
 import { FiMessageSquare } from 'react-icons/fi';
+import { ToastContainer } from './Toast';
 
 const ADMIN_UID = 'PktGlRBWVZc9E0Y3OLSQ4TeRg0P2';
 
@@ -783,6 +784,7 @@ function LayoutContent({
           />
         </>
       )}
+      <ToastContainer />
     </main>
   );
 }

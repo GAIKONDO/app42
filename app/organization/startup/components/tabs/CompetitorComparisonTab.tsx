@@ -22,6 +22,7 @@ import AxisOptionsEditModal from './CompetitorComparisonTab/AxisOptionsEditModal
 import DeleteAllConfirmModal from './CompetitorComparisonTab/DeleteAllConfirmModal';
 import DeleteAxisConfirmModal from './CompetitorComparisonTab/DeleteAxisConfirmModal';
 import AIGenerationModal from '../modals/AIGenerationModal';
+import { showToast } from '@/components/Toast';
 
 export default function CompetitorComparisonTab({
   startup,
@@ -65,7 +66,8 @@ export default function CompetitorComparisonTab({
   const [aiSummaryFormat, setAiSummaryFormat] = useState<'auto' | 'bullet' | 'paragraph' | 'custom'>('auto');
   const [aiSummaryLength, setAiSummaryLength] = useState<number>(1000);
   const [aiCustomPrompt, setAiCustomPrompt] = useState<string>('');
-
+  // エクスポート関連の状態
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // 保存された競合比較データを読み込む（startupIdが変更された場合のみ）
   const prevStartupIdRef = React.useRef<string | null>(null);
@@ -690,10 +692,32 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
         }
       });
       
+      // 必須の比較軸を追加（既に存在しない場合のみ）
+      const requiredAxes: ComparisonAxis[] = [
+        {
+          id: `target_axis_required_environment_${Date.now()}`,
+          label: '利用環境',
+          options: ['クラウド', 'オンプレミス', 'ハイブリッド'],
+        },
+        {
+          id: `target_axis_required_cost_${Date.now()}`,
+          label: 'コスト',
+          options: ['無償', '10万円', '100万円', '1,000万円', '1億円'],
+        },
+      ];
+      
+      // 既存の比較軸に同じラベルがないかチェック
+      const existingLabels = new Set(targetAxes.map(axis => axis.label));
+      requiredAxes.forEach(requiredAxis => {
+        if (!existingLabels.has(requiredAxis.label)) {
+          targetAxes.unshift(requiredAxis); // 先頭に追加
+        }
+      });
+      
       const newSections: ComparisonSections = {
         general: { axes: generalAxes.slice(0, 6), matrix: {} },
         function: { axes: functionAxes, matrix: {} },
-        target: { axes: targetAxes.slice(0, 6), matrix: {} }, // 最大6個まで
+        target: { axes: targetAxes.slice(0, 8), matrix: {} }, // 必須2つ + AI生成分（最大6個）で最大8個まで
       };
       
       setComparisonSections(newSections);
@@ -1051,6 +1075,905 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
     return filteredStartups.filter(s => selectedStartups.includes(s.id));
   }, [filteredStartups, selectedStartups]);
 
+  // ファイルダウンロードのヘルパー関数
+  const downloadFile = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  };
+
+  // JSON形式でエクスポート
+  const exportToJSON = () => {
+    if (!startup) {
+      alert('スタートアップデータがありません');
+      return;
+    }
+    try {
+      const exportData = {
+        startup: {
+          id: startup.id,
+          title: startup.title,
+          description: startup.description,
+        },
+        comparisonId: comparisonId,
+        selectedStartups: selectedStartupList.map(s => ({
+          id: s.id,
+          title: s.title,
+          description: s.description,
+        })),
+        sections: comparisonSections,
+        exportedAt: new Date().toISOString(),
+      };
+
+      const jsonString = JSON.stringify(exportData, null, 2);
+      const sanitizedTitle = (startup.title || '競合比較').replace(/[<>:"/\\|?*]/g, '_');
+      const filename = `${sanitizedTitle}_競合比較_${new Date().toISOString().split('T')[0]}.json`;
+      downloadFile(jsonString, filename, 'application/json');
+      setShowExportModal(false);
+      showToast('完了しました。', 'success');
+    } catch (error) {
+      console.error('JSONエクスポートエラー:', error);
+      alert('JSON形式でのエクスポートに失敗しました');
+    }
+  };
+
+  // Markdown形式でエクスポート
+  const exportToMarkdown = () => {
+    if (!startup) {
+      alert('スタートアップデータがありません');
+      return;
+    }
+    try {
+      const sectionLabels: Record<ComparisonSectionType, string> = {
+        general: '一般',
+        function: '機能',
+        target: 'ターゲット層',
+      };
+
+      let markdown = `# ${startup.title || '競合比較'} - 競合比較レポート\n\n`;
+      markdown += `**エクスポート日時**: ${new Date().toLocaleString('ja-JP')}\n\n`;
+      
+      if (startup.description) {
+        markdown += `## 対象スタートアップ\n\n${startup.description}\n\n`;
+      }
+
+      if (selectedStartupList.length > 0) {
+        markdown += `## 比較対象スタートアップ\n\n`;
+        selectedStartupList.forEach((s, idx) => {
+          markdown += `${idx + 1}. **${s.title}**${s.description ? `: ${s.description}` : ''}\n`;
+        });
+        markdown += '\n';
+      }
+
+      // 各セクションをエクスポート
+      (['general', 'function', 'target'] as ComparisonSectionType[]).forEach(sectionType => {
+        const section = comparisonSections[sectionType];
+        if (section.axes.length === 0) return;
+
+        markdown += `## ${sectionLabels[sectionType]}セクション\n\n`;
+
+        // セクションの解説があれば追加
+        if (section.description) {
+          markdown += `${section.description}\n\n`;
+        }
+
+        // マトリクステーブルを作成
+        if (selectedStartupList.length > 0) {
+          markdown += `### 比較マトリクス\n\n`;
+          
+          // ヘッダー行
+          markdown += `| 比較軸 | ${startup.title}`;
+          selectedStartupList.forEach(s => {
+            markdown += ` | ${s.title}`;
+          });
+          markdown += ' |\n';
+          
+          // 区切り行
+          markdown += '|';
+          for (let i = 0; i <= selectedStartupList.length + 1; i++) {
+            markdown += ' --- |';
+          }
+          markdown += '\n';
+
+          // データ行
+          section.axes.forEach(axis => {
+            markdown += `| ${axis.label}`;
+            
+            // 現在のスタートアップ
+            const currentValue = section.matrix[startup.id]?.[axis.id];
+            if (sectionType === 'target') {
+              const badges = Array.isArray(currentValue) ? currentValue : [];
+              markdown += ` | ${badges.length > 0 ? badges.join(', ') : '-'}`;
+            } else {
+              const score = typeof currentValue === 'number' ? currentValue : '-';
+              markdown += ` | ${score}`;
+            }
+
+            // 選択されたスタートアップ
+            selectedStartupList.forEach(s => {
+              const value = section.matrix[s.id]?.[axis.id];
+              if (sectionType === 'target') {
+                const badges = Array.isArray(value) ? value : [];
+                markdown += ` | ${badges.length > 0 ? badges.join(', ') : '-'}`;
+              } else {
+                const score = typeof value === 'number' ? value : '-';
+                markdown += ` | ${score}`;
+              }
+            });
+            markdown += ' |\n';
+          });
+          markdown += '\n';
+        }
+      });
+
+      const sanitizedTitle = (startup.title || '競合比較').replace(/[<>:"/\\|?*]/g, '_');
+      const filename = `${sanitizedTitle}_競合比較_${new Date().toISOString().split('T')[0]}.md`;
+      downloadFile(markdown, filename, 'text/markdown;charset=utf-8');
+      setShowExportModal(false);
+      showToast('完了しました。', 'success');
+    } catch (error) {
+      console.error('Markdownエクスポートエラー:', error);
+      alert('Markdown形式でのエクスポートに失敗しました');
+    }
+  };
+
+  // HTML形式でエクスポート
+  const exportToHTML = () => {
+    if (!startup) {
+      alert('スタートアップデータがありません');
+      return;
+    }
+    try {
+      const sectionLabels: Record<ComparisonSectionType, string> = {
+        general: '一般',
+        function: '機能',
+        target: 'ターゲット層',
+      };
+
+      // スコアの色を取得する関数（HTML用）
+      const getScoreColorHTML = (score: number | undefined): string => {
+        if (score === undefined) return '#9CA3AF';
+        if (score >= 4) return '#10B981';
+        if (score >= 3) return '#3B82F6';
+        if (score >= 2) return '#F59E0B';
+        return '#EF4444';
+      };
+
+      // バッジの色を取得する関数（HTML用）
+      const getBadgeColorHTML = (badgeText: string): string => {
+        const colorPalette = [
+          '#4262FF', '#3B82F6', '#2563EB', '#1D4ED8', '#1E40AF',
+          '#1E3A8A', '#6366F1', '#4F46E5', '#5B21B6', '#4338CA',
+        ];
+        let hash = 0;
+        for (let i = 0; i < badgeText.length; i++) {
+          hash = badgeText.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const colorIndex = Math.abs(hash) % colorPalette.length;
+        return colorPalette[colorIndex];
+      };
+
+      // マークダウンをHTMLに変換する関数（基本的な記法のみ）
+      const markdownToHTML = (markdown: string): string => {
+        if (!markdown) return '';
+        
+        let html = markdown;
+        
+        // コードブロック（```で囲まれた部分）を先に処理
+        const codeBlocks: string[] = [];
+        html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+          const id = `CODE_BLOCK_${codeBlocks.length}`;
+          codeBlocks.push(`<pre><code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`);
+          return id;
+        });
+        
+        // インラインコード
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        
+        // 見出し（行の先頭のみ）
+        html = html.replace(/^#### (.*$)/gim, '<h4>$1</h4>');
+        html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+        html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+        html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+        
+        // リスト（順序なし）
+        html = html.replace(/^[\*\-\+]\s+(.*$)/gim, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+        
+        // リスト（順序あり）
+        html = html.replace(/^\d+\.\s+(.*$)/gim, '<li>$1</li>');
+        // 順序なしリストと順序ありリストを区別する必要があるが、簡易実装のため省略
+        
+        // 太字
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+        
+        // 斜体（太字の後に処理）
+        html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+        html = html.replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, '<em>$1</em>');
+        
+        // 水平線
+        html = html.replace(/^---$/gim, '<hr>');
+        html = html.replace(/^\*\*\*$/gim, '<hr>');
+        
+        // 引用
+        html = html.replace(/^>\s+(.*$)/gim, '<blockquote>$1</blockquote>');
+        
+        // リンク
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        
+        // コードブロックを復元
+        codeBlocks.forEach((codeBlock, index) => {
+          html = html.replace(`CODE_BLOCK_${index}`, codeBlock);
+        });
+        
+        // 段落に分割（空行で区切る）
+        const paragraphs = html.split(/\n\s*\n/);
+        html = paragraphs.map(p => {
+          p = p.trim();
+          if (!p) return '';
+          // 既にHTMLタグで囲まれている場合はそのまま
+          if (p.match(/^<(h[1-6]|ul|ol|pre|blockquote|hr)/)) {
+            return p;
+          }
+          // 改行を<br>に変換
+          p = p.replace(/\n/g, '<br>');
+          return `<p>${p}</p>`;
+        }).filter(p => p).join('\n');
+        
+        return html;
+      };
+
+      let htmlContent = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${startup.title || '競合比較'} - 競合比較レポート</title>
+    <style>
+        html {
+            scroll-behavior: smooth;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            background-color: #F9FAFB;
+            color: #374151;
+            line-height: 1.6;
+            padding: 24px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background-color: #FFFFFF;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            overflow: visible;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 8px;
+        }
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #374151;
+            margin-top: 32px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #E5E7EB;
+        }
+        h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #374151;
+            margin-top: 24px;
+            margin-bottom: 12px;
+        }
+        .meta-info {
+            color: #6B7280;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .startup-info {
+            background-color: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .startup-list {
+            list-style: none;
+            padding: 0;
+            margin: 16px 0;
+        }
+        .startup-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        .startup-list li:last-child {
+            border-bottom: none;
+        }
+        .section {
+            margin-bottom: 40px;
+        }
+        .section-description {
+            background-color: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        .section-description h4 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 12px;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .comparison-table thead {
+            background-color: #F9FAFB;
+        }
+        .comparison-table th {
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #E5E7EB;
+            font-size: 14px;
+        }
+        .comparison-table th:first-child {
+            min-width: 200px;
+        }
+        .comparison-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #E5E7EB;
+            font-size: 14px;
+        }
+        .comparison-table tr:last-child td {
+            border-bottom: none;
+        }
+        .score-cell {
+            text-align: center;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .badge-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #FFFFFF;
+        }
+        .empty-cell {
+            color: #9CA3AF;
+            font-style: italic;
+            text-align: center;
+        }
+        /* タブ機能のスタイル */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #E5E7EB;
+            margin-bottom: 24px;
+        }
+        .tab-button {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #6B7280;
+            transition: all 0.2s ease;
+            margin-bottom: -2px;
+        }
+        .tab-button:hover {
+            color: #374151;
+            background-color: #F9FAFB;
+        }
+        .tab-button.active {
+            color: #4262FF;
+            border-bottom-color: #4262FF;
+            font-weight: 600;
+        }
+        .tab-content {
+            display: none;
+            overflow: visible;
+        }
+        .tab-content.active {
+            display: block;
+            overflow: visible;
+        }
+        /* マークダウンコンテンツのスタイル */
+        .markdown-content {
+            color: #374151;
+            line-height: 1.8;
+            font-size: 15px;
+        }
+        .markdown-content > *:first-child {
+            margin-top: 0 !important;
+        }
+        .markdown-content h1 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-top: 24px;
+            margin-bottom: 16px;
+            color: #1F2937;
+            border-bottom: 2px solid #E5E7EB;
+            padding-bottom: 8px;
+        }
+        .markdown-content h1:first-child {
+            margin-top: 0;
+        }
+        .markdown-content h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-top: 20px;
+            margin-bottom: 12px;
+            color: #2563EB;
+            border-bottom: 1px solid #E5E7EB;
+            padding-bottom: 8px;
+        }
+        .markdown-content h2:first-child {
+            margin-top: 0;
+        }
+        .markdown-content h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 16px;
+            margin-bottom: 10px;
+            color: #1F2937;
+        }
+        .markdown-content h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 14px;
+            margin-bottom: 8px;
+            color: #1F2937;
+        }
+        .markdown-content p {
+            margin-bottom: 12px;
+            color: #374151;
+        }
+        .markdown-content ul {
+            margin-bottom: 12px;
+            padding-left: 32px;
+            list-style-type: disc;
+        }
+        .markdown-content ol {
+            margin-bottom: 12px;
+            padding-left: 32px;
+        }
+        .markdown-content li {
+            margin-bottom: 6px;
+        }
+        .markdown-content code {
+            background-color: #F3F4F6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: monospace;
+            color: #DC2626;
+        }
+        .markdown-content pre {
+            background-color: #F9FAFB;
+            padding: 16px;
+            border-radius: 6px;
+            overflow: auto;
+            margin-bottom: 12px;
+            border: 1px solid #E5E7EB;
+        }
+        .markdown-content pre code {
+            background-color: transparent;
+            padding: 0;
+            font-family: monospace;
+            font-size: 14px;
+            color: #374151;
+        }
+        .markdown-content blockquote {
+            border-left: 4px solid #3B82F6;
+            padding-left: 16px;
+            margin-left: 0;
+            margin-right: 0;
+            margin-bottom: 12px;
+            color: #6B7280;
+            font-style: italic;
+        }
+        .markdown-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+            border: 1px solid #E5E7EB;
+        }
+        .markdown-content th {
+            padding: 8px 12px;
+            background-color: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            font-weight: 600;
+            text-align: left;
+        }
+        .markdown-content td {
+            padding: 8px 12px;
+            border: 1px solid #E5E7EB;
+            text-align: left;
+        }
+        .markdown-content a {
+            color: #3B82F6;
+            text-decoration: underline;
+        }
+        .markdown-content strong {
+            font-weight: 600;
+            color: #1F2937;
+        }
+        .markdown-content hr {
+            border: none;
+            border-top: 1px solid #E5E7EB;
+            margin: 24px 0;
+        }
+        /* ナビゲーション用スタイル */
+        .nav-sidebar-outer {
+            position: fixed;
+            left: calc((100% - 1400px) / 2);
+            top: 230px;
+            width: 280px;
+            z-index: 100;
+        }
+        @media (max-width: 1448px) {
+            .nav-sidebar-outer {
+                left: 24px;
+            }
+        }
+        .nav-sidebar {
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 20px;
+            max-height: calc(100vh - 250px);
+            overflow-y: auto;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+        .nav-sidebar h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+            margin-top: 0;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #E5E7EB;
+        }
+        .nav-links {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .nav-links li {
+            margin-bottom: 4px;
+        }
+        .nav-links a {
+            display: block;
+            padding: 10px 14px;
+            color: #374151;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .nav-links a:hover {
+            background-color: #F3F4F6;
+            color: #4262FF;
+        }
+        .nav-links a:active {
+            background-color: #EFF6FF;
+            color: #2563EB;
+        }
+        .startup-section {
+            margin-bottom: 40px;
+            padding-bottom: 24px;
+            border-bottom: 2px solid #E5E7EB;
+        }
+        .startup-section:last-child {
+            border-bottom: none;
+        }
+        .startup-section h2 {
+            scroll-margin-top: 20px;
+        }
+        .content-with-nav {
+            margin-left: 304px;
+            position: relative;
+            padding-right: 24px;
+        }
+        .content-column {
+            width: 100%;
+            max-width: calc(1400px - 304px - 24px);
+        }
+        @media (max-width: 1448px) {
+            .content-with-nav {
+                margin-left: 304px;
+            }
+        }
+        @media (max-width: 1200px) {
+            .nav-sidebar-outer {
+                display: none;
+            }
+            .content-with-nav {
+                margin-left: 0;
+            }
+        }
+        @media print {
+            body {
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+            }
+            .tabs {
+                display: none;
+            }
+            .tab-content {
+                display: block !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>${startup.title || '競合比較'} - 競合比較レポート</h1>
+        <div class="meta-info">
+            <strong>エクスポート日時:</strong> ${new Date().toLocaleString('ja-JP')}
+        </div>
+        
+        <!-- タブ -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="showTab('startup-info')">対象スタートアップの紹介</button>
+            <button class="tab-button" onclick="showTab('comparison')">競合比較</button>
+        </div>
+        
+        <!-- 対象スタートアップの紹介タブ -->
+        <div id="startup-info" class="tab-content active">
+            <!-- ナビゲーション（コンテナの外に配置） -->
+            <div class="nav-sidebar-outer">
+                <div class="nav-sidebar">
+                    <h3>ナビゲーション</h3>
+                    <ul class="nav-links">
+                        <li><a href="#startup-${startup.id}">${startup.title || '対象スタートアップ'}</a></li>`;
+      
+      // 比較対象スタートアップのナビゲーションリンクを追加
+      selectedStartupList.forEach((s) => {
+        const sanitizedId = s.id.replace(/[^a-zA-Z0-9]/g, '_');
+        htmlContent += `
+                        <li><a href="#startup-${sanitizedId}">${s.title}</a></li>`;
+      });
+      
+      htmlContent += `
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- コンテンツ -->
+            <div class="content-with-nav">
+                <div class="content-column">
+                    <!-- 対象スタートアップ -->
+                    <div id="startup-${startup.id}" class="startup-section">
+                        <h2>${startup.title || '対象スタートアップ'}</h2>
+                        ${startup.description ? `
+                        <div class="markdown-content">
+                            ${markdownToHTML(startup.description)}
+                        </div>` : '<p>説明がありません。</p>'}
+                    </div>`;
+      
+      // 比較対象スタートアップの概要を追加
+      selectedStartupList.forEach((s) => {
+        const sanitizedId = s.id.replace(/[^a-zA-Z0-9]/g, '_');
+        htmlContent += `
+                    
+                    <!-- ${s.title} -->
+                    <div id="startup-${sanitizedId}" class="startup-section">
+                        <h2>${s.title}</h2>
+                        ${s.description ? `
+                        <div class="markdown-content">
+                            ${markdownToHTML(s.description)}
+                        </div>` : '<p>説明がありません。</p>'}
+                    </div>`;
+      });
+      
+      htmlContent += `
+                </div>
+            </div>
+        </div>
+        
+        <!-- 競合比較タブ -->
+        <div id="comparison" class="tab-content">`;
+
+      // 全セクションをエクスポート（一般、機能、ターゲット層）
+      (['general', 'function', 'target'] as ComparisonSectionType[]).forEach(sectionType => {
+        const section = comparisonSections[sectionType];
+        if (section.axes.length === 0) return;
+
+        htmlContent += `
+        <div class="section">
+            <h2>${sectionLabels[sectionType]}セクション</h2>`;
+
+        // マトリクステーブル（先に表示）
+        if (selectedStartupList.length > 0) {
+          htmlContent += `
+            <h3>比較マトリクス</h3>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>比較軸</th>
+                        <th>${startup.title}</th>`;
+          selectedStartupList.forEach(s => {
+            htmlContent += `
+                        <th>${s.title}</th>`;
+          });
+          htmlContent += `
+                    </tr>
+                </thead>
+                <tbody>`;
+
+          section.axes.forEach(axis => {
+            htmlContent += `
+                    <tr>
+                        <td><strong>${axis.label}</strong></td>`;
+
+            // 現在のスタートアップ
+            const currentValue = section.matrix[startup.id]?.[axis.id];
+            if (sectionType === 'target') {
+              const badges = Array.isArray(currentValue) ? currentValue : [];
+              if (badges.length > 0) {
+                htmlContent += `
+                        <td>
+                            <div class="badge-container">`;
+                badges.forEach(badge => {
+                  const badgeColor = getBadgeColorHTML(badge);
+                  htmlContent += `
+                                <span class="badge" style="background-color: ${badgeColor};">${badge}</span>`;
+                });
+                htmlContent += `
+                            </div>
+                        </td>`;
+              } else {
+                htmlContent += `
+                        <td class="empty-cell">-</td>`;
+              }
+            } else {
+              const score = typeof currentValue === 'number' ? currentValue : undefined;
+              if (score !== undefined) {
+                const scoreColor = getScoreColorHTML(score);
+                htmlContent += `
+                        <td class="score-cell" style="color: ${scoreColor};">${score}</td>`;
+              } else {
+                htmlContent += `
+                        <td class="empty-cell">-</td>`;
+              }
+            }
+
+            // 選択されたスタートアップ
+            selectedStartupList.forEach(s => {
+              const value = section.matrix[s.id]?.[axis.id];
+              if (sectionType === 'target') {
+                const badges = Array.isArray(value) ? value : [];
+                if (badges.length > 0) {
+                  htmlContent += `
+                        <td>
+                            <div class="badge-container">`;
+                  badges.forEach(badge => {
+                    const badgeColor = getBadgeColorHTML(badge);
+                    htmlContent += `
+                                <span class="badge" style="background-color: ${badgeColor};">${badge}</span>`;
+                  });
+                  htmlContent += `
+                            </div>
+                        </td>`;
+                } else {
+                  htmlContent += `
+                        <td class="empty-cell">-</td>`;
+                }
+              } else {
+                const score = typeof value === 'number' ? value : undefined;
+                if (score !== undefined) {
+                  const scoreColor = getScoreColorHTML(score);
+                  htmlContent += `
+                        <td class="score-cell" style="color: ${scoreColor};">${score}</td>`;
+                } else {
+                  htmlContent += `
+                        <td class="empty-cell">-</td>`;
+                }
+              }
+            });
+
+            htmlContent += `
+                    </tr>`;
+          });
+
+          htmlContent += `
+                </tbody>
+            </table>`;
+        }
+
+        // セクションの解説（後で表示）
+        if (section.description) {
+          htmlContent += `
+            <div class="section-description" style="margin-top: 24px;">
+                <h4>${sectionLabels[sectionType]}セクションの解説</h4>
+                <div class="markdown-content">${markdownToHTML(section.description)}</div>
+            </div>`;
+        }
+
+        htmlContent += `
+        </div>`;
+      });
+
+      htmlContent += `
+        </div>
+    </div>
+    
+    <script>
+        function showTab(tabName) {
+            // すべてのタブコンテンツを非表示
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // すべてのタブボタンからactiveクラスを削除
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // 選択されたタブを表示
+            document.getElementById(tabName).classList.add('active');
+            
+            // クリックされたボタンにactiveクラスを追加
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>`;
+
+      const sanitizedTitle = (startup.title || '競合比較').replace(/[<>:"/\\|?*]/g, '_');
+      const filename = `${sanitizedTitle}_競合比較_${new Date().toISOString().split('T')[0]}.html`;
+      downloadFile(htmlContent, filename, 'text/html;charset=utf-8');
+      setShowExportModal(false);
+      showToast('完了しました。', 'success');
+    } catch (error) {
+      console.error('HTMLエクスポートエラー:', error);
+      alert('HTML形式でのエクスポートに失敗しました');
+    }
+  };
+
   if (!startup) {
     return (
       <div style={{ padding: '24px', textAlign: 'center', color: '#6B7280' }}>
@@ -1134,6 +2057,28 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
             }}
           >
             {isGeneratingAxes ? '生成中...' : '比較軸をAI生成'}
+          </button>
+          <button
+            onClick={() => setShowExportModal(true)}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#6B7280',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#4B5563';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = '#6B7280';
+            }}
+          >
+            📥 エクスポート
           </button>
         </div>
       </div>
@@ -1340,6 +2285,172 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
         />
       )}
 
+      {/* エクスポートモーダル */}
+      {showExportModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowExportModal(false);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '12px',
+              padding: '24px',
+              width: '90%',
+              maxWidth: '500px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#111827' }}>
+                エクスポート形式を選択
+              </h3>
+              <button
+                onClick={() => setShowExportModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  color: '#6B7280',
+                  cursor: 'pointer',
+                  padding: '0',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button
+                onClick={exportToJSON}
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#F9FAFB',
+                  border: '2px solid #E5E7EB',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F3F4F6';
+                  e.currentTarget.style.borderColor = '#D1D5DB';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F9FAFB';
+                  e.currentTarget.style.borderColor = '#E5E7EB';
+                }}
+              >
+                <span style={{ fontSize: '20px' }}>📄</span>
+                <div>
+                  <div style={{ fontWeight: '600', marginBottom: '4px' }}>JSON形式</div>
+                  <div style={{ fontSize: '12px', color: '#6B7280' }}>
+                    データを完全に保存・インポート可能な形式
+                  </div>
+                </div>
+              </button>
+              
+              <button
+                onClick={exportToMarkdown}
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#F9FAFB',
+                  border: '2px solid #E5E7EB',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F3F4F6';
+                  e.currentTarget.style.borderColor = '#D1D5DB';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F9FAFB';
+                  e.currentTarget.style.borderColor = '#E5E7EB';
+                }}
+              >
+                <span style={{ fontSize: '20px' }}>📝</span>
+                <div>
+                  <div style={{ fontWeight: '600', marginBottom: '4px' }}>Markdown形式</div>
+                  <div style={{ fontSize: '12px', color: '#6B7280' }}>
+                    テキストエディタで編集可能な形式
+                  </div>
+                </div>
+              </button>
+              
+              <button
+                onClick={exportToHTML}
+                style={{
+                  padding: '16px',
+                  backgroundColor: '#F9FAFB',
+                  border: '2px solid #E5E7EB',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F3F4F6';
+                  e.currentTarget.style.borderColor = '#D1D5DB';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F9FAFB';
+                  e.currentTarget.style.borderColor = '#E5E7EB';
+                }}
+              >
+                <span style={{ fontSize: '20px' }}>🌐</span>
+                <div>
+                  <div style={{ fontWeight: '600', marginBottom: '4px' }}>HTML形式</div>
+                  <div style={{ fontSize: '12px', color: '#6B7280' }}>
+                    ブラウザで表示可能な形式（デザイン保持）
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* AI生成モーダル */}
       <AIGenerationModal
         isOpen={isAIGenerationModalOpen}
@@ -1392,6 +2503,8 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
         statuses={[]}
         engagementLevels={[]}
         bizDevPhases={[]}
+        comparisonSectionType={aiGeneratedTarget || null}
+        comparisonSectionLabel={aiGeneratedTarget ? (aiGeneratedTarget === 'general' ? '一般' : aiGeneratedTarget === 'function' ? '機能' : 'ターゲット層') : undefined}
       />
     </div>
   );

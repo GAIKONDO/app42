@@ -183,7 +183,7 @@ export default function DescriptionSection({
           value={localDescription}
           onChange={(e) => setLocalDescription(e.target.value)}
           placeholder="施策の説明を入力（マークダウン記法対応）"
-          rows={8}
+          rows={16}
           style={{
             width: '100%',
             padding: '12px',

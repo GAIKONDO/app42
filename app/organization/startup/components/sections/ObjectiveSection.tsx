@@ -183,7 +183,7 @@ export default function ObjectiveSection({
           value={localObjective}
           onChange={(e) => setLocalObjective(e.target.value)}
           placeholder="注力アクションを入力（マークダウン記法対応）"
-          rows={8}
+          rows={16}
           style={{
             width: '100%',
             padding: '12px',

@@ -5,42 +5,23 @@ import type { Startup, CompetitorComparisonData, Category } from '@/lib/orgApi';
 import { getAllStartups, saveStartup } from '@/lib/orgApi/startups';
 import { generateUniqueId, getCategories } from '@/lib/orgApi';
 import { callGPTAPI } from '@/lib/topicMetadataGeneration';
-
-interface CompetitorComparisonTabProps {
-  startup: Startup | null;
-  organizationId: string;
-  setStartup?: (startup: Startup) => void;
-}
-
-interface ComparisonAxis {
-  id: string;
-  label: string;
-  isEditing?: boolean;
-  options?: string[]; // ターゲット層セクションの場合、バッジの選択肢
-}
-
-interface ComparisonMatrix {
-  [startupId: string]: {
-    [axisId: string]: number; // 0-5の点数（一般・機能セクション用）
-  };
-}
-
-type ComparisonSectionType = 'general' | 'function' | 'target';
-
-interface ComparisonSection {
-  axes: ComparisonAxis[];
-  matrix: {
-    [startupId: string]: {
-      [axisId: string]: number | string[]; // 点数（0-5）またはバッジの配列
-    };
-  };
-}
-
-interface ComparisonSections {
-  general: ComparisonSection;
-  function: ComparisonSection;
-  target: ComparisonSection;
-}
+import type { 
+  ComparisonAxis, 
+  ComparisonMatrix, 
+  ComparisonSectionType, 
+  ComparisonSection, 
+  ComparisonSections,
+  CompetitorComparisonTabProps 
+} from './CompetitorComparisonTab/types';
+import { convertMatrixToScores, getScoreColor } from './CompetitorComparisonTab/utils';
+import ComparisonTargetSelector from './CompetitorComparisonTab/ComparisonTargetSelector';
+import ComparisonMatrixTable from './CompetitorComparisonTab/ComparisonMatrixTable';
+import ScoreSelectModal from './CompetitorComparisonTab/ScoreSelectModal';
+import BadgeSelectModal from './CompetitorComparisonTab/BadgeSelectModal';
+import AxisOptionsEditModal from './CompetitorComparisonTab/AxisOptionsEditModal';
+import DeleteAllConfirmModal from './CompetitorComparisonTab/DeleteAllConfirmModal';
+import DeleteAxisConfirmModal from './CompetitorComparisonTab/DeleteAxisConfirmModal';
+import AIGenerationModal from '../modals/AIGenerationModal';
 
 export default function CompetitorComparisonTab({
   startup,
@@ -68,24 +49,23 @@ export default function CompetitorComparisonTab({
   const [categories, setCategories] = useState<Category[]>([]);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [deleteAllSection, setDeleteAllSection] = useState<ComparisonSectionType | null>(null);
+  const [showDeleteAxisModal, setShowDeleteAxisModal] = useState(false);
+  const [deleteAxisInfo, setDeleteAxisInfo] = useState<{ section: ComparisonSectionType; axisId: string; axisLabel: string } | null>(null);
   const [scoreSelectCell, setScoreSelectCell] = useState<{ section: ComparisonSectionType; startupId: string; axisId: string } | null>(null);
   const [badgeSelectCell, setBadgeSelectCell] = useState<{ section: ComparisonSectionType; startupId: string; axisId: string } | null>(null);
   const [editingAxisOptions, setEditingAxisOptions] = useState<{ section: ComparisonSectionType; axisId: string } | null>(null);
   const [newOptionInput, setNewOptionInput] = useState<string>('');
+  // AI生成関連の状態
+  const [isAIGenerationModalOpen, setIsAIGenerationModalOpen] = useState(false);
+  const [aiGeneratedTarget, setAiGeneratedTarget] = useState<ComparisonSectionType | null>(null);
+  const [aiGeneratedContent, setAiGeneratedContent] = useState<string | null>(null);
+  const [originalContent, setOriginalContent] = useState<string | null>(null);
+  const [aiGenerationInput, setAiGenerationInput] = useState<string>('');
+  const [selectedTopicIdsForAI, setSelectedTopicIdsForAI] = useState<string[]>([]);
+  const [aiSummaryFormat, setAiSummaryFormat] = useState<'auto' | 'bullet' | 'paragraph' | 'custom'>('auto');
+  const [aiSummaryLength, setAiSummaryLength] = useState<number>(1000);
+  const [aiCustomPrompt, setAiCustomPrompt] = useState<string>('');
 
-  // マトリクスのbooleanを数値に変換（後方互換性）
-  const convertMatrixToScores = (matrix: any): ComparisonMatrix => {
-    const converted: ComparisonMatrix = {};
-    Object.keys(matrix).forEach(startupId => {
-      converted[startupId] = {};
-      Object.keys(matrix[startupId]).forEach(axisId => {
-        const value = matrix[startupId][axisId];
-        // booleanの場合は1点に変換、数値の場合はそのまま
-        converted[startupId][axisId] = typeof value === 'boolean' ? (value ? 1 : 0) : (typeof value === 'number' ? value : 0);
-      });
-    });
-    return converted;
-  };
 
   // 保存された競合比較データを読み込む（startupIdが変更された場合のみ）
   const prevStartupIdRef = React.useRef<string | null>(null);
@@ -116,15 +96,18 @@ export default function CompetitorComparisonTab({
             general: {
               axes: sections.general?.axes || [],
               matrix: convertMatrixToScores(sections.general?.matrix || {}),
+              description: sections.general?.description || '',
             },
             function: {
               axes: sections.function?.axes || [],
               matrix: convertMatrixToScores(sections.function?.matrix || {}),
+              description: sections.function?.description || '',
             },
             target: {
               axes: sections.target?.axes || [],
               // ターゲット層セクションのマトリクスはそのまま使用（バッジの配列）
               matrix: sections.target?.matrix || {},
+              description: sections.target?.description || '',
             },
           };
           
@@ -757,6 +740,15 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
     setEditingAxisLabel('');
   };
 
+  // セクションごとの比較軸の削除確認モーダルを表示
+  const handleDeleteAxisClick = (section: ComparisonSectionType, axisId: string) => {
+    const axis = comparisonSections[section].axes.find(a => a.id === axisId);
+    if (axis) {
+      setDeleteAxisInfo({ section, axisId, axisLabel: axis.label });
+      setShowDeleteAxisModal(true);
+    }
+  };
+
   // セクションごとの比較軸を削除
   const deleteAxis = async (section: ComparisonSectionType, axisId: string) => {
     const updatedSections = { ...comparisonSections };
@@ -770,6 +762,9 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
     setComparisonSections(updatedSections);
     // 削除後に自動保存
     await autoSaveComparisonDataWithSections(updatedSections);
+    // モーダルを閉じる
+    setShowDeleteAxisModal(false);
+    setDeleteAxisInfo(null);
   };
 
   // セクションごとのすべての比較軸を一括削除の確認モーダルを表示
@@ -797,6 +792,10 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
     const newAxis: ComparisonAxis = {
       id: newId,
       label: '新しい比較軸',
+      // ターゲット層の場合はデフォルトの選択肢を設定
+      ...(section === 'target' && {
+        options: ['選択肢1', '選択肢2', '選択肢3'],
+      }),
     };
     const updatedSections = { ...comparisonSections };
     updatedSections[section].axes = [...updatedSections[section].axes, newAxis];
@@ -808,23 +807,6 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
     await autoSaveComparisonDataWithSections(updatedSections);
   };
 
-  // 点数ごとの色を取得
-  const getScoreColor = (score: number | undefined): { bg: string; text: string; border: string } => {
-    if (score === undefined || score === 0) {
-      return { bg: '#F3F4F6', text: '#9CA3AF', border: '#E5E7EB' }; // グレーアウト
-    } else if (score === 1) {
-      return { bg: '#FEE2E2', text: '#DC2626', border: '#FCA5A5' }; // 赤系
-    } else if (score === 2) {
-      return { bg: '#FEF3C7', text: '#D97706', border: '#FCD34D' }; // オレンジ系
-    } else if (score === 3) {
-      return { bg: '#FEF9C3', text: '#CA8A04', border: '#FDE047' }; // 黄色系
-    } else if (score === 4) {
-      return { bg: '#DCFCE7', text: '#16A34A', border: '#86EFAC' }; // 緑系
-    } else if (score === 5) {
-      return { bg: '#D1FAE5', text: '#059669', border: '#6EE7B7' }; // 濃い緑系
-    }
-    return { bg: '#F3F4F6', text: '#9CA3AF', border: '#E5E7EB' };
-  };
 
   // セクションごとのマトリクスのセルに点数を設定
   const setMatrixCellScore = async (section: ComparisonSectionType, startupId: string, axisId: string, score: number) => {
@@ -893,6 +875,47 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
       
       await autoSaveComparisonDataWithSections(updatedSections);
     }
+  };
+
+  // セクションの解説文を更新
+  const updateSectionDescription = async (section: ComparisonSectionType, description: string) => {
+    const updatedSections = { ...comparisonSections };
+    updatedSections[section].description = description;
+    setComparisonSections(updatedSections);
+    // 解説文変更後に自動保存
+    await autoSaveComparisonDataWithSections(updatedSections);
+  };
+
+  // AI生成モーダルを開く
+  const handleOpenAIModal = (sectionType: ComparisonSectionType) => {
+    setAiGeneratedTarget(sectionType);
+    setAiGenerationInput('');
+    setSelectedTopicIdsForAI([]);
+    setAiSummaryFormat('auto');
+    setAiSummaryLength(1000);
+    setAiCustomPrompt('');
+    setOriginalContent(comparisonSections[sectionType].description || '');
+    setIsAIGenerationModalOpen(true);
+  };
+
+  // AI生成結果を元に戻す
+  const handleUndo = () => {
+    if (aiGeneratedTarget) {
+      const updatedSections = { ...comparisonSections };
+      updatedSections[aiGeneratedTarget].description = originalContent || '';
+      setComparisonSections(updatedSections);
+      autoSaveComparisonDataWithSections(updatedSections);
+    }
+    setAiGeneratedContent(null);
+    setAiGeneratedTarget(null);
+    setOriginalContent(null);
+  };
+
+  // AI生成結果を保持
+  const handleKeep = () => {
+    setAiGeneratedContent(null);
+    setAiGeneratedTarget(null);
+    setOriginalContent(null);
   };
 
   // セクション構造での自動保存用の関数
@@ -1058,40 +1081,33 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
           )}
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          {(() => {
-            const hasAnyAxes = Object.values(comparisonSections).some(section => section.axes.length > 0);
-            return hasAnyAxes && (
-              <>
-                <button
-                  onClick={saveComparisonData}
-                  disabled={isSaving}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: isSaving ? '#9CA3AF' : '#10B981',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    cursor: isSaving ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSaving) {
-                      e.currentTarget.style.backgroundColor = '#059669';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSaving) {
-                      e.currentTarget.style.backgroundColor = '#10B981';
-                    }
-                  }}
-                >
-                  {isSaving ? '保存中...' : '💾 保存'}
-                </button>
-              </>
-            );
-          })()}
+          <button
+            onClick={saveComparisonData}
+            disabled={isSaving}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: isSaving ? '#9CA3AF' : '#10B981',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.backgroundColor = '#059669';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.backgroundColor = '#10B981';
+              }
+            }}
+          >
+            {isSaving ? '保存中...' : '💾 保存'}
+          </button>
           <button
             onClick={generateComparisonAxes}
             disabled={isGeneratingAxes}
@@ -1123,113 +1139,33 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
       </div>
 
       {/* 比較対象の選択 */}
-      <div style={{ 
-        backgroundColor: '#FFFFFF', 
-        borderRadius: '8px', 
-        padding: '20px',
-        border: '1px solid #E5E7EB',
-        marginBottom: '24px'
-      }}>
-        <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#374151', marginBottom: '16px' }}>
-          比較対象の選択
-        </h3>
-        {!startup.categoryIds || startup.categoryIds.length === 0 ? (
-          <p style={{ color: '#6B7280', fontSize: '14px', margin: 0 }}>
-            このスタートアップにカテゴリーが設定されていないため、比較対象を表示できません。まず、詳細タブでカテゴリーを設定してください。
-          </p>
-        ) : currentSubCategoryIds.size === 0 ? (
+      {currentSubCategoryIds.size === 0 ? (
+        <div style={{ 
+          backgroundColor: '#FFFFFF', 
+          borderRadius: '8px', 
+          padding: '20px',
+          border: '1px solid #E5E7EB',
+          marginBottom: '24px'
+        }}>
+          <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#374151', marginBottom: '16px' }}>
+            比較対象の選択
+          </h3>
           <p style={{ color: '#6B7280', fontSize: '14px', margin: 0 }}>
             このスタートアップにサブカテゴリーが設定されていないため、比較対象を表示できません。サブカテゴリーを設定してください。
           </p>
-        ) : startupsBySubCategory.size === 0 ? (
-          <p style={{ color: '#6B7280', fontSize: '14px', margin: 0 }}>
-            同じサブカテゴリーが設定されているスタートアップが見つかりませんでした。
-          </p>
-        ) : (
-          <>
-            <p style={{ color: '#6B7280', fontSize: '12px', margin: 0, marginBottom: '16px' }}>
-              同じカテゴリーが設定されているスタートアップのみ表示されています（合計 {filteredStartups.length}件）
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {Array.from(startupsBySubCategory.entries()).map(([subCategoryId, { subCategory, parentCategory, startups: subCategoryStartups }]) => (
-                <div key={subCategoryId} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    paddingBottom: '8px',
-                    borderBottom: '2px solid #E5E7EB',
-                    marginBottom: '8px',
-                  }}>
-                    {parentCategory && (
-                      <span style={{
-                        fontSize: '12px',
-                        fontWeight: '500',
-                        color: '#9CA3AF',
-                        marginRight: '8px',
-                      }}>
-                        {parentCategory.title} / 
-                      </span>
-                    )}
-                    <h4 style={{
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: '#4262FF',
-                      margin: 0,
-                    }}>
-                      {subCategory.title}
-                    </h4>
-                    <span style={{
-                      fontSize: '12px',
-                      color: '#6B7280',
-                      marginLeft: '8px',
-                    }}>
-                      ({subCategoryStartups.length}件)
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {subCategoryStartups.map(s => (
-                      <label
-                        key={s.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '8px 16px',
-                          backgroundColor: selectedStartups.includes(s.id) ? '#EFF6FF' : '#F9FAFB',
-                          border: `1.5px solid ${selectedStartups.includes(s.id) ? '#4262FF' : '#E5E7EB'}`,
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          color: selectedStartups.includes(s.id) ? '#4262FF' : '#374151',
-                          fontWeight: selectedStartups.includes(s.id) ? '600' : '400',
-                          transition: 'all 0.2s ease',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedStartups.includes(s.id)}
-                          onChange={async (e) => {
-                            let updatedSelectedStartups: string[];
-                            if (e.target.checked) {
-                              updatedSelectedStartups = [...selectedStartups, s.id];
-                            } else {
-                              updatedSelectedStartups = selectedStartups.filter(id => id !== s.id);
-                            }
-                            setSelectedStartups(updatedSelectedStartups);
-                            // 選択変更後に自動保存
-                            await autoSaveComparisonData(undefined, updatedSelectedStartups);
-                          }}
-                          style={{ marginRight: '8px', cursor: 'pointer' }}
-                        />
-                        {s.title}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+        </div>
+      ) : (
+        <ComparisonTargetSelector
+          startup={startup}
+          startupsBySubCategory={startupsBySubCategory}
+          filteredStartups={filteredStartups}
+          selectedStartups={selectedStartups}
+          onSelectionChange={async (updatedSelectedStartups) => {
+            setSelectedStartups(updatedSelectedStartups);
+            await autoSaveComparisonData(undefined, updatedSelectedStartups);
+          }}
+        />
+      )}
 
       {/* セクションごとのマトリクステーブル */}
       {selectedStartupList.length > 0 && (() => {
@@ -1243,1134 +1179,42 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
           <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
             {sectionConfigs.map(({ type, label }) => {
               const section = comparisonSections[type];
-              const hasAxes = section.axes.length > 0;
               
-              if (!hasAxes) return null;
-
               return (
-                <div key={type} style={{ 
-                  backgroundColor: '#FFFFFF', 
-                  borderRadius: '8px', 
-                  padding: '20px',
-                  border: '1px solid #E5E7EB',
-                }}>
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    marginBottom: '16px',
-                    paddingBottom: '12px',
-                    borderBottom: '2px solid #E5E7EB',
-                  }}>
-                    <h3 style={{ 
-                      fontSize: '18px', 
-                      fontWeight: '600', 
-                      color: '#374151', 
-                      margin: 0 
-                    }}>
-                      {label}
-                    </h3>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        onClick={() => addNewAxis(type)}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#FFFFFF',
-                          color: '#4262FF',
-                          border: '1.5px solid #4262FF',
-                          borderRadius: '6px',
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#EFF6FF';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = '#FFFFFF';
-                        }}
-                      >
-                        + 比較軸を追加
-                      </button>
-                      <button
-                        onClick={() => handleDeleteAllClick(type)}
-                        style={{
-                          padding: '8px 16px',
-                          backgroundColor: '#FFFFFF',
-                          color: '#EF4444',
-                          border: '1.5px solid #EF4444',
-                          borderRadius: '6px',
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#FEF2F2';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = '#FFFFFF';
-                        }}
-                      >
-                        🗑️ すべて削除
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
-                      <thead>
-                        <tr>
-                          <th style={{ 
-                            padding: '12px',
-                            textAlign: 'left',
-                            borderBottom: '2px solid #E5E7EB',
-                            backgroundColor: '#F9FAFB',
-                            position: 'sticky',
-                            left: 0,
-                            zIndex: 10,
-                            minWidth: '200px',
-                            fontSize: '14px',
-                            fontWeight: '600',
-                            color: '#374151'
-                          }}>
-                            比較軸
-                          </th>
-                          <th style={{ 
-                            padding: '12px',
-                            textAlign: 'center',
-                            borderBottom: '2px solid #E5E7EB',
-                            backgroundColor: '#F9FAFB',
-                            fontSize: '14px',
-                            fontWeight: '600',
-                            color: '#4262FF',
-                            minWidth: '150px'
-                          }}>
-                            {startup.title}
-                          </th>
-                          {selectedStartupList.map(s => (
-                            <th 
-                              key={s.id}
-                              style={{ 
-                                padding: '12px',
-                                textAlign: 'center',
-                                borderBottom: '2px solid #E5E7EB',
-                                backgroundColor: '#F9FAFB',
-                                fontSize: '14px',
-                                fontWeight: '600',
-                                color: '#374151',
-                                minWidth: '150px'
-                              }}
-                            >
-                              {s.title}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {section.axes.map((axis) => (
-                <tr 
-                  key={axis.id}
-                  style={{ position: 'relative' }}
-                  onMouseEnter={(e) => {
-                    const buttons = e.currentTarget.querySelectorAll('[data-action-button]');
-                    buttons.forEach((btn: any) => {
-                      btn.style.opacity = '1';
-                      btn.style.visibility = 'visible';
-                    });
+                <ComparisonMatrixTable
+                  key={type}
+                  section={section}
+                  sectionType={type}
+                  sectionLabel={label}
+                  currentStartup={startup}
+                  selectedStartups={selectedStartupList}
+                  editingSection={editingSection}
+                  editingAxisId={editingAxisId}
+                  editingAxisLabel={editingAxisLabel}
+                  onEditLabel={setEditingAxisLabel}
+                  onSaveEdit={saveEditingAxis}
+                  onCancelEdit={cancelEditingAxis}
+                  onStartEdit={(axis) => startEditingAxis(type, axis)}
+                  onDelete={(axisId) => handleDeleteAxisClick(type, axisId)}
+                  onAddAxis={() => addNewAxis(type)}
+                  onDeleteAll={() => handleDeleteAllClick(type)}
+                  scoreSelectCell={scoreSelectCell}
+                  badgeSelectCell={badgeSelectCell}
+                  onScoreCellClick={(startupId, axisId) => {
+                    setScoreSelectCell({ section: type, startupId, axisId });
                   }}
-                  onMouseLeave={(e) => {
-                    const buttons = e.currentTarget.querySelectorAll('[data-action-button]');
-                    buttons.forEach((btn: any) => {
-                      if (!(editingSection === type && editingAxisId === axis.id)) {
-                        btn.style.opacity = '0';
-                        btn.style.visibility = 'hidden';
-                      }
-                    });
+                  onBadgeCellClick={(startupId, axisId) => {
+                    setBadgeSelectCell({ section: type, startupId, axisId });
                   }}
-                >
-                  <td style={{ 
-                    padding: '12px',
-                    borderBottom: '1px solid #E5E7EB',
-                    backgroundColor: '#FFFFFF',
-                    position: 'sticky',
-                    left: 0,
-                    zIndex: 5,
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#374151'
-                  }}>
-                    {editingSection === type && editingAxisId === axis.id ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="text"
-                          value={editingAxisLabel}
-                          onChange={(e) => setEditingAxisLabel(e.target.value)}
-                          onKeyPress={(e) => {
-                            if (e.key === 'Enter') {
-                              saveEditingAxis();
-                            } else if (e.key === 'Escape') {
-                              cancelEditingAxis();
-                            }
-                          }}
-                          autoFocus
-                          style={{
-                            flex: 1,
-                            padding: '6px 10px',
-                            border: '1.5px solid #4262FF',
-                            borderRadius: '6px',
-                            fontSize: '14px',
-                            outline: 'none',
-                          }}
-                        />
-                        <button
-                          onClick={saveEditingAxis}
-                          style={{
-                            padding: '4px 8px',
-                            backgroundColor: '#4262FF',
-                            color: '#FFFFFF',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                          }}
-                          title="保存"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onClick={cancelEditingAxis}
-                          style={{
-                            padding: '4px 8px',
-                            backgroundColor: '#F3F4F6',
-                            color: '#374151',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                          }}
-                          title="キャンセル"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
-                        <span style={{ flex: 1 }}>{axis.label}</span>
-                        <button
-                          data-action-button
-                          onClick={() => startEditingAxis(type, axis)}
-                          style={{
-                            padding: '4px 8px',
-                            backgroundColor: 'transparent',
-                            color: '#6B7280',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                            opacity: 0,
-                            visibility: 'hidden',
-                            transition: 'all 0.2s ease',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = '#F3F4F6';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                          }}
-                          title="編集"
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          data-action-button
-                          onClick={() => {
-                            if (confirm(`「${axis.label}」を削除しますか？`)) {
-                              deleteAxis(type, axis.id);
-                            }
-                          }}
-                          style={{
-                            padding: '4px 8px',
-                            backgroundColor: 'transparent',
-                            color: '#EF4444',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                            opacity: 0,
-                            visibility: 'hidden',
-                            transition: 'all 0.2s ease',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = '#FEF2F2';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                          }}
-                          title="削除"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ 
-                    padding: '8px',
-                    textAlign: 'center',
-                    borderBottom: '1px solid #E5E7EB',
-                    position: 'relative',
-                  }}>
-                    {(() => {
-                      // ターゲット層セクションの場合はバッジ形式、それ以外は点数形式
-                      if (type === 'target') {
-                        const cellValue = section.matrix[startup.id]?.[axis.id];
-                        const selectedBadges = Array.isArray(cellValue) 
-                          ? (cellValue as string[])
-                          : [];
-                        const isSelected = badgeSelectCell?.section === type && 
-                                          badgeSelectCell?.startupId === startup.id && 
-                                          badgeSelectCell?.axisId === axis.id;
-                        
-                        return (
-                          <>
-                            <div
-                              onClick={() => {
-                                setBadgeSelectCell({ section: type, startupId: startup.id, axisId: axis.id });
-                              }}
-                              style={{
-                                minHeight: '40px',
-                                padding: '8px',
-                                margin: '0 auto',
-                                border: `2px solid ${isSelected ? '#4262FF' : '#E5E7EB'}`,
-                                borderRadius: '8px',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                                display: 'flex',
-                                flexWrap: 'wrap',
-                                gap: '4px',
-                                justifyContent: selectedBadges.length === 0 ? 'center' : 'flex-start',
-                                alignItems: 'center',
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.borderColor = '#4262FF';
-                                e.currentTarget.style.backgroundColor = '#F9FAFB';
-                              }}
-                              onMouseLeave={(e) => {
-                                if (!isSelected) {
-                                  e.currentTarget.style.borderColor = '#E5E7EB';
-                                  e.currentTarget.style.backgroundColor = 'transparent';
-                                }
-                              }}
-                            >
-                              {selectedBadges.length > 0 ? (
-                                selectedBadges.map((badge, idx) => (
-                                  <span
-                                    key={idx}
-                                    style={{
-                                      padding: '4px 8px',
-                                      backgroundColor: '#4262FF',
-                                      color: '#FFFFFF',
-                                      borderRadius: '12px',
-                                      fontSize: '12px',
-                                      fontWeight: '500',
-                                      display: 'inline-block',
-                                    }}
-                                  >
-                                    {badge}
-                                  </span>
-                                ))
-                              ) : (
-                                <span style={{ color: '#9CA3AF', fontSize: '12px' }}>バッジを選択</span>
-                              )}
-                            </div>
-                            
-                            {/* バッジ選択モーダル */}
-                            {isSelected && axis.options && axis.options.length > 0 && (
-                              <div
-                                style={{
-                                  position: 'fixed',
-                                  top: '50%',
-                                  left: '50%',
-                                  transform: 'translate(-50%, -50%)',
-                                  backgroundColor: '#FFFFFF',
-                                  border: '1px solid #E5E7EB',
-                                  borderRadius: '16px',
-                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                                  zIndex: 10001,
-                                  padding: '24px',
-                                  minWidth: '500px',
-                                  maxWidth: '600px',
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <div style={{ marginBottom: '16px' }}>
-                                  <h4 style={{
-                                    margin: 0,
-                                    fontSize: '16px',
-                                    fontWeight: '600',
-                                    color: '#374151',
-                                    marginBottom: '4px',
-                                  }}>
-                                    バッジを選択
-                                  </h4>
-                                  <p style={{
-                                    margin: 0,
-                                    fontSize: '12px',
-                                    color: '#6B7280',
-                                  }}>
-                                    {axis.label} - {startup.title}
-                                  </p>
-                                </div>
-                                
-                                <div style={{
-                                  display: 'flex',
-                                  flexWrap: 'wrap',
-                                  gap: '8px',
-                                  marginBottom: '16px',
-                                  maxHeight: '300px',
-                                  overflowY: 'auto',
-                                }}>
-                                  {axis.options.map((option) => {
-                                    const isSelected = selectedBadges.includes(option);
-                                    return (
-                                      <button
-                                        key={option}
-                                        onClick={() => {
-                                          const newBadges = isSelected
-                                            ? selectedBadges.filter(b => b !== option)
-                                            : [...selectedBadges, option];
-                                          setMatrixCellBadges(type, startup.id, axis.id, newBadges);
-                                        }}
-                                        style={{
-                                          padding: '8px 16px',
-                                          border: `2px solid ${isSelected ? '#4262FF' : '#E5E7EB'}`,
-                                          borderRadius: '12px',
-                                          backgroundColor: isSelected ? '#EFF6FF' : '#FFFFFF',
-                                          color: isSelected ? '#4262FF' : '#374151',
-                                          fontSize: '14px',
-                                          fontWeight: isSelected ? '600' : '500',
-                                          cursor: 'pointer',
-                                          transition: 'all 0.2s ease',
-                                        }}
-                                        onMouseEnter={(e) => {
-                                          if (!isSelected) {
-                                            e.currentTarget.style.borderColor = '#4262FF';
-                                            e.currentTarget.style.backgroundColor = '#F9FAFB';
-                                          }
-                                        }}
-                                        onMouseLeave={(e) => {
-                                          if (!isSelected) {
-                                            e.currentTarget.style.borderColor = '#E5E7EB';
-                                            e.currentTarget.style.backgroundColor = '#FFFFFF';
-                                          }
-                                        }}
-                                      >
-                                        {option}
-                                        {isSelected && ' ✓'}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                                
-                                <div style={{
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  paddingTop: '16px',
-                                  borderTop: '1px solid #E5E7EB',
-                                }}>
-                                  <button
-                                    onClick={() => {
-                                      setEditingAxisOptions({ section: type, axisId: axis.id });
-                                      setBadgeSelectCell(null);
-                                    }}
-                                    style={{
-                                      padding: '8px 16px',
-                                      backgroundColor: '#F3F4F6',
-                                      color: '#374151',
-                                      border: 'none',
-                                      borderRadius: '8px',
-                                      fontSize: '14px',
-                                      fontWeight: '500',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    選択肢を編集
-                                  </button>
-                                  <button
-                                    onClick={() => setBadgeSelectCell(null)}
-                                    style={{
-                                      padding: '8px 16px',
-                                      backgroundColor: '#F3F4F6',
-                                      color: '#374151',
-                                      border: 'none',
-                                      borderRadius: '8px',
-                                      fontSize: '14px',
-                                      fontWeight: '500',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    閉じる
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        );
-                      }
-                      
-                      // 一般・機能セクションは点数形式
-                      const currentStartupScore = section.matrix[startup.id]?.[axis.id];
-                      const score = typeof currentStartupScore === 'number' && currentStartupScore !== undefined 
-                        ? currentStartupScore 
-                        : 5; // デフォルトは5点
-                      const colors = getScoreColor(score);
-                      const isSelected = scoreSelectCell?.section === type && 
-                                        scoreSelectCell?.startupId === startup.id && 
-                                        scoreSelectCell?.axisId === axis.id;
-                      
-                      return (
-                        <>
-                          <div
-                            onClick={() => {
-                              setScoreSelectCell({ section: type, startupId: startup.id, axisId: axis.id });
-                            }}
-                            style={{
-                              width: '40px',
-                              height: '40px',
-                              margin: '0 auto',
-                              backgroundColor: colors.bg,
-                              border: `2px solid ${isSelected ? '#4262FF' : colors.border}`,
-                              borderRadius: '8px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: colors.text,
-                              fontSize: '16px',
-                              fontWeight: '700',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease',
-                              opacity: score === 0 ? 0.5 : 1,
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = 'scale(1.1)';
-                              e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = 'scale(1)';
-                              e.currentTarget.style.boxShadow = 'none';
-                            }}
-                          >
-                            {score !== undefined && score !== null ? score : '-'}
-                          </div>
-                          
-                          {/* 点数選択モーダル */}
-                          {isSelected && (
-                            <div
-                              style={{
-                                position: 'fixed',
-                                top: '50%',
-                                left: '50%',
-                                transform: 'translate(-50%, -50%)',
-                                backgroundColor: '#FFFFFF',
-                                border: '1px solid #E5E7EB',
-                                borderRadius: '16px',
-                                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                                zIndex: 10001,
-                                padding: '24px',
-                                minWidth: '400px',
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => {
-                                const key = e.key;
-                                if (key >= '0' && key <= '5') {
-                                  const point = parseInt(key);
-                                  setMatrixCellScore(type, startup.id, axis.id, point);
-                                  setScoreSelectCell(null);
-                                } else if (key === 'Escape') {
-                                  setScoreSelectCell(null);
-                                }
-                              }}
-                              tabIndex={0}
-                            >
-                              <div style={{ marginBottom: '16px' }}>
-                                <h4 style={{
-                                  margin: 0,
-                                  fontSize: '16px',
-                                  fontWeight: '600',
-                                  color: '#374151',
-                                  marginBottom: '4px',
-                                }}>
-                                  点数を選択
-                                </h4>
-                                <p style={{
-                                  margin: 0,
-                                  fontSize: '12px',
-                                  color: '#6B7280',
-                                }}>
-                                  {axis.label} - {startup.title}
-                                </p>
-                              </div>
-                              
-                              <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(3, 1fr)',
-                                gap: '12px',
-                                marginBottom: '16px',
-                              }}>
-                                {[0, 1, 2, 3, 4, 5].map((point) => {
-                                  const pointColors = getScoreColor(point);
-                                  const isCurrentScore = score === point;
-                                  return (
-                                    <button
-                                      key={point}
-                                      onClick={() => {
-                                        setMatrixCellScore(type, startup.id, axis.id, point);
-                                        setScoreSelectCell(null);
-                                      }}
-                                      style={{
-                                        padding: '16px',
-                                        border: `2px solid ${isCurrentScore ? '#4262FF' : pointColors.border}`,
-                                        borderRadius: '12px',
-                                        backgroundColor: isCurrentScore ? '#EFF6FF' : pointColors.bg,
-                                        color: pointColors.text,
-                                        fontSize: '18px',
-                                        fontWeight: '700',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s ease',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '8px',
-                                        opacity: point === 0 ? 0.6 : 1,
-                                        position: 'relative',
-                                      }}
-                                      onMouseEnter={(e) => {
-                                        e.currentTarget.style.transform = 'scale(1.05)';
-                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        e.currentTarget.style.transform = 'scale(1)';
-                                        e.currentTarget.style.boxShadow = 'none';
-                                      }}
-                                    >
-                                      <div style={{
-                                        fontSize: '32px',
-                                        fontWeight: '700',
-                                        lineHeight: 1,
-                                      }}>
-                                        {point}
-                                      </div>
-                                      <div style={{
-                                        fontSize: '11px',
-                                        fontWeight: '500',
-                                        opacity: 0.8,
-                                      }}>
-                                        点
-                                      </div>
-                                      {isCurrentScore && (
-                                        <div style={{
-                                          position: 'absolute',
-                                          top: '4px',
-                                          right: '4px',
-                                          width: '20px',
-                                          height: '20px',
-                                          backgroundColor: '#4262FF',
-                                          borderRadius: '50%',
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          color: '#FFFFFF',
-                                          fontSize: '12px',
-                                        }}>
-                                          ✓
-                                        </div>
-                                      )}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              
-                              <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                paddingTop: '16px',
-                                borderTop: '1px solid #E5E7EB',
-                              }}>
-                                <p style={{
-                                  margin: 0,
-                                  fontSize: '11px',
-                                  color: '#9CA3AF',
-                                }}>
-                                  キーボードの0-5キーでも選択できます
-                                </p>
-                                <button
-                                  onClick={() => setScoreSelectCell(null)}
-                                  style={{
-                                    padding: '8px 16px',
-                                    backgroundColor: '#F3F4F6',
-                                    color: '#374151',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '14px',
-                                    fontWeight: '500',
-                                    cursor: 'pointer',
-                                    transition: 'background-color 0.2s ease',
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#E5E7EB';
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#F3F4F6';
-                                  }}
-                                >
-                                  キャンセル
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </td>
-                  {selectedStartupList.map(s => {
-                    // ターゲット層セクションの場合はバッジ形式、それ以外は点数形式
-                    if (type === 'target') {
-                      const cellValue = section.matrix[s.id]?.[axis.id];
-                      const selectedBadges = Array.isArray(cellValue) 
-                        ? (cellValue as string[])
-                        : [];
-                      const isSelected = badgeSelectCell?.section === type && 
-                                        badgeSelectCell?.startupId === s.id && 
-                                        badgeSelectCell?.axisId === axis.id;
-                      
-                      return (
-                        <td 
-                          key={s.id}
-                          style={{ 
-                            padding: '8px',
-                            textAlign: 'center',
-                            borderBottom: '1px solid #E5E7EB',
-                            position: 'relative',
-                          }}
-                        >
-                          <div
-                            onClick={() => {
-                              setBadgeSelectCell({ section: type, startupId: s.id, axisId: axis.id });
-                            }}
-                            style={{
-                              minHeight: '40px',
-                              padding: '8px',
-                              margin: '0 auto',
-                              border: `2px solid ${isSelected ? '#4262FF' : '#E5E7EB'}`,
-                              borderRadius: '8px',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease',
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              gap: '4px',
-                              justifyContent: selectedBadges.length === 0 ? 'center' : 'flex-start',
-                              alignItems: 'center',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.borderColor = '#4262FF';
-                              e.currentTarget.style.backgroundColor = '#F9FAFB';
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isSelected) {
-                                e.currentTarget.style.borderColor = '#E5E7EB';
-                                e.currentTarget.style.backgroundColor = 'transparent';
-                              }
-                            }}
-                          >
-                            {selectedBadges.length > 0 ? (
-                              selectedBadges.map((badge, idx) => (
-                                <span
-                                  key={idx}
-                                  style={{
-                                    padding: '4px 8px',
-                                    backgroundColor: '#4262FF',
-                                    color: '#FFFFFF',
-                                    borderRadius: '12px',
-                                    fontSize: '12px',
-                                    fontWeight: '500',
-                                    display: 'inline-block',
-                                  }}
-                                >
-                                  {badge}
-                                </span>
-                              ))
-                            ) : (
-                              <span style={{ color: '#9CA3AF', fontSize: '12px' }}>バッジを選択</span>
-                            )}
-                          </div>
-                          
-                          {/* バッジ選択モーダル */}
-                          {isSelected && axis.options && axis.options.length > 0 && (
-                            <div
-                              style={{
-                                position: 'fixed',
-                                top: '50%',
-                                left: '50%',
-                                transform: 'translate(-50%, -50%)',
-                                backgroundColor: '#FFFFFF',
-                                border: '1px solid #E5E7EB',
-                                borderRadius: '16px',
-                                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                                zIndex: 10001,
-                                padding: '24px',
-                                minWidth: '500px',
-                                maxWidth: '600px',
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div style={{ marginBottom: '16px' }}>
-                                <h4 style={{
-                                  margin: 0,
-                                  fontSize: '16px',
-                                  fontWeight: '600',
-                                  color: '#374151',
-                                  marginBottom: '4px',
-                                }}>
-                                  バッジを選択
-                                </h4>
-                                <p style={{
-                                  margin: 0,
-                                  fontSize: '12px',
-                                  color: '#6B7280',
-                                }}>
-                                  {axis.label} - {s.title}
-                                </p>
-                              </div>
-                              
-                              <div style={{
-                                display: 'flex',
-                                flexWrap: 'wrap',
-                                gap: '8px',
-                                marginBottom: '16px',
-                                maxHeight: '300px',
-                                overflowY: 'auto',
-                              }}>
-                                {axis.options.map((option) => {
-                                  const isSelectedBadge = selectedBadges.includes(option);
-                                  return (
-                                    <button
-                                      key={option}
-                                      onClick={() => {
-                                        const newBadges = isSelectedBadge
-                                          ? selectedBadges.filter(b => b !== option)
-                                          : [...selectedBadges, option];
-                                        setMatrixCellBadges(type, s.id, axis.id, newBadges);
-                                      }}
-                                      style={{
-                                        padding: '8px 16px',
-                                        border: `2px solid ${isSelectedBadge ? '#4262FF' : '#E5E7EB'}`,
-                                        borderRadius: '12px',
-                                        backgroundColor: isSelectedBadge ? '#EFF6FF' : '#FFFFFF',
-                                        color: isSelectedBadge ? '#4262FF' : '#374151',
-                                        fontSize: '14px',
-                                        fontWeight: isSelectedBadge ? '600' : '500',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s ease',
-                                      }}
-                                      onMouseEnter={(e) => {
-                                        if (!isSelectedBadge) {
-                                          e.currentTarget.style.borderColor = '#4262FF';
-                                          e.currentTarget.style.backgroundColor = '#F9FAFB';
-                                        }
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        if (!isSelectedBadge) {
-                                          e.currentTarget.style.borderColor = '#E5E7EB';
-                                          e.currentTarget.style.backgroundColor = '#FFFFFF';
-                                        }
-                                      }}
-                                    >
-                                      {option}
-                                      {isSelectedBadge && ' ✓'}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              
-                              <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                paddingTop: '16px',
-                                borderTop: '1px solid #E5E7EB',
-                              }}>
-                                <button
-                                  onClick={() => {
-                                    setEditingAxisOptions({ section: type, axisId: axis.id });
-                                    setBadgeSelectCell(null);
-                                  }}
-                                  style={{
-                                    padding: '8px 16px',
-                                    backgroundColor: '#F3F4F6',
-                                    color: '#374151',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '14px',
-                                    fontWeight: '500',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  選択肢を編集
-                                </button>
-                                <button
-                                  onClick={() => setBadgeSelectCell(null)}
-                                  style={{
-                                    padding: '8px 16px',
-                                    backgroundColor: '#F3F4F6',
-                                    color: '#374151',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '14px',
-                                    fontWeight: '500',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  閉じる
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </td>
-                      );
-                    }
-                    
-                    // 一般・機能セクションは点数形式
-                    const cellValue = section.matrix[s.id]?.[axis.id];
-                    const score = typeof cellValue === 'number' && cellValue !== undefined ? cellValue : undefined;
-                    const colors = getScoreColor(score);
-                    const isSelected = scoreSelectCell?.section === type && 
-                                      scoreSelectCell?.startupId === s.id && 
-                                      scoreSelectCell?.axisId === axis.id;
-                    
-                    return (
-                      <td 
-                        key={s.id}
-                        style={{ 
-                          padding: '8px',
-                          textAlign: 'center',
-                          borderBottom: '1px solid #E5E7EB',
-                          position: 'relative',
-                        }}
-                      >
-                        <div
-                          onClick={() => {
-                            setScoreSelectCell({ section: type, startupId: s.id, axisId: axis.id });
-                          }}
-                          style={{
-                            width: '40px',
-                            height: '40px',
-                            margin: '0 auto',
-                            backgroundColor: colors.bg,
-                            border: `2px solid ${isSelected ? '#4262FF' : colors.border}`,
-                            borderRadius: '8px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: colors.text,
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease',
-                            opacity: score === 0 || score === undefined ? 0.5 : 1,
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'scale(1.1)';
-                            e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = 'scale(1)';
-                            e.currentTarget.style.boxShadow = 'none';
-                          }}
-                        >
-                          {score !== undefined && score !== null ? score : '-'}
-                        </div>
-                        
-                        {/* 点数選択モーダル */}
-                        {isSelected && (
-                          <div
-                            style={{
-                              position: 'fixed',
-                              top: '50%',
-                              left: '50%',
-                              transform: 'translate(-50%, -50%)',
-                              backgroundColor: '#FFFFFF',
-                              border: '1px solid #E5E7EB',
-                              borderRadius: '16px',
-                              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                              zIndex: 10001,
-                              padding: '24px',
-                              minWidth: '400px',
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => {
-                              // キーボードショートカット（0-5の数字キー）
-                              const key = e.key;
-                              if (key >= '0' && key <= '5') {
-                                const point = parseInt(key);
-                                setMatrixCellScore(type, s.id, axis.id, point);
-                                setScoreSelectCell(null);
-                              } else if (key === 'Escape') {
-                                setScoreSelectCell(null);
-                              }
-                            }}
-                            tabIndex={0}
-                          >
-                            <div style={{ marginBottom: '16px' }}>
-                              <h4 style={{
-                                margin: 0,
-                                fontSize: '16px',
-                                fontWeight: '600',
-                                color: '#374151',
-                                marginBottom: '4px',
-                              }}>
-                                点数を選択
-                              </h4>
-                              <p style={{
-                                margin: 0,
-                                fontSize: '12px',
-                                color: '#6B7280',
-                              }}>
-                                {axis.label} - {s.title}
-                              </p>
-                            </div>
-                            
-                            <div style={{
-                              display: 'grid',
-                              gridTemplateColumns: 'repeat(3, 1fr)',
-                              gap: '12px',
-                              marginBottom: '16px',
-                            }}>
-                              {[0, 1, 2, 3, 4, 5].map((point) => {
-                                const pointColors = getScoreColor(point);
-                                const isCurrentScore = score === point;
-                                return (
-                                  <button
-                                    key={point}
-                                    onClick={() => {
-                                      setMatrixCellScore(type, s.id, axis.id, point);
-                                      setScoreSelectCell(null);
-                                    }}
-                                    style={{
-                                      padding: '16px',
-                                      border: `2px solid ${isCurrentScore ? '#4262FF' : pointColors.border}`,
-                                      borderRadius: '12px',
-                                      backgroundColor: isCurrentScore ? '#EFF6FF' : pointColors.bg,
-                                      color: pointColors.text,
-                                      fontSize: '18px',
-                                      fontWeight: '700',
-                                      cursor: 'pointer',
-                                      transition: 'all 0.2s ease',
-                                      display: 'flex',
-                                      flexDirection: 'column',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      gap: '8px',
-                                      opacity: point === 0 ? 0.6 : 1,
-                                      position: 'relative',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.transform = 'scale(1.05)';
-                                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.transform = 'scale(1)';
-                                      e.currentTarget.style.boxShadow = 'none';
-                                    }}
-                                  >
-                                    <div style={{
-                                      fontSize: '32px',
-                                      fontWeight: '700',
-                                      lineHeight: 1,
-                                    }}>
-                                      {point}
-                                    </div>
-                                    <div style={{
-                                      fontSize: '11px',
-                                      fontWeight: '500',
-                                      opacity: 0.8,
-                                    }}>
-                                      点
-                                    </div>
-                                    {isCurrentScore && (
-                                      <div style={{
-                                        position: 'absolute',
-                                        top: '4px',
-                                        right: '4px',
-                                        width: '20px',
-                                        height: '20px',
-                                        backgroundColor: '#4262FF',
-                                        borderRadius: '50%',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        color: '#FFFFFF',
-                                        fontSize: '12px',
-                                      }}>
-                                        ✓
-                                      </div>
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              paddingTop: '16px',
-                              borderTop: '1px solid #E5E7EB',
-                            }}>
-                              <p style={{
-                                margin: 0,
-                                fontSize: '11px',
-                                color: '#9CA3AF',
-                              }}>
-                                キーボードの0-5キーでも選択できます
-                              </p>
-                              <button
-                                onClick={() => setScoreSelectCell(null)}
-                                style={{
-                                  padding: '8px 16px',
-                                  backgroundColor: '#F3F4F6',
-                                  color: '#374151',
-                                  border: 'none',
-                                  borderRadius: '8px',
-                                  fontSize: '14px',
-                                  fontWeight: '500',
-                                  cursor: 'pointer',
-                                  transition: 'background-color 0.2s ease',
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.backgroundColor = '#E5E7EB';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.backgroundColor = '#F3F4F6';
-                                }}
-                              >
-                                キャンセル
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                  onDescriptionChange={(description) => updateSectionDescription(type, description)}
+                  onOpenAIModal={handleOpenAIModal}
+                  isAIGenerationModalOpen={isAIGenerationModalOpen}
+                  aiGeneratedTarget={aiGeneratedTarget}
+                  aiGeneratedContent={aiGeneratedContent}
+                  originalContent={originalContent}
+                  onUndo={handleUndo}
+                  onKeep={handleKeep}
+                />
               );
             })}
           </div>
@@ -2397,314 +1241,158 @@ ${targetResponse ? `前回の応答: ${targetResponse.substring(0, 200)}` : ''}`
         return null;
       })()}
 
-      {/* 点数選択モーダルを閉じるためのオーバーレイ */}
-      {scoreSelectCell && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 10000,
-          }}
-          onClick={() => setScoreSelectCell(null)}
-        />
-      )}
-
-      {/* バッジ選択モーダルを閉じるためのオーバーレイ */}
-      {badgeSelectCell && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 10000,
-          }}
-          onClick={() => setBadgeSelectCell(null)}
-        />
-      )}
-
-      {/* 選択肢編集モーダル */}
-      {editingAxisOptions && (() => {
-        const axis = comparisonSections[editingAxisOptions.section].axes.find(a => a.id === editingAxisOptions.axisId);
-        if (!axis) return null;
-        const options = axis.options || [];
+      {/* モーダル */}
+      {scoreSelectCell && (() => {
+        const section = comparisonSections[scoreSelectCell.section];
+        const axis = section.axes.find(a => a.id === scoreSelectCell.axisId);
+        const targetStartup = scoreSelectCell.startupId === startup.id 
+          ? startup 
+          : selectedStartupList.find(s => s.id === scoreSelectCell.startupId);
+        if (!axis || !targetStartup) return null;
+        
+        const cellValue = section.matrix[targetStartup.id]?.[axis.id];
+        const score = typeof cellValue === 'number' && cellValue !== undefined ? cellValue : undefined;
         
         return (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              zIndex: 10000,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-            onClick={() => {
-              setEditingAxisOptions(null);
-              setNewOptionInput('');
-            }}
-          >
-            <div
-              style={{
-                backgroundColor: '#FFFFFF',
-                border: '1px solid #E5E7EB',
-                borderRadius: '16px',
-                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                padding: '24px',
-                minWidth: '500px',
-                maxWidth: '600px',
-                maxHeight: '80vh',
-                overflowY: 'auto',
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 style={{
-                margin: 0,
-                marginBottom: '16px',
-                fontSize: '18px',
-                fontWeight: '600',
-                color: '#374151',
-              }}>
-                選択肢を編集: {axis.label}
-              </h3>
-              
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                  <input
-                    type="text"
-                    value={newOptionInput}
-                    onChange={(e) => setNewOptionInput(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && newOptionInput.trim()) {
-                        addAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, newOptionInput.trim());
-                        setNewOptionInput('');
-                      }
-                    }}
-                    placeholder="新しい選択肢を入力"
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      border: '1px solid #E5E7EB',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      if (newOptionInput.trim()) {
-                        addAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, newOptionInput.trim());
-                        setNewOptionInput('');
-                      }
-                    }}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: '#4262FF',
-                      color: '#FFFFFF',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    追加
-                  </button>
-                </div>
-              </div>
-              
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                marginBottom: '16px',
-              }}>
-                {options.map((option, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '12px',
-                      backgroundColor: '#F9FAFB',
-                      borderRadius: '8px',
-                    }}
-                  >
-                    <span style={{ fontSize: '14px', color: '#374151' }}>{option}</span>
-                    <button
-                      onClick={() => removeAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, option)}
-                      style={{
-                        padding: '4px 8px',
-                        backgroundColor: '#FEF2F2',
-                        color: '#EF4444',
-                        border: 'none',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      削除
-                    </button>
-                  </div>
-                ))}
-                {options.length === 0 && (
-                  <p style={{ color: '#9CA3AF', fontSize: '14px', textAlign: 'center', margin: '16px 0' }}>
-                    選択肢がありません。上記の入力欄から追加してください。
-                  </p>
-                )}
-              </div>
-              
-              <div style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '8px',
-              }}>
-                <button
-                  onClick={() => {
-                    setEditingAxisOptions(null);
-                    setNewOptionInput('');
-                  }}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#F3F4F6',
-                    color: '#374151',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    cursor: 'pointer',
-                  }}
-                >
-                  閉じる
-                </button>
-              </div>
-            </div>
-          </div>
+          <ScoreSelectModal
+            isOpen={true}
+            section={scoreSelectCell.section}
+            startup={targetStartup}
+            axis={axis}
+            currentScore={score}
+            onSelect={(newScore) => setMatrixCellScore(scoreSelectCell.section, targetStartup.id, axis.id, newScore)}
+            onClose={() => setScoreSelectCell(null)}
+          />
         );
       })()}
 
-      {/* 一括削除確認モーダル */}
-      {showDeleteAllModal && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setShowDeleteAllModal(false);
-            }
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: '#FFFFFF',
-              borderRadius: '12px',
-              width: '90%',
-              maxWidth: '500px',
-              padding: '24px',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+      {badgeSelectCell && (() => {
+        const section = comparisonSections[badgeSelectCell.section];
+        const axis = section.axes.find(a => a.id === badgeSelectCell.axisId);
+        const targetStartup = badgeSelectCell.startupId === startup.id 
+          ? startup 
+          : selectedStartupList.find(s => s.id === badgeSelectCell.startupId);
+        if (!axis || !targetStartup) return null;
+        
+        const cellValue = section.matrix[targetStartup.id]?.[axis.id];
+        const selectedBadges = Array.isArray(cellValue) ? (cellValue as string[]) : [];
+        
+        return (
+          <BadgeSelectModal
+            isOpen={true}
+            section={badgeSelectCell.section}
+            startup={targetStartup}
+            axis={axis}
+            selectedBadges={selectedBadges}
+            onSelect={(newBadges) => setMatrixCellBadges(badgeSelectCell.section, targetStartup.id, axis.id, newBadges)}
+            onClose={() => setBadgeSelectCell(null)}
+            onEditOptions={() => {
+              setEditingAxisOptions({ section: badgeSelectCell.section, axisId: axis.id });
+              setBadgeSelectCell(null);
             }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{
-              margin: 0,
-              marginBottom: '16px',
-              fontSize: '18px',
-              fontWeight: '600',
-              color: '#111827',
-            }}>
-              すべての比較軸を削除
-            </h3>
-            <p style={{
-              margin: 0,
-              marginBottom: '24px',
-              fontSize: '14px',
-              color: '#6B7280',
-              lineHeight: '1.5',
-            }}>
-              {deleteAllSection && (
-                <>
-                  {deleteAllSection === 'general' && '一般'}
-                  {deleteAllSection === 'function' && '機能'}
-                  {deleteAllSection === 'target' && 'ターゲット層'}
-                  セクションのすべての比較軸（{comparisonSections[deleteAllSection].axes.length}件）を削除しますか？<br />
-                  この操作は取り消せません。
-                </>
-              )}
-            </p>
-            <div style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-            }}>
-              <button
-                onClick={() => setShowDeleteAllModal(false)}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#F3F4F6',
-                  color: '#374151',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#E5E7EB';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#F3F4F6';
-                }}
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={deleteAllAxes}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#EF4444',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#DC2626';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#EF4444';
-                }}
-              >
-                削除する
-              </button>
-            </div>
-          </div>
-        </div>
+          />
+        );
+      })()}
+
+      {editingAxisOptions && (() => {
+        const axis = comparisonSections[editingAxisOptions.section].axes.find(a => a.id === editingAxisOptions.axisId);
+        if (!axis) return null;
+        
+        return (
+          <AxisOptionsEditModal
+            isOpen={true}
+            section={editingAxisOptions.section}
+            axis={axis}
+            onAddOption={(option) => addAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, option)}
+            onRemoveOption={(option) => removeAxisOption(editingAxisOptions.section, editingAxisOptions.axisId, option)}
+            onClose={() => {
+              setEditingAxisOptions(null);
+              setNewOptionInput('');
+            }}
+          />
+        );
+      })()}
+
+      {showDeleteAllModal && deleteAllSection && (
+        <DeleteAllConfirmModal
+          isOpen={true}
+          section={deleteAllSection}
+          axesCount={comparisonSections[deleteAllSection].axes.length}
+          onConfirm={deleteAllAxes}
+          onCancel={() => {
+            setShowDeleteAllModal(false);
+            setDeleteAllSection(null);
+          }}
+        />
       )}
+
+      {showDeleteAxisModal && deleteAxisInfo && (
+        <DeleteAxisConfirmModal
+          isOpen={true}
+          axisLabel={deleteAxisInfo.axisLabel}
+          onConfirm={() => {
+            deleteAxis(deleteAxisInfo.section, deleteAxisInfo.axisId);
+          }}
+          onCancel={() => {
+            setShowDeleteAxisModal(false);
+            setDeleteAxisInfo(null);
+          }}
+        />
+      )}
+
+      {/* AI生成モーダル */}
+      <AIGenerationModal
+        isOpen={isAIGenerationModalOpen}
+        onClose={() => {
+          setIsAIGenerationModalOpen(false);
+          setAiGeneratedTarget(null);
+          setAiGeneratedContent(null);
+          setOriginalContent(null);
+        }}
+        target={aiGeneratedTarget ? 'description' : null}
+        topics={[]}
+        localTopicIds={[]}
+        selectedTopicIdsForAI={selectedTopicIdsForAI}
+        setSelectedTopicIdsForAI={setSelectedTopicIdsForAI}
+        aiGenerationInput={aiGenerationInput}
+        setAIGenerationInput={setAiGenerationInput}
+        aiSummaryFormat={aiSummaryFormat}
+        setAiSummaryFormat={setAiSummaryFormat}
+        aiSummaryLength={aiSummaryLength}
+        setAiSummaryLength={setAiSummaryLength}
+        aiCustomPrompt={aiCustomPrompt}
+        setAiCustomPrompt={setAiCustomPrompt}
+        aiGeneratedContent={aiGeneratedContent}
+        originalContent={originalContent}
+        setAiGeneratedContent={setAiGeneratedContent}
+        setAiGeneratedTarget={(target) => {
+          // targetがnullの場合はaiGeneratedTargetもnullに
+          if (target === null) {
+            setAiGeneratedTarget(null);
+          }
+        }}
+        setOriginalContent={setOriginalContent}
+        localDescription={aiGeneratedTarget ? (comparisonSections[aiGeneratedTarget].description || '') : ''}
+        localObjective={''}
+        localEvaluation={''}
+        setLocalDescription={async (description: string) => {
+          if (aiGeneratedTarget) {
+            await updateSectionDescription(aiGeneratedTarget, description);
+          }
+        }}
+        setLocalObjective={() => {}}
+        setLocalEvaluation={() => {}}
+        setIsEditingDescription={() => {}}
+        setIsEditingObjective={() => {}}
+        setIsEditingEvaluation={() => {}}
+        startup={startup}
+        categories={categories}
+        vcs={[]}
+        departments={[]}
+        statuses={[]}
+        engagementLevels={[]}
+        bizDevPhases={[]}
+      />
     </div>
   );
 }
-

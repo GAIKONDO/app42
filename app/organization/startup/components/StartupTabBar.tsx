@@ -11,9 +11,9 @@ export function StartupTabBar({ activeTab, onTabChange }: StartupTabBarProps) {
   const tabs: { id: StartupTab; label: string }[] = [
     { id: 'overview', label: '概要' },
     { id: 'details', label: '詳細' },
+    { id: 'competitor-comparison', label: '競合比較' },
     { id: 'periods', label: 'NDA期間' },
     { id: 'deepsearch', label: 'Deepsearch' },
-    { id: 'competitor-comparison', label: '競合比較' },
     { id: 'relation', label: '相関図' },
   ];
 

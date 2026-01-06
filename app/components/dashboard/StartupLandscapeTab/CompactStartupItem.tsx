@@ -1,12 +1,14 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import type { CompactStartupItemProps } from './types';
 
 export default function CompactStartupItem({ startup, bizDevPhases }: CompactStartupItemProps) {
+  const router = useRouter();
   const handleClick = () => {
     if (startup.organizationId && startup.id) {
-      window.location.href = `/organization/startup?organizationId=${startup.organizationId}&startupId=${startup.id}`;
+      router.push(`/organization/startup?organizationId=${startup.organizationId}&startupId=${startup.id}`);
     }
   };
 

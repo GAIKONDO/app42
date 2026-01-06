@@ -1,15 +1,17 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import type { StartupCardProps } from './types';
 
 export default function StartupCard({ startup, bizDevPhases, statuses }: StartupCardProps) {
+  const router = useRouter();
   const bizDevPhase = startup.bizDevPhase 
     ? bizDevPhases.find(p => p.id === startup.bizDevPhase)
     : null;
   const handleClick = () => {
     if (startup.organizationId && startup.id) {
-      window.location.href = `/organization/startup?organizationId=${startup.organizationId}&startupId=${startup.id}`;
+      router.push(`/organization/startup?organizationId=${startup.organizationId}&startupId=${startup.id}`);
     }
   };
 

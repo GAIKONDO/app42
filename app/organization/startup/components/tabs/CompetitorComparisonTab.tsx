@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import type { Startup, CompetitorComparisonData } from '@/lib/orgApi';
+import type { Startup, CompetitorComparisonData, Category } from '@/lib/orgApi';
 import { getAllStartups, saveStartup } from '@/lib/orgApi/startups';
-import { generateUniqueId } from '@/lib/orgApi';
+import { generateUniqueId, getCategories } from '@/lib/orgApi';
 
 interface CompetitorComparisonTabProps {
   startup: Startup | null;
@@ -38,35 +38,53 @@ export default function CompetitorComparisonTab({
   const [editingAxisLabel, setEditingAxisLabel] = useState<string>('');
   const [comparisonId, setComparisonId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
 
-  // 保存された競合比較データを読み込む
+  // 保存された競合比較データを読み込む（startupIdが変更された場合のみ）
+  const prevStartupIdRef = React.useRef<string | null>(null);
   useEffect(() => {
     if (!startup) return;
     
-    if (startup.competitorComparison) {
-      const saved = startup.competitorComparison;
-      console.log('📖 [CompetitorComparisonTab] 保存されたデータを読み込み:', {
-        id: saved.id,
-        axesCount: saved.axes?.length || 0,
-        selectedStartupsCount: saved.selectedStartupIds?.length || 0,
-        matrixKeys: Object.keys(saved.matrix || {}),
-      });
-      setComparisonId(saved.id);
-      setComparisonAxes(saved.axes || []);
-      setSelectedStartups(saved.selectedStartupIds || []);
-      setComparisonMatrix(saved.matrix || {});
-    } else {
-      // データがない場合は初期化（startupが存在する場合のみ）
-      console.log('📖 [CompetitorComparisonTab] 保存されたデータなし');
-      // 既存のデータをクリアしない（ユーザーが編集中の可能性があるため）
-      // ただし、startupが変更された場合は初期化
-      if (comparisonId) {
-        // 既存のIDがある場合は、新しいstartupにデータがないことを示す
-        console.log('📖 [CompetitorComparisonTab] 新しいstartupにデータなし、IDをクリア');
+    // startupIdが変更された場合のみ再読み込み
+    if (prevStartupIdRef.current !== startup.id) {
+      prevStartupIdRef.current = startup.id;
+      
+      if (startup.competitorComparison) {
+        const saved = startup.competitorComparison;
+        console.log('📖 [CompetitorComparisonTab] 保存されたデータを読み込み:', {
+          id: saved.id,
+          axesCount: saved.axes?.length || 0,
+          selectedStartupsCount: saved.selectedStartupIds?.length || 0,
+          matrixKeys: Object.keys(saved.matrix || {}),
+        });
+        setComparisonId(saved.id);
+        setComparisonAxes(saved.axes || []);
+        setSelectedStartups(saved.selectedStartupIds || []);
+        setComparisonMatrix(saved.matrix || {});
+      } else {
+        // データがない場合は初期化
+        console.log('📖 [CompetitorComparisonTab] 保存されたデータなし');
         setComparisonId(null);
+        setComparisonAxes([]);
+        setSelectedStartups([]);
+        setComparisonMatrix({});
       }
     }
-  }, [startup?.id, startup?.competitorComparison]);
+  }, [startup?.id]);
+
+  // カテゴリー情報を取得
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const categoriesData = await getCategories();
+        setCategories(categoriesData);
+      } catch (error) {
+        console.error('カテゴリーの取得に失敗しました:', error);
+      }
+    };
+
+    loadCategories();
+  }, []);
 
   // すべてのスタートアップを取得
   useEffect(() => {
@@ -77,11 +95,6 @@ export default function CompetitorComparisonTab({
         // 現在のスタートアップを除外
         const filtered = startups.filter(s => s.id !== startup?.id);
         setAllStartups(filtered);
-        
-        // 保存されたデータがない場合のみ初期選択
-        if (!startup?.competitorComparison && filtered.length > 0) {
-          setSelectedStartups(filtered.slice(0, Math.min(5, filtered.length)).map(s => s.id));
-        }
       } catch (error) {
         console.error('スタートアップの取得に失敗しました:', error);
       } finally {
@@ -94,12 +107,88 @@ export default function CompetitorComparisonTab({
     }
   }, [startup]);
 
+  // 現在のスタートアップが持つサブカテゴリーIDを取得
+  const currentSubCategoryIds = useMemo(() => {
+    if (!startup || !startup.categoryIds || startup.categoryIds.length === 0) {
+      return new Set<string>();
+    }
+    
+    const subCategoryIds = new Set<string>();
+    startup.categoryIds.forEach(categoryId => {
+      const category = categories.find(c => c.id === categoryId);
+      // サブカテゴリー（parentCategoryIdがある）のみを対象
+      if (category && category.parentCategoryId) {
+        subCategoryIds.add(categoryId);
+      }
+    });
+    
+    return subCategoryIds;
+  }, [startup, categories]);
+
+  // 同じサブカテゴリーを持つスタートアップのみをフィルタリング
+  const filteredStartups = useMemo(() => {
+    if (currentSubCategoryIds.size === 0) {
+      // サブカテゴリーが設定されていない場合は空配列を返す
+      return [];
+    }
+    
+    return allStartups.filter(s => {
+      // カテゴリーが設定されていないスタートアップは除外
+      if (!s.categoryIds || s.categoryIds.length === 0) {
+        return false;
+      }
+      
+      // 少なくとも1つのサブカテゴリーが一致するスタートアップを返す
+      return s.categoryIds.some(categoryId => currentSubCategoryIds.has(categoryId));
+    });
+  }, [allStartups, currentSubCategoryIds]);
+
+  // サブカテゴリーごとにスタートアップをグループ化
+  const startupsBySubCategory = useMemo(() => {
+    if (currentSubCategoryIds.size === 0) {
+      return new Map<string, { subCategory: Category; parentCategory?: Category; startups: Startup[] }>();
+    }
+
+    const grouped = new Map<string, { subCategory: Category; parentCategory?: Category; startups: Startup[] }>();
+
+    // 現在のスタートアップが持つサブカテゴリーのみを処理
+    currentSubCategoryIds.forEach(subCategoryId => {
+      const subCategory = categories.find(c => c.id === subCategoryId);
+      if (!subCategory || !subCategory.parentCategoryId) return;
+
+      const parentCategory = categories.find(c => c.id === subCategory.parentCategoryId);
+      
+      // このサブカテゴリーを持つスタートアップをフィルタリング
+      const startupsInSubCategory = filteredStartups.filter(s => 
+        s.categoryIds && s.categoryIds.includes(subCategoryId)
+      );
+      
+      if (startupsInSubCategory.length > 0) {
+        grouped.set(subCategoryId, {
+          subCategory: subCategory,
+          parentCategory: parentCategory,
+          startups: startupsInSubCategory,
+        });
+      }
+    });
+
+    return grouped;
+  }, [filteredStartups, categories, currentSubCategoryIds]);
+
+  // フィルタリングされたスタートアップから初期選択を設定
+  useEffect(() => {
+    // 保存されたデータがない場合のみ初期選択
+    if (!startup?.competitorComparison && filteredStartups.length > 0 && selectedStartups.length === 0) {
+      setSelectedStartups(filteredStartups.slice(0, Math.min(5, filteredStartups.length)).map(s => s.id));
+    }
+  }, [filteredStartups, startup?.competitorComparison]);
+
   // 比較軸をAIで生成（プレースホルダー）
   const generateComparisonAxes = async () => {
     setIsGeneratingAxes(true);
     // TODO: AI APIを呼び出して比較軸を生成
     // 現在はプレースホルダーの比較軸を生成
-    setTimeout(() => {
+    setTimeout(async () => {
       const defaultAxes: ComparisonAxis[] = [
         { id: 'axis1', label: '技術優位性' },
         { id: 'axis2', label: '市場規模' },
@@ -110,6 +199,11 @@ export default function CompetitorComparisonTab({
       ];
       setComparisonAxes(defaultAxes);
       setIsGeneratingAxes(false);
+      
+      // 比較軸を生成したら自動保存（生成されたaxesを渡す）
+      console.log('💾 [CompetitorComparisonTab] 比較軸生成後の自動保存開始');
+      await autoSaveComparisonData(defaultAxes);
+      console.log('✅ [CompetitorComparisonTab] 比較軸生成後の自動保存成功');
     }, 1000);
   };
 
@@ -120,14 +214,17 @@ export default function CompetitorComparisonTab({
   };
 
   // 比較軸の編集を保存
-  const saveEditingAxis = () => {
+  const saveEditingAxis = async () => {
     if (editingAxisId && editingAxisLabel.trim()) {
-      setComparisonAxes(prev => prev.map(axis => 
+      const updatedAxes = comparisonAxes.map(axis => 
         axis.id === editingAxisId ? { ...axis, label: editingAxisLabel.trim() } : axis
-      ));
+      );
+      setComparisonAxes(updatedAxes);
+      setEditingAxisId(null);
+      setEditingAxisLabel('');
+      // 編集後に自動保存（更新されたaxesを渡す）
+      await autoSaveComparisonData(updatedAxes);
     }
-    setEditingAxisId(null);
-    setEditingAxisLabel('');
   };
 
   // 比較軸の編集をキャンセル
@@ -137,28 +234,84 @@ export default function CompetitorComparisonTab({
   };
 
   // 比較軸を削除
-  const deleteAxis = (axisId: string) => {
-    setComparisonAxes(prev => prev.filter(axis => axis.id !== axisId));
+  const deleteAxis = async (axisId: string) => {
+    const updatedAxes = comparisonAxes.filter(axis => axis.id !== axisId);
+    setComparisonAxes(updatedAxes);
     // マトリクスからも削除
-    setComparisonMatrix(prev => {
-      const newMatrix = { ...prev };
-      Object.keys(newMatrix).forEach(startupId => {
-        delete newMatrix[startupId][axisId];
-      });
-      return newMatrix;
+    const updatedMatrix = { ...comparisonMatrix };
+    Object.keys(updatedMatrix).forEach(startupId => {
+      delete updatedMatrix[startupId][axisId];
     });
+    setComparisonMatrix(updatedMatrix);
+    // 削除後に自動保存（更新されたaxesとmatrixを渡す）
+    await autoSaveComparisonData(updatedAxes, undefined, updatedMatrix);
+  };
+
+  // すべての比較軸を一括削除
+  const deleteAllAxes = async () => {
+    if (comparisonAxes.length === 0) return;
+    
+    if (confirm(`すべての比較軸（${comparisonAxes.length}件）を削除しますか？`)) {
+      setComparisonAxes([]);
+      setComparisonMatrix({});
+      // 一括削除後に自動保存
+      await autoSaveComparisonData([], selectedStartups, {});
+    }
   };
 
   // 新しい比較軸を追加
-  const addNewAxis = () => {
+  const addNewAxis = async () => {
     const newId = `axis_${Date.now()}`;
     const newAxis: ComparisonAxis = {
       id: newId,
       label: '新しい比較軸',
     };
-    setComparisonAxes(prev => [...prev, newAxis]);
+    const updatedAxes = [...comparisonAxes, newAxis];
+    setComparisonAxes(updatedAxes);
     setEditingAxisId(newId);
     setEditingAxisLabel('新しい比較軸');
+    // 追加後に自動保存（更新されたaxesを渡す）
+    await autoSaveComparisonData(updatedAxes);
+  };
+
+  // 自動保存用の関数（保存中フラグを表示しない、再読み込みを発生させない）
+  const autoSaveComparisonData = async (
+    axesOverride?: ComparisonAxis[],
+    selectedStartupsOverride?: string[],
+    matrixOverride?: ComparisonMatrix
+  ) => {
+    if (!startup) return;
+
+    try {
+      const now = new Date().toISOString();
+      const comparisonData: CompetitorComparisonData = {
+        id: comparisonId || `comp_${generateUniqueId()}`,
+        axes: axesOverride ?? comparisonAxes,
+        selectedStartupIds: selectedStartupsOverride ?? selectedStartups,
+        matrix: matrixOverride ?? comparisonMatrix,
+        createdAt: comparisonId && startup.competitorComparison?.createdAt 
+          ? startup.competitorComparison.createdAt 
+          : now,
+        updatedAt: now,
+      };
+
+      const updatedStartup = {
+        ...startup,
+        competitorComparison: comparisonData,
+      };
+      
+      // データベースに保存（setStartupは呼び出さないことで再読み込みを防ぐ）
+      await saveStartup(updatedStartup);
+
+      const newComparisonId = comparisonData.id;
+      setComparisonId(newComparisonId);
+      
+      // 自動保存時はsetStartupを呼び出さない（再読み込みを防ぐため）
+      // データベースには保存されているので、次回ページを開いたときに正しいデータが読み込まれる
+    } catch (error) {
+      console.error('自動保存に失敗しました:', error);
+      // 自動保存の失敗はユーザーに通知しない（手動保存で対応可能）
+    }
   };
 
   // 競合比較データを保存
@@ -213,20 +366,23 @@ export default function CompetitorComparisonTab({
   };
 
   // マトリクスのセルをトグル
-  const toggleMatrixCell = (startupId: string, axisId: string) => {
-    setComparisonMatrix(prev => ({
-      ...prev,
+  const toggleMatrixCell = async (startupId: string, axisId: string) => {
+    const updatedMatrix = {
+      ...comparisonMatrix,
       [startupId]: {
-        ...prev[startupId],
-        [axisId]: !prev[startupId]?.[axisId],
+        ...comparisonMatrix[startupId],
+        [axisId]: !comparisonMatrix[startupId]?.[axisId],
       },
-    }));
+    };
+    setComparisonMatrix(updatedMatrix);
+    // マトリクス変更後に自動保存（更新されたmatrixを渡す）
+    await autoSaveComparisonData(undefined, undefined, updatedMatrix);
   };
 
   // 選択されたスタートアップのリスト
   const selectedStartupList = useMemo(() => {
-    return allStartups.filter(s => selectedStartups.includes(s.id));
-  }, [allStartups, selectedStartups]);
+    return filteredStartups.filter(s => selectedStartups.includes(s.id));
+  }, [filteredStartups, selectedStartups]);
 
   if (!startup) {
     return (
@@ -281,6 +437,28 @@ export default function CompetitorComparisonTab({
                 }}
               >
                 + 比較軸を追加
+              </button>
+              <button
+                onClick={deleteAllAxes}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#FFFFFF',
+                  color: '#EF4444',
+                  border: '1.5px solid #EF4444',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#FEF2F2';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#FFFFFF';
+                }}
+              >
+                🗑️ すべて削除
               </button>
               <button
                 onClick={saveComparisonData}
@@ -352,40 +530,102 @@ export default function CompetitorComparisonTab({
         <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#374151', marginBottom: '16px' }}>
           比較対象の選択
         </h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-          {allStartups.map(s => (
-            <label
-              key={s.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '8px 16px',
-                backgroundColor: selectedStartups.includes(s.id) ? '#EFF6FF' : '#F9FAFB',
-                border: `1.5px solid ${selectedStartups.includes(s.id) ? '#4262FF' : '#E5E7EB'}`,
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                color: selectedStartups.includes(s.id) ? '#4262FF' : '#374151',
-                fontWeight: selectedStartups.includes(s.id) ? '600' : '400',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={selectedStartups.includes(s.id)}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedStartups([...selectedStartups, s.id]);
-                  } else {
-                    setSelectedStartups(selectedStartups.filter(id => id !== s.id));
-                  }
-                }}
-                style={{ marginRight: '8px', cursor: 'pointer' }}
-              />
-              {s.title}
-            </label>
-          ))}
-        </div>
+        {!startup.categoryIds || startup.categoryIds.length === 0 ? (
+          <p style={{ color: '#6B7280', fontSize: '14px', margin: 0 }}>
+            このスタートアップにカテゴリーが設定されていないため、比較対象を表示できません。まず、詳細タブでカテゴリーを設定してください。
+          </p>
+        ) : currentSubCategoryIds.size === 0 ? (
+          <p style={{ color: '#6B7280', fontSize: '14px', margin: 0 }}>
+            このスタートアップにサブカテゴリーが設定されていないため、比較対象を表示できません。サブカテゴリーを設定してください。
+          </p>
+        ) : startupsBySubCategory.size === 0 ? (
+          <p style={{ color: '#6B7280', fontSize: '14px', margin: 0 }}>
+            同じサブカテゴリーが設定されているスタートアップが見つかりませんでした。
+          </p>
+        ) : (
+          <>
+            <p style={{ color: '#6B7280', fontSize: '12px', margin: 0, marginBottom: '16px' }}>
+              同じカテゴリーが設定されているスタートアップのみ表示されています（合計 {filteredStartups.length}件）
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {Array.from(startupsBySubCategory.entries()).map(([subCategoryId, { subCategory, parentCategory, startups: subCategoryStartups }]) => (
+                <div key={subCategoryId} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingBottom: '8px',
+                    borderBottom: '2px solid #E5E7EB',
+                    marginBottom: '8px',
+                  }}>
+                    {parentCategory && (
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        color: '#9CA3AF',
+                        marginRight: '8px',
+                      }}>
+                        {parentCategory.title} / 
+                      </span>
+                    )}
+                    <h4 style={{
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      color: '#4262FF',
+                      margin: 0,
+                    }}>
+                      {subCategory.title}
+                    </h4>
+                    <span style={{
+                      fontSize: '12px',
+                      color: '#6B7280',
+                      marginLeft: '8px',
+                    }}>
+                      ({subCategoryStartups.length}件)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {subCategoryStartups.map(s => (
+                      <label
+                        key={s.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '8px 16px',
+                          backgroundColor: selectedStartups.includes(s.id) ? '#EFF6FF' : '#F9FAFB',
+                          border: `1.5px solid ${selectedStartups.includes(s.id) ? '#4262FF' : '#E5E7EB'}`,
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          color: selectedStartups.includes(s.id) ? '#4262FF' : '#374151',
+                          fontWeight: selectedStartups.includes(s.id) ? '600' : '400',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedStartups.includes(s.id)}
+                          onChange={async (e) => {
+                            let updatedSelectedStartups: string[];
+                            if (e.target.checked) {
+                              updatedSelectedStartups = [...selectedStartups, s.id];
+                            } else {
+                              updatedSelectedStartups = selectedStartups.filter(id => id !== s.id);
+                            }
+                            setSelectedStartups(updatedSelectedStartups);
+                            // 選択変更後に自動保存
+                            await autoSaveComparisonData(undefined, updatedSelectedStartups);
+                          }}
+                          style={{ marginRight: '8px', cursor: 'pointer' }}
+                        />
+                        {s.title}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* マトリクステーブル */}
